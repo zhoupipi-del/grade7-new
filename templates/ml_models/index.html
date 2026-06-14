@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}ML数学模型 - AI分析{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col">
+            <h2><i class="bi bi-cpu"></i> ML数学模型演示</h2>
+            <p class="text-muted">基于Python Scikit-Learn的教育数据挖掘模型</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- 模型1：成绩预测 -->
+        <div class="col-md-4 mb-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-graph-up text-primary"></i> 成绩预测模型</h5>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">使用<strong>线性回归</strong>预测下次考试成绩</p>
+                    <ul class="small">
+                        <li>输入：历史成绩 + 违纪次数 + 考勤异常</li>
+                        <li>输出：预测成绩 + 置信区间 + 趋势方向</li>
+                        <li>难度：⭐ 简单</li>
+                    </ul>
+                </div>
+                <div class="card-footer bg-white border-0">
+                    <a href="{{ url_for('ml_models.grade_prediction') }}" class="btn btn-primary w-100">
+                        <i class="bi bi-play-circle"></i> 演示
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模型2：心理风险 -->
+        <div class="col-md-4 mb-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-heart-pulse text-danger"></i> 心理风险模型</h5>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">使用<strong>逻辑回归</strong>预测心理危机风险</p>
+                    <ul class="small">
+                        <li>输入：MSSMHS-55 10个维度得分</li>
+                        <li>输出：风险概率 + 风险等级 + 关键因子</li>
+                        <li>难度：⭐ 简单</li>
+                    </ul>
+                </div>
+                <div class="card-footer bg-white border-0">
+                    <a href="{{ url_for('ml_models.mental_risk') }}" class="btn btn-danger w-100">
+                        <i class="bi bi-play-circle"></i> 演示
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模型3：违纪预测 -->
+        <div class="col-md-4 mb-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-exclamation-triangle text-warning"></i> 违纪预测模型</h5>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">使用<strong>泊松回归</strong>预测未来违纪概率</p>
+                    <ul class="small">
+                        <li>输入：历史违纪频率 + 时间周期性</li>
+                        <li>输出：30天违纪概率 + 高风险时间段</li>
+                        <li>难度：⭐⭐ 中等</li>
+                    </ul>
+                </div>
+                <div class="card-footer bg-white border-0">
+                    <a href="{{ url_for('ml_models.discipline_prediction') }}" class="btn btn-warning w-100">
+                        <i class="bi bi-play-circle"></i> 演示
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模型4：综合素质预测 -->
+        <div class="col-md-4 mb-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-star text-info"></i> 综合素质预测</h5>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">使用<strong>PCA+回归</strong>预测综合素质发展</p>
+                    <ul class="small">
+                        <li>输入：五翼各维度得分 + 成绩 + 活动</li>
+                        <li>输出：综合素质总分预测 + 发展轨迹</li>
+                        <li>难度：⭐⭐ 中等</li>
+                    </ul>
+                </div>
+                <div class="card-footer bg-white border-0">
+                    <a href="{{ url_for('ml_models.quality_prediction') }}" class="btn btn-info w-100">
+                        <i class="bi bi-play-circle"></i> 演示
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模型5：综合风险评分 -->
+        <div class="col-md-4 mb-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-shield-check text-success"></i> 综合风险评分</h5>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">使用<strong>规则引擎</strong>计算多维度风险</p>
+                    <ul class="small">
+                        <li>输入：心理+成绩+违纪+考勤</li>
+                        <li>输出：0-100分 + 因子分解 + 干预建议</li>
+                        <li>难度：⭐ 最简单</li>
+                    </ul>
+                </div>
+                <div class="card-footer bg-white border-0">
+                    <a href="{{ url_for('ai_analysis.risk_score') }}" class="btn btn-success w-100">
+                        <i class="bi bi-play-circle"></i> 演示
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模型6：成长预测 -->
+        <div class="col-md-4 mb-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-graph-up-arrow text-primary"></i> 成长预测</h5>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">使用<strong>趋势分析</strong>预测下学期发展</p>
+                    <ul class="small">
+                        <li>输入：历史成绩+违纪+心理+考勤</li>
+                        <li>输出：成绩预测+风险趋势+成长建议</li>
+                        <li>难度：⭐⭐ 中等</li>
+                    </ul>
+                </div>
+                <div class="card-footer bg-white border-0">
+                    <a href="{{ url_for('ml_models.growth_prediction') }}" class="btn btn-primary w-100">
+                        <i class="bi bi-play-circle"></i> 演示
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模型7：相似学生推荐 -->
+        <div class="col-md-4 mb-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-people-fill text-info"></i> 相似学生推荐</h5>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">使用<strong>余弦相似度</strong>找相似学生</p>
+                    <ul class="small">
+                        <li>输入：成绩+违纪+心理+考勤+综评</li>
+                        <li>输出：Top10相似学生+相似度评分</li>
+                        <li>难度：⭐⭐ 中等</li>
+                    </ul>
+                </div>
+                <div class="card-footer bg-white border-0">
+                    <a href="{{ url_for('ml_models.similar_students') }}" class="btn btn-info w-100">
+                        <i class="bi bi-play-circle"></i> 演示
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 技术说明 -->
+        <div class="col-md-4 mb-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-gear text-secondary"></i> 技术栈</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="small mb-0">
+                        <li><strong>Web框架</strong>：Flask 3.1</li>
+                        <li><strong>ML库</strong>：Scikit-Learn 1.3</li>
+                        <li><strong>数据库</strong>：MySQL 8.0</li>
+                        <li><strong>部署</strong>：Gunicorn + Nginx</li>
+                        <li><strong>图表</strong>：Chart.js</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

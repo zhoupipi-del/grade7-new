@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}考勤记录 - {{ student.name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5><i class="bi bi-calendar-check"></i> 考勤记录 — {{ student.name }}</h5>
+    </div>
+
+    <!-- 月份筛选 -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <form method="get" class="row g-2 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label form-label-sm mb-0">年份</label>
+                    <select name="year" class="form-select form-select-sm">
+                        {% for y in range(2024, 2027) %}
+                        <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}年</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <label class="form-label form-label-sm mb-0">月份</label>
+                    <select name="month" class="form-select form-select-sm">
+                        {% for m in range(1,13) %}
+                        <option value="{{ m }}" {% if m==month %}selected{% endif %}>{{ m }}月</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-filter"></i> 筛选</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="row g-2 mb-3">
+        <div class="col"><div class="card bg-success bg-opacity-10 text-center py-2"><div class="card-body p-1"><div class="fs-5 fw-bold">{{ stats.present }}</div><small>出勤</small></div></div></div>
+        <div class="col"><div class="card bg-warning bg-opacity-10 text-center py-2"><div class="card-body p-1"><div class="fs-5 fw-bold">{{ stats.late }}</div><small>迟到</small></div></div></div>
+        <div class="col"><div class="card bg-info bg-opacity-10 text-center py-2"><div class="card-body p-1"><div class="fs-5 fw-bold">{{ stats.early }}</div><small>早退</small></div></div></div>
+        <div class="col"><div class="card bg-danger bg-opacity-10 text-center py-2"><div class="card-body p-1"><div class="fs-5 fw-bold">{{ stats.absent }}</div><small>缺勤</small></div></div></div>
+        <div class="col"><div class="card bg-secondary bg-opacity-10 text-center py-2"><div class="card-body p-1"><div class="fs-5 fw-bold">{{ stats.leave }}</div><small>请假</small></div></div></div>
+        <div class="col"><div class="card bg-light text-center py-2"><div class="card-body p-1"><div class="fs-5 fw-bold">{{ stats.total }}</div><small>合计</small></div></div></div>
+    </div>
+
+    <!-- 考勤明细 -->
+    <div class="card">
+        <div class="card-body p-0">
+            {% if records %}
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr><th>日期</th><th>星期</th><th>状态</th><th>备注</th></tr>
+                </thead>
+                <tbody>
+                {% for r in records %}
+                    <tr>
+                        <td>{{ r.record_date.strftime('%m月%d日') }}</td>
+                        <td>{{ ['一','二','三','四','五','六','日'][r.record_date.weekday()] }}</td>
+                        <td>
+                            {% if r.status=='present' %}<span class="badge bg-success">出勤</span>
+                            {% elif r.status=='late' %}<span class="badge bg-warning">迟到</span>
+                            {% elif r.status=='early' %}<span class="badge bg-info">早退</span>
+                            {% elif r.status=='absent' %}<span class="badge bg-danger">缺勤</span>
+                            {% else %}<span class="badge bg-secondary">请假</span>{% endif %}
+                        </td>
+                        <td class="small text-muted">{{ r.note or '' }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="text-center text-muted py-5">该月暂无考勤记录</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,179 @@
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-megaphone me-2"></i>管理公告</h4>
+  <button class="btn btn-primary btn-sm" onclick="openCreate()">
+    <i class="bi bi-plus-lg me-1"></i> 新建公告
+  </button>
+</div>
+
+{% if announcements %}
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>标题</th>
+        <th>置顶</th>
+        <th>状态</th>
+        <th>发布者</th>
+        <th>有效期</th>
+        <th>发布时间</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for a in announcements %}
+      <tr>
+        <td><strong>{{ a.title }}</strong></td>
+        <td>
+          {% if a.is_pinned %}<span class="badge bg-warning text-dark">置顶</span>{% else %}--{% endif %}
+        </td>
+        <td>
+          {% if a.is_active %}
+          <span class="badge bg-success">发布中</span>
+          {% else %}
+          <span class="badge bg-secondary">已关闭</span>
+          {% endif %}
+        </td>
+        <td>{{ a.author }}</td>
+        <td><small>{{ a.expire_date if a.expire_date else '永久' }}</small></td>
+        <td><small>{{ a.created_at.strftime("%m-%d %H:%M") if a.created_at else "" }}</small></td>
+        <td>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary" onclick='editAnn({{ a.id }}, {{ a.to_json()|safe if a else "{}" }})'>
+              <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-outline-danger" onclick="deleteAnn({{ a.id }})">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-megaphone display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无公告</p>
+</div>
+{% endif %}
+
+<!-- 编辑/新建 Modal -->
+<div class="modal fade" id="annModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="annModalTitle">
+          <i class="bi bi-megaphone me-2"></i>新建公告
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="annId">
+        <div class="row g-3">
+          <div class="col-md-8">
+            <label class="form-label">标题</label>
+            <input type="text" id="annTitle" class="form-control" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">有效期</label>
+            <input type="date" id="annExpire" class="form-control">
+          </div>
+          <div class="col-12">
+            <label class="form-label">正文</label>
+            <textarea id="annContent" class="form-control" rows="5" required></textarea>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">目标角色</label>
+            <select id="annRoles" class="form-select">
+              <option value="">全部</option>
+              <option value="ms_admin">德育处</option>
+              <option value="grade_leader">年级组</option>
+              <option value="class_teacher">班主任</option>
+              <option value="parent">家长</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <div class="form-check mt-4">
+              <input class="form-check-input" type="checkbox" id="annPinned">
+              <label class="form-check-label">置顶</label>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="form-check mt-4">
+              <input class="form-check-input" type="checkbox" id="annActive" checked>
+              <label class="form-check-label">立即发布</label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveAnn()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var modal = null;
+document.addEventListener('DOMContentLoaded', function() {
+  modal = new bootstrap.Modal(document.getElementById('annModal'));
+});
+
+function openCreate() {
+  document.getElementById('annId').value = '';
+  document.getElementById('annTitle').value = '';
+  document.getElementById('annContent').value = '';
+  document.getElementById('annExpire').value = '';
+  document.getElementById('annRoles').value = '';
+  document.getElementById('annPinned').checked = false;
+  document.getElementById('annActive').checked = true;
+  document.getElementById('annModalTitle').innerHTML = '<i class="bi bi-megaphone me-2"></i>新建公告';
+  modal.show();
+}
+
+function editAnn(id) {
+  document.getElementById('annId').value = id;
+  // 从行中取数据
+  var row = event.target.closest('tr');
+  var cells = row.querySelectorAll('td');
+  document.getElementById('annTitle').value = cells[0].textContent.trim();
+  document.getElementById('annExpire').value = cells[4].textContent.trim() === '永久' ? '' : cells[4].textContent.trim();
+  document.getElementById('annModalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>编辑公告';
+  modal.show();
+}
+
+function saveAnn() {
+  var data = {
+    id: document.getElementById('annId').value || null,
+    title: document.getElementById('annTitle').value,
+    content: document.getElementById('annContent').value,
+    expire_date: document.getElementById('annExpire').value,
+    target_roles: document.getElementById('annRoles').value,
+    is_pinned: document.getElementById('annPinned').checked,
+    is_active: document.getElementById('annActive').checked
+  };
+  if (!data.title || !data.content) { alert('请填写标题和内容'); return; }
+  fetch('/common/api/announcements/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { modal.hide(); location.reload(); }
+      else alert('保存失败');
+    });
+}
+
+function deleteAnn(id) {
+  if (!confirm('确定删除此公告？')) return;
+  var data = { id: id, is_active: false, title: '', content: '' };
+  fetch('/common/api/announcements/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  }).then(function(r) { return r.json(); })
+    .then(function(d) { if (d.ok) location.reload(); else alert('删除失败'); });
+}
+</script>

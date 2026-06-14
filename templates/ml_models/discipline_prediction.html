@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}违纪预测模型{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2><i class="bi bi-exclamation-triangle text-warning"></i> 违纪趋势预测（泊松回归）</h2>
+    <p class="text-muted">基于历史违纪频率，预测未来30天违纪概率</p>
+    <div class="row mt-4">
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white"><h5 class="mb-0"><i class="bi bi-search"></i> 学生搜索</h5></div>
+                <div class="card-body">
+                    <input type="text" class="form-control mb-3" id="studentName" placeholder="输入学生姓名">
+                    <button class="btn btn-warning w-100" onclick="predictDiscipline()">
+                        <i class="bi bi-cpu"></i> 开始预测
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-8">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white"><h5 class="mb-0"><i class="bi bi-clipboard2-data"></i> 预测结果</h5></div>
+                <div class="card-body">
+                    <div id="loadingArea" style="display:none;" class="text-center py-5">
+                        <div class="spinner-border text-warning"></div>
+                        <p class="mt-2">正在分析违纪趋势...</p>
+                    </div>
+                    <div id="resultArea" style="display:none;">
+                        <p><strong>学生：</strong><span id="studentNameSpan"></span></p>
+                        <p><strong>历史违纪次数：</strong><span id="histCount" class="fw-bold"></span></p>
+                        <p><strong>日均违纪率：</strong><span id="dailyRate" class="fw-bold"></span></p>
+                        <p><strong>未来30天预测违纪次数：</strong><span id="predCount" class="fw-bold text-danger"></span></p>
+                        <p><strong>风险等级：</strong><span id="riskLevel"></span></p>
+                    </div>
+                    <div id="noDataArea" style="display:none;" class="text-center py-5 text-muted">
+                        <i class="bi bi-exclamation-circle" style="font-size: 3rem;"></i>
+                        <p class="mt-2">该学生无违纪记录，风险较低</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function predictDiscipline() {
+    const name = document.getElementById('studentName').value.trim();
+    if (!name) { alert('请输入学生姓名'); return; }
+
+    document.getElementById('loadingArea').style.display = 'block';
+    document.getElementById('resultArea').style.display = 'none';
+    document.getElementById('noDataArea').style.display = 'none';
+
+    fetch(`/search/api?q=${encodeURIComponent(name)}&type=student`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.results && data.results.length > 0) {
+                document.getElementById('studentNameSpan').textContent = data.results[0].name;
+                return fetch(`/ai-analysis/api/predict/discipline/${data.results[0].id}`);
+            } else { throw new Error('未找到该学生'); }
+        })
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('loadingArea').style.display = 'none';
+            if (data.predicted_count_30d === 0 && data.historical_count === 0) {
+                document.getElementById('noDataArea').style.display = 'block';
+                return;
+            }
+            document.getElementById('resultArea').style.display = 'block';
+            document.getElementById('studentNameSpan').textContent = data.student_name;
+            document.getElementById('histCount').textContent = data.historical_count;
+            document.getElementById('dailyRate').textContent = data.daily_rate;
+            document.getElementById('predCount').textContent = data.predicted_count_30d;
+            const badge = document.getElementById('riskLevel');
+            if (data.risk === 'high') {
+                badge.className = 'badge bg-danger fs-6';
+                badge.textContent = '🔴 高风险（需立即干预）';
+            } else if (data.risk === 'medium') {
+                badge.className = 'badge bg-warning fs-6';
+                badge.textContent = '🟡 中风险（建议关注）';
+            } else {
+                badge.className = 'badge bg-success fs-6';
+                badge.textContent = '🟢 低风险（正常')；
+            }
+        })
+        .catch(err => {
+            document.getElementById('loadingArea').style.display = 'none';
+            alert('预测失败: ' + err.message);
+        });
+}
+document.getElementById('studentName').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') predictDiscipline();
+});
+</script>
+{% endblock %}

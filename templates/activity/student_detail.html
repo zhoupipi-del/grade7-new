@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}{{ activity.title }} - 活动详情{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4" style="max-width: 800px;">
+  <a href="{{ url_for('activity.student_list') }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回活动列表</a>
+
+  <h3>{{ activity.title }}</h3>
+  <div class="text-muted mb-3">
+    <span class="badge bg-info">{{ activity.activity_type }}</span>
+    <span class="badge
+      {% if activity.status == 'published' %}bg-primary
+      {% elif activity.status == 'ongoing' %}bg-success
+      {% else %}bg-dark{% endif %}">
+      {{ STATUS_LABELS.get(activity.status, activity.status) }}
+    </span>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, msg in messages %}
+        <div class="alert alert-{{ 'danger' if category=='danger' else ('warning' if category=='warning' else 'success') }} alert-dismissible fade show">
+          {{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <!-- Info -->
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <small class="text-muted d-block">活动日期</small>
+          <strong>{{ activity.start_date }}{% if activity.end_date and activity.end_date != activity.start_date %} ~ {{ activity.end_date }}{% endif %}</strong>
+        </div>
+        <div class="col-md-6">
+          <small class="text-muted d-block">地点</small>
+          <strong>{{ activity.location or '待定' }}</strong>
+        </div>
+        <div class="col-md-6">
+          <small class="text-muted d-block">组织者</small>
+          <strong>{{ activity.organizer or '—' }}</strong>
+        </div>
+        <div class="col-md-6">
+          <small class="text-muted d-block">报名人数</small>
+          <strong>{{ confirmed_count }}{% if max_p > 0 %} / {{ max_p }}{% endif %}</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if activity.description %}
+  <div class="card mb-3">
+    <div class="card-header">活动描述</div>
+    <div class="card-body">{{ activity.description }}</div>
+  </div>
+  {% endif %}
+
+  <!-- Registration Status -->
+  <div class="card mb-3">
+    <div class="card-header">我的报名状态</div>
+    <div class="card-body text-center">
+      {% if my_reg %}
+        {% if my_reg.status == 'registered' %}
+        <div class="text-warning">
+          <i class="bi bi-hourglass-split fs-1"></i>
+          <h5>已报名，等待确认</h5>
+          <p class="text-muted">报名时间: {{ my_reg.registered_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        </div>
+        {% elif my_reg.status == 'confirmed' %}
+        <div class="text-success">
+          <i class="bi bi-check-circle fs-1"></i>
+          <h5>报名已确认</h5>
+          <p class="text-muted">确认时间: {{ my_reg.registered_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        </div>
+        {% elif my_reg.status == 'cancelled' %}
+        <div class="text-danger">
+          <i class="bi bi-x-circle fs-1"></i>
+          <h5>报名已取消</h5>
+        </div>
+        {% endif %}
+      {% else %}
+      <div class="text-muted">
+        <i class="bi bi-calendar-plus fs-1 mb-2 d-block"></i>
+        <h5>您还未报名此活动</h5>
+        {% if activity.status in ('published', 'ongoing') %}
+        <form method="POST" action="{{ url_for('activity.student_register', aid=activity.id) }}" class="mt-2">
+          {% if max_p > 0 and confirmed_count >= max_p %}
+          <button class="btn btn-secondary" disabled>报名人数已满</button>
+          {% else %}
+          <button type="submit" class="btn btn-primary btn-lg">立即报名</button>
+          {% endif %}
+        </form>
+        {% else %}
+        <p class="text-muted mt-2">该活动已不接受报名</p>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

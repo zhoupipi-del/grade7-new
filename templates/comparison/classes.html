@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>班级对比分析 - 梨江中学</title>
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Microsoft YaHei', sans-serif; background:#f5f7fa; color:#333; padding:20px; }
+.container { max-width:1400px; margin:0 auto; }
+h1 { color:#2c3e50; margin-bottom:20px; }
+.card { background:#fff; border-radius:12px; padding:24px; margin-bottom:20px; box-shadow:0 2px 12px rgba(0,0,0,0.08); }
+.card-title { font-size:16px; font-weight:600; color:#2c3e50; margin-bottom:16px; }
+.selector { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+.selector select { flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
+.btn { padding:10px 24px; border:none; border-radius:8px; cursor:pointer; font-size:14px; transition:all 0.3s; }
+.btn-primary { background:linear-gradient(135deg, #667eea, #764ba2); color:#fff; }
+.btn-primary:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(102,126,234,0.4); }
+.chart-wrap { position:relative; height:350px; margin-bottom:20px; }
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; }
+th { background:#f8f9fa; padding:12px; text-align:left; font-weight:600; color:#2c3e50; border-bottom:2px solid #dee2e6; }
+td { padding:10px 12px; border-bottom:1px solid #e9ecef; }
+tr:hover { background:#f8f9fa; }
+.badge { display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+.badge-success { background:#d4edda; color:#155724; }
+.badge-warning { background:#fff3cd; color:#856404; }
+.badge-danger { background:#f8d7da; color:#721c24; }
+.loading { text-align:center; padding:40px; color:#7f8c8d; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>📊 班级对比分析</h1>
+  
+  <div class="card">
+    <div class="card-title">选择班级（可多选）</div>
+    <div class="selector">
+      <select id="class-select" multiple size="5" style="min-height:120px;">
+        <option value="">加载中...</option>
+      </select>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <button class="btn btn-primary" onclick="compareClasses()">开始对比</button>
+        <button class="btn" style="background:#6c757d; color:#fff;" onclick="selectAll()">全选</button>
+        <button class="btn" style="background:#e9ecef; color:#333;" onclick="clearSelection()">清空</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="result" class="loading">请选择至少2个班级进行对比...</div>
+</div>
+
+<script>
+// 加载班级列表
+fetch('/api/classes')
+  .then(r => r.json())
+  .then(data => {
+    const sel = document.getElementById('class-select');
+    sel.innerHTML = '';
+    (data.clases || []).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name + ' (' + (c.grade_name || '未知年级') + ')';
+      sel.appendChild(opt);
+    });
+  });
+
+function selectAll() {
+  const sel = document.getElementById('class-select');
+  for (let i = 0; i < sel.options.length; i++) {
+    sel.options[i].selected = true;
+  }
+}
+
+function clearSelection() {
+  const sel = document.getElementById('class-select');
+  for (let i = 0; i < sel.options.length; i++) {
+    sel.options[i].selected = false;
+  }
+}
+
+function getSelectedClasses() {
+  const sel = document.getElementById('class-select');
+  const selected = [];
+  for (let i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].selected) {
+      selected.push(sel.options[i].value);
+    }
+  }
+  return selected;
+}
+
+function compareClasses() {
+  const classIds = getSelectedClasses();
+  if (classIds.length < 2) {
+    alert('请至少选择2个班级进行对比');
+    return;
+  }
+  
+  const resultDiv = document.getElementById('result');
+  resultDiv.className = 'loading';
+  resultDiv.innerHTML = '⏳ 正在获取班级数据，进行对比分析...';
+  
+  const params = new URLSearchParams();
+  classIds.forEach(id => params.append('class_ids[]', id));
+  
+  fetch('/comparison/api/classes?' + params.toString())
+    .then(r => r.json())
+    .then(data => {
+      renderComparison(data);
+    })
+    .catch(err => {
+      resultDiv.innerHTML = '❌ 对比失败：' + err.message;
+    });
+}
+
+function renderComparison(data) {
+  const resultDiv = document.getElementById('result');
+  resultDiv.className = '';
+  resultDiv.innerHTML = '';
+  
+  const classes = data.clases || [];
+  if (classes.length === 0) {
+    resultDiv.innerHTML = '<div class="card"><p class="text-muted">未找到对比数据</p></div>';
+    return;
+  }
+  
+  // 1. 成绩对比图表
+  let html = '<div class="card"><div class="card-title">成绩对比（' + (data.latest_exam_name || '暂无考试') + '）</div>';
+  html += '<div class="chart-wrap"><canvas id="scoreChart"></canvas></div></div>';
+  
+  // 2. 违纪对比图表
+  html += '<div class="card"><div class="card-title">违纪次数对比（近30天）</div>';
+  html += '<div class="chart-wrap"><canvas id="disciplineChart"></canvas></div></div>';
+  
+  // 3. 出勤率对比图表
+  html += '<div class="card"><div class="card-title">出勤率对比（近30天）</div>';
+  html += '<div class="chart-wrap"><canvas id="attendanceChart"></canvas></div></div>';
+  
+  // 4. 详细数据表格
+  html += '<div class="card"><div class="card-title">详细数据对比</div>';
+  html += '<div class="table-wrap"><table>';
+  html += '<thead><tr>';
+  html += '<th>班级</th><th>学生人数</th><th>平均成绩</th><th>违纪次数</th><th>出勤率</th><th>心理高风险</th><th>五翼均分</th>';
+  html += '</tr></thead><tbody>';
+  
+  classes.forEach(c => {
+    const scoreClass = c.avg_score >= 80 ? 'badge-success' : c.avg_score >= 60 ? 'badge-warning' : 'badge-danger';
+    const attClass = c.attendance_rate >= 95 ? 'badge-success' : c.attendance_rate >= 85 ? 'badge-warning' : 'badge-danger';
+    const mhClass = c.mental_high_risk === 0 ? 'badge-success' : c.mental_high_risk <= 2 ? 'badge-warning' : 'badge-danger';
+    
+    html += '<tr>';
+    html += '<td><strong>' + c.class_name + '</strong> (' + c.grade_name + ')</td>';
+    html += '<td>' + c.student_count + ' 人</td>';
+    html += '<td><span class="badge ' + scoreClass + '">' + c.avg_score + ' 分</span></td>';
+    html += '<td>' + c.discipline_count + ' 次</td>';
+    html += '<td><span class="badge ' + attClass + '">' + c.attendance_rate + '%</span></td>';
+    html += '<td><span class="badge ' + mhClass + '">' + c.mental_high_risk + ' 人</span></td>';
+    html += '<td>' + c.wing_avg + ' 分</td>';
+    html += '</tr>';
+  });
+  
+  html += '</tbody></table></div></div>';
+  resultDiv.innerHTML = html;
+  
+  // 渲染图表
+  renderCharts(classes);
+}
+
+function renderCharts(classes) {
+  const labels = classes.map(c => c.class_name);
+  
+  // 成绩对比
+  new Chart(document.getElementById('scoreChart'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '平均成绩',
+        data: classes.map(c => c.avg_score),
+        backgroundColor: 'rgba(102,126,234,0.6)',
+        borderColor: 'rgba(102,126,234,1)',
+        borderWidth: 1,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { beginAtZero: true, max: 100, ticks: { color: '#7f8c8d' }, grid: { color: '#f0f0f0' } },
+        x: { ticks: { color: '#7f8c8d' }, grid: { display: false } }
+      },
+      plugins: {
+        legend: { labels: { color: '#2c3e50' } }
+      }
+    }
+  });
+  
+  // 违纪对比
+  new Chart(document.getElementById('disciplineChart'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '违纪次数',
+        data: classes.map(c => c.discipline_count),
+        backgroundColor: 'rgba(231,76,60,0.6)',
+        borderColor: 'rgba(231,76,60,1)',
+        borderWidth: 1,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { beginAtZero: true, ticks: { color: '#7f8c8d' }, grid: { color: '#f0f0f0' } },
+        x: { ticks: { color: '#7f8c8d' }, grid: { display: false } }
+      },
+      plugins: {
+        legend: { labels: { color: '#2c3e50' } }
+      }
+    }
+  });
+  
+  // 出勤率对比
+  new Chart(document.getElementById('attendanceChart'), {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '出勤率',
+        data: classes.map(c => c.attendance_rate),
+        borderColor: 'rgba(46,204,113,1)',
+        backgroundColor: 'rgba(46,204,113,0.1)',
+        fill: true,
+        tension: 0.4,
+        pointRadius: 5,
+        pointBackgroundColor: 'rgba(46,204,113,1)',
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { min: 80, max: 100, ticks: { color: '#7f8c8d', callback: v => v + '%' }, grid: { color: '#f0f0f0' } },
+        x: { ticks: { color: '#7f8c8d' }, grid: { display: false } }
+      },
+      plugins: {
+        legend: { labels: { color: '#2c3e50' } }
+      }
+    }
+  });
+}
+</script>
+</body>
+</html>

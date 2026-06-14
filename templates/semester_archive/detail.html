@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+{% block title %}{{ archive.display_name }} - 学期归档详情{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h3><i class="bi bi-archive text-primary"></i> {{ archive.display_name }}</h3>
+        <p class="text-muted">学期归档详情 - 创建于 {{ archive.archived_at.strftime('%Y-%m-%d %H:%M') if archive.archived_at else '-' }}</p>
+    </div>
+    <div class="col-auto">
+        <a href="{{ url_for('semester_archive.list_archives') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> 返回列表
+        </a>
+    </div>
+</div>
+
+<!-- 基本信息 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-2 text-primary">{{ archive.semester_name }}</div>
+            <div class="text-muted">学期名称</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-2 text-success">{{ summary.student_count or 0 }}</div>
+            <div class="text-muted">学生人数</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-2 text-info">{{ summary.class_count or 0 }}</div>
+            <div class="text-muted">班级数量</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-2 text-warning">{{ summary.teacher_count or 0 }}</div>
+            <div class="text-muted">教师人数</div>
+        </div>
+    </div>
+</div>
+
+<!-- 详细统计 -->
+<div class="row g-3 mb-4">
+    <!-- 违纪统计 -->
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <i class="bi bi-exclamation-triangle"></i> 违纪统计
+            </div>
+            <div class="card-body">
+                {% if summary.discipline_stats %}
+                <div class="mb-3">
+                    <strong>违纪总数：</strong>
+                    <span class="badge bg-danger">{{ summary.discipline_stats.total or 0 }}</span>
+                </div>
+                
+                {% if summary.discipline_stats.by_type %}
+                <h6>按类型统计</h6>
+                <ul class="list-unstyled">
+                    {% for type, count in summary.discipline_stats.by_type.items() %}
+                    <li class="mb-1">
+                        <span class="badge bg-secondary">{{ type }}</span>
+                        <span class="badge bg-danger">{{ count }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% else %}
+                <p class="text-muted mb-0">暂无违纪数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 成绩统计 -->
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <i class="bi bi-graph-up"></i> 成绩统计
+            </div>
+            <div class="card-body">
+                {% if summary.score_stats %}
+                <div class="mb-3">
+                    <strong>平均成绩：</strong>
+                    <span class="badge bg-primary">{{ summary.score_stats.average or 0 }}</span>
+                </div>
+                
+                {% if summary.score_stats.by_subject %}
+                <h6>按科目统计</h6>
+                <ul class="list-unstyled">
+                    {% for subject, score in summary.score_stats.by_subject.items() %}
+                    <li class="mb-1">
+                        <span class="text-muted">{{ subject }}：</span>
+                        <span class="badge bg-info">{{ score }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% else %}
+                <p class="text-muted mb-0">暂无成绩数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <!-- 活动统计 -->
+    <div class="col-md-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <i class="bi bi-calendar-event"></i> 活动统计
+            </div>
+            <div class="card-body">
+                {% if summary.activity_stats %}
+                <div class="mb-2">
+                    <strong>活动总数：</strong>{{ summary.activity_stats.total_activities or 0 }}
+                </div>
+                <div class="mb-2">
+                    <strong>参与人次：</strong>{{ summary.activity_stats.total_participants or 0 }}
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">暂无活动数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 消息统计 -->
+    <div class="col-md-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <i class="bi bi-envelope"></i> 消息统计
+            </div>
+            <div class="card-body">
+                {% if summary.message_stats %}
+                <div class="mb-2">
+                    <strong>消息总数：</strong>{{ summary.message_stats.total_messages or 0 }}
+                </div>
+                <div class="mb-2">
+                    <strong>未读消息：</strong>
+                    <span class="badge bg-warning">{{ summary.message_stats.unread_count or 0 }}</span>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">暂无消息数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 考勤统计 -->
+    <div class="col-md-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <i class="bi bi-clock"></i> 考勤统计
+            </div>
+            <div class="card-body">
+                {% if summary.attendance_stats %}
+                <div class="mb-2">
+                    <strong>平均出勤率：</strong>
+                    <span class="badge bg-success">{{ (summary.attendance_stats.average_rate * 100) | round(1) if summary.attendance_stats.average_rate else 0 }}%</span>
+                </div>
+                <div class="mb-2">
+                    <strong>迟到次数：</strong>
+                    <span class="badge bg-warning">{{ summary.attendance_stats.late_count or 0 }}</span>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">暂无考勤数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 操作按钮 -->
+<div class="row">
+    <div class="col">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <i class="bi bi-gear"></i> 操作
+            </div>
+            <div class="card-body">
+                <div class="btn-group">
+                    <a href="{{ url_for('semester_archive.export_archive', semester_name=archive.semester_name) }}" 
+                       class="btn btn-success">
+                        <i class="bi bi-download"></i> 导出Excel
+                    </a>
+                    <button type="button" class="btn btn-warning" 
+                            onclick="confirmRestore('{{ archive.semester_name }}')">
+                        <i class="bi bi-arrow-counterclockwise"></i> 恢复数据
+                    </button>
+                    <button type="button" class="btn btn-danger" 
+                            onclick="confirmDelete('{{ archive.semester_name }}')">
+                        <i class="bi bi-trash"></i> 删除归档
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 归档信息 -->
+<div class="row mt-4">
+    <div class="col">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <i class="bi bi-info-circle"></i> 归档信息
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless table-sm">
+                    <tr>
+                        <td width="150"><strong>学期名称：</strong></td>
+                        <td>{{ archive.semester_name }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>显示名称：</strong></td>
+                        <td>{{ archive.display_name }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>开始日期：</strong></td>
+                        <td>{{ archive.start_date.strftime('%Y年%m月%d日') if archive.start_date else '-' }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>结束日期：</strong></td>
+                        <td>{{ archive.end_date.strftime('%Y年%m月%d日') if archive.end_date else '-' }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>归档人：</strong></td>
+                        <td>{{ archived_by.display_name if archived_by else '-' }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>归档时间：</strong></td>
+                        <td>{{ archive.archived_at.strftime('%Y-%m-%d %H:%M:%S') if archive.archived_at else '-' }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 恢复确认模态框 -->
+<div class="modal fade" id="restoreModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle"></i> 确认恢复</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>确定要从 <strong id="restoreSemesterName"></strong> 归档恢复数据吗？</p>
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>警告：</strong>恢复操作将覆盖当前学期的部分数据，请谨慎操作！
+                </div>
+            </div>
+            <div class="modal-footer">
+                <form method="POST" id="restoreForm" style="display: inline;">
+                    <button type="submit" class="btn btn-warning">
+                        <i class="bi bi-arrow-counterclockwise"></i> 确认恢复
+                    </button>
+                </form>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 删除确认模态框 -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-trash"></i> 确认删除</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>确定要删除 <strong id="deleteSemesterName"></strong> 的归档吗？</p>
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>警告：</strong>删除后无法恢复！
+                </div>
+            </div>
+            <div class="modal-footer">
+                <form method="POST" id="deleteForm" style="display: inline;">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-trash"></i> 确认删除
+                    </button>
+                </form>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function confirmRestore(semesterName) {
+    document.getElementById('restoreSemesterName').textContent = semesterName;
+    document.getElementById('restoreForm').action = "{{ url_for('semester_archive.restore_archive', semester_name='') }}" + semesterName;
+    new bootstrap.Modal(document.getElementById('restoreModal')).show();
+}
+
+function confirmDelete(semesterName) {
+    document.getElementById('deleteSemesterName').textContent = semesterName;
+    document.getElementById('deleteForm').action = "{{ url_for('semester_archive.delete_archive', semester_name='') }}" + semesterName;
+    new bootstrap.Modal(document.getElementById('deleteModal')).show();
+}
+</script>
+{% endblock %}

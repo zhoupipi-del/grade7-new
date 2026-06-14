@@ -1,0 +1,116 @@
+<div class="d-flex align-items-center mb-3">
+  <a href="{{ url_for('wings.score_page') }}" class="btn btn-outline-secondary btn-sm me-3">
+    <i class="bi bi-arrow-left me-1"></i> 返回
+  </a>
+  <h4 class="mb-0"><i class="bi bi-person me-2"></i>学生评分</h4>
+</div>
+
+{% if student %}
+<div class="row g-3">
+  <!-- 自评 -->
+  <div class="col-md-5">
+    <div class="card">
+      <div class="card-header"><strong><i class="bi bi-person-circle me-1"></i>自评</strong></div>
+      <div class="card-body">
+        <div class="row g-2">
+          {% for d in dimensions %}
+          <div class="col-12">
+            <label class="form-label">{{ d }}</label>
+            <div class="d-flex align-items-center gap-2">
+              <input type="range" class="form-range" id="self-{{ d }}" min="0" max="10" step="0.5" value="5"
+                     oninput="document.getElementById('sv-{{ d }}').textContent = this.value">
+              <span class="badge bg-primary" id="sv-{{ d }}">5</span>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <button class="btn btn-primary btn-sm mt-2 w-100" onclick="saveSelf()">
+          <i class="bi bi-check-lg me-1"></i> 提交自评
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 互评 -->
+  <div class="col-md-7">
+    <div class="card">
+      <div class="card-header"><strong><i class="bi bi-people me-1"></i>同学互评</strong></div>
+      <div class="card-body">
+        {% if classmates %}
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead><tr><th>同学</th>{% for d in dimensions %}<th class="text-center">{{ d }}</th>{% endfor %}<th></th></tr></thead>
+            <tbody>
+            {% for c in classmates %}
+            <tr>
+              <td><strong>{{ c.name }}</strong></td>
+              {% for d in dimensions %}
+              <td>
+                <select class="form-select form-select-sm peer-select" data-sid="{{ c.id }}" data-dim="{{ d }}" style="width:65px;">
+                  <option value="">-</option>
+                  {% for i in range(11) %}<option value="{{ i }}">{{ i }}</option>{% endfor %}
+                </select>
+              </td>
+              {% endfor %}
+              <td>
+                <button class="btn btn-sm btn-outline-success save-peer" data-sid="{{ c.id }}">
+                  <i class="bi bi-check-lg"></i>
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-3">暂无同学可互评</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="text-center py-5 text-muted">
+  <i class="bi bi-person-x display-1"></i>
+  <p class="mt-3">未绑定学生身份</p>
+</div>
+{% endif %}
+
+{% if student %}
+<script>
+function saveScore(sid, dim, val, type) {
+  if (!val && val !== 0) return;
+  return fetch('/wings/api/score/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      student_id: sid, dimension: dim, score: parseInt(val),
+      scorer_type: type,
+      class_id: {{ student.class_id or 0 }},
+      grade_id: {{ student.grade_id or 0 }}
+    })
+  }).then(function(r) { return r.json(); });
+}
+function saveSelf() {
+  var promises = [];
+  {% for d in dimensions %}
+  promises.push(saveScore({{ student.id }}, '{{ d }}', document.getElementById('self-{{ d }}').value, 'self'));
+  {% endfor %}
+  Promise.all(promises).then(function() { alert('自评已提交！'); });
+}
+document.querySelectorAll('.save-peer').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var sid = this.dataset.sid;
+    var promises = [];
+    this.closest('tr').querySelectorAll('.peer-select').forEach(function(sel) {
+      if (sel.value !== '') promises.push(saveScore(sid, sel.dataset.dim, sel.value, 'peer'));
+    });
+    Promise.all(promises).then(function() {
+      btn.classList.remove('btn-outline-success');
+      btn.classList.add('btn-success');
+      btn.innerHTML = '✓';
+    });
+  });
+});
+</script>
+{% endif %}

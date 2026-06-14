@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}家长端 - 家长会签到{% endblock %}
+
+{% block content %}
+{% if not student %}
+<div class="text-center py-5">
+    <i class="bi bi-exclamation-circle display-1 text-warning"></i>
+    <h4 class="mt-3">尚未绑定学生</h4>
+    <p class="text-muted">请联系班主任为您绑定孩子信息</p>
+</div>
+{% else %}
+
+<div class="row mb-4">
+    <div class="col">
+        <h3><i class="bi bi-people text-primary"></i> 家长会签到</h3>
+        <p class="text-muted">您好，{{ session.display_name }} — {{ student.name }} 的家长</p>
+    </div>
+</div>
+
+<div class="row g-3">
+    {% for m in meetings %}
+    <div class="col-md-6 col-lg-4">
+        <div class="card shadow-sm {% if m.id in signed_meetings %}border-success{% endif %}">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-bold">{{ m.title or '家长会' }}</span>
+                {% if m.id in signed_meetings %}
+                <span class="badge bg-success">已签到</span>
+                {% else %}
+                <span class="badge bg-secondary">未签到</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <p class="mb-1"><i class="bi bi-calendar"></i> {{ m.meeting_date.strftime('%Y-%m-%d') }}</p>
+                <p class="mb-1"><i class="bi bi-clock"></i> {{ m.meeting_time or '-' }}</p>
+                <p class="mb-1"><i class="bi bi-geo-alt"></i> {{ m.location or '-' }}</p>
+                {% if m.description %}
+                <p class="text-muted small mt-2">{{ m.description }}</p>
+                {% endif %}
+
+                {% if m.id in signed_meetings %}
+                <div class="mt-2 text-success small">
+                    <i class="bi bi-check-circle"></i>
+                    签到时间：{{ signed_meetings[m.id].signed_at.strftime('%H:%M') }}
+                    {% if signed_meetings[m.id].is_late %}<span class="text-warning">（迟到）</span>{% endif %}
+                </div>
+                {% else %}
+                <button class="btn btn-primary btn-sm mt-2 w-100" onclick="showSigninModal({{ m.id }}, '{{ m.title or '家长会' }}')">
+                    <i class="bi bi-check2-circle"></i> 签到
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="col-12">
+        <p class="text-center text-muted py-4">暂无家长会安排</p>
+    </div>
+    {% endfor %}
+</div>
+
+{% endif %}
+
+<!-- 签到弹窗 -->
+<div class="modal fade" id="signinModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">家长会签到</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>确认参加：<strong id="modalMeetingTitle"></strong></p>
+                <input type="hidden" id="modalMeetingId">
+                <div class="mb-2">
+                    <label class="form-label">家长姓名 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control form-control-sm" id="signinParentName" placeholder="请输入您的姓名">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">联系电话</label>
+                    <input type="text" class="form-control form-control-sm" id="signinPhone" placeholder="请输入联系电话">
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="signinIsLate">
+                    <label class="form-check-label small" for="signinIsLate">迟到</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="submitSignin()">确认签到</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function showSigninModal(mid, title) {
+    document.getElementById('modalMeetingId').value = mid;
+    document.getElementById('modalMeetingTitle').textContent = title;
+    document.getElementById('signinParentName').value = '';
+    document.getElementById('signinPhone').value = '';
+    document.getElementById('signinIsLate').checked = false;
+    new bootstrap.Modal(document.getElementById('signinModal')).show();
+}
+
+function submitSignin() {
+    const mid = document.getElementById('modalMeetingId').value;
+    const parentName = document.getElementById('signinParentName').value.trim();
+    const phone = document.getElementById('signinPhone').value.trim();
+    const isLate = document.getElementById('signinIsLate').checked;
+
+    if (!parentName) {
+        alert('请输入家长姓名');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('parent_name', parentName);
+    formData.append('phone', phone);
+    if (isLate) formData.append('is_late', 'on');
+
+    fetch(`/parent/meeting/${mid}/signin`, {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            location.reload();
+        } else {
+            alert(data.error || '签到失败');
+        }
+    })
+    .catch(() => alert('签到失败，请重试'));
+}
+</script>
+{% endblock %}

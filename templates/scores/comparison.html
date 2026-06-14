@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}多学期对比分析{% endblock %}
+
+{% block head_extra %}
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h3><i class="bi bi-graph-up-arrow"></i> 多学期对比分析</h3>
+    <p class="text-muted">跨考试趋势追踪 · 班级横向对比 · 进退步动态监测</p>
+    {% if subject_count_warning %}
+    <div class="alert alert-warning alert-dismissible fade show py-2" role="alert">
+        <i class="bi bi-exclamation-triangle-fill"></i> {{ subject_count_warning }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> {{ error }}</div>
+    {% else %}
+
+    <!-- 筛选栏 -->
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body py-2">
+            <form method="get" class="row g-2 align-items-center" id="filterForm">
+                <div class="col-auto">
+                    <select name="class_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="">全部班级</option>
+                        {% for cls in classes %}
+                        <option value="{{ cls.id }}" {% if view_class_id == cls.id %}selected{% endif %}>{{ cls.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <select name="subject_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="">全部科目</option>
+                        {% for sub in subjects %}
+                        <option value="{{ sub.id }}" {% if view_subject_id == sub.id %}selected{% endif %}>{{ sub.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-auto ms-auto text-muted small">
+                    共 {{ exams|length }} 场考试 · {{ classes|length }} 个班级 · {{ student_map|length }} 名学生
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ====== Section 1: 班级均分趋势 ====== -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-8">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0"><i class="bi bi-graph-up text-primary"></i> 各班均分走势（总分）</h6>
+                    <small class="text-muted">{{ exams|map(attribute='name')|join(' → ') }}</small>
+                </div>
+                <div class="card-body">
+                    <canvas id="trendChart" height="280"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-transparent">
+                    <h6 class="mb-0"><i class="bi bi-star text-warning"></i> 班级均分排名</h6>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>班级</th>
+                                {% for e in exams %}
+                                <th class="text-end small">{{ e.name[:4] }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% set exam_ids = exams|map(attribute='id')|list %}
+                            {% for cls in classes %}
+                            <tr>
+                                <td><strong>{{ cls.name }}</strong></td>
+                                {% for eid in exam_ids %}
+                                <td class="text-end">{{ class_exam_avgs.get(cls.id, {}).get(eid, '—') }}</td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Section 2: 科目雷达图 + 各科得分率 ====== -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-5">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-transparent">
+                    <h6 class="mb-0"><i class="bi bi-hexagon text-info"></i> 期末各科均分雷达图 — {{ last_exam.name }}</h6>
+                </div>
+                <div class="card-body">
+                    <canvas id="radarChart" height="300"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-7">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-transparent">
+                    <h6 class="mb-0"><i class="bi bi-table text-success"></i> 各科均分对比表 — {{ last_exam.name }}</h6>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>班级</th>
+                                    {% for sub in subjects %}
+                                    <th class="text-end small">{{ sub.name }}</th>
+                                    {% endfor %}
+                                    <th class="text-end small fw-bold">总分</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for cls in classes %}
+                                <tr>
+                                    <td><strong>{{ cls.name }}</strong></td>
+                                    {% set sub_data = class_exam_subject_avgs.get(cls.id, {}).get(last_exam.id, {}) %}
+                                    {% for sub in subjects %}
+                                    <td class="text-end">{{ sub_data.get(sub.id, '—') }}</td>
+                                    {% endfor %}
+                                    <td class="text-end fw-bold">{{ class_exam_avgs.get(cls.id, {}).get(last_exam.id, '—') }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Section 3: 进退步榜 ====== -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-transparent d-flex justify-content-between">
+                    <h6 class="mb-0"><i class="bi bi-arrow-up-circle text-success"></i> 进步榜 TOP20</h6>
+                    <small class="text-muted">{{ exams[-2].name }} → {{ exams[-1].name }}</small>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>#</th><th>姓名</th><th>班级</th><th class="text-end">上次</th><th class="text-end">本次</th><th class="text-end text-success">↑提升</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sid, delta, prev, curr in improvers %}
+                            {% set st = student_map.get(sid, {}) %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td><a href="#" class="text-decoration-none fw-bold">{{ st.name or sid }}</a></td>
+                                <td class="small">{{ st.class_name }}</td>
+                                <td class="text-end">{{ prev }}</td>
+                                <td class="text-end">{{ curr }}</td>
+                                <td class="text-end text-success fw-bold">+{{ delta }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="6" class="text-center text-muted">暂无数据</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-transparent d-flex justify-content-between">
+                    <h6 class="mb-0"><i class="bi bi-arrow-down-circle text-danger"></i> 退步榜 TOP20</h6>
+                    <small class="text-muted">{{ exams[-2].name }} → {{ exams[-1].name }}</small>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>#</th><th>姓名</th><th>班级</th><th class="text-end">上次</th><th class="text-end">本次</th><th class="text-end text-danger">↓下降</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sid, delta, prev, curr in decliners %}
+                            {% set st = student_map.get(sid, {}) %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td><a href="#" class="text-decoration-none fw-bold">{{ st.name or sid }}</a></td>
+                                <td class="small">{{ st.class_name }}</td>
+                                <td class="text-end">{{ prev }}</td>
+                                <td class="text-end">{{ curr }}</td>
+                                <td class="text-end text-danger fw-bold">{{ delta }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="6" class="text-center text-muted">暂无数据</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if not error %}
+<script>
+// ── 班级均分走势图 ──
+(function() {
+    const ctx = document.getElementById('trendChart');
+    if (!ctx) return;
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ chart_labels | tojson }},
+            datasets: {{ chart_datasets | tojson }}
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { usePointStyle: true, padding: 16 } },
+                tooltip: { mode: 'index', intersect: false }
+            },
+            scales: {
+                y: { beginAtZero: false, title: { display: true, text: '总分均分' } }
+            },
+            interaction: { mode: 'nearest', axis: 'x', intersect: false }
+        }
+    });
+})();
+
+// ── 科目雷达图 ──
+(function() {
+    const ctx = document.getElementById('radarChart');
+    if (!ctx) return;
+    new Chart(ctx, {
+        type: 'radar',
+        data: {
+            labels: {{ radar_labels | tojson }},
+            datasets: {{ radar_datasets | tojson }}
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { usePointStyle: true, padding: 12 } }
+            },
+            scales: {
+                r: {
+                    beginAtZero: false,
+                    suggestedMin: 30,
+                    ticks: { stepSize: 10, backdropColor: 'transparent' }
+                }
+            }
+        }
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

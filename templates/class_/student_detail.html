@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block title %}学生详情 - {{ student.name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 学生基本信息卡片 -->
+    <div class="row mb-3">
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <div class="display-1 text-primary mb-2">
+                        <i class="bi bi-person-circle"></i>
+                    </div>
+                    <h4>{{ student.name }}</h4>
+                    <span class="badge bg-info">{{ student.gender }}</span>
+                    <p class="text-muted mt-2 mb-0">
+                        <small>学号：{{ student.student_no }}</small>
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-9">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-info-circle me-2"></i>基本信息</span>
+                    <div>
+                        <a href="{{ url_for('student_profile.detail', sid=student.id) }}" 
+                           class="btn btn-sm btn-primary me-1">
+                            <i class="bi bi-person-badge"></i> 学生画像
+                        </a>
+                        <a href="{{ url_for('class.edit_student', sid=student.id) }}" 
+                           class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-pencil"></i> 编辑
+                        </a>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-sm table-borderless">
+                                <tr>
+                                    <td class="text-muted" width="120">全国学籍号</td>
+                                    <td>{{ student.national_id or '-' }}</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted">民族</td>
+                                    <td>{{ student.ethnicity or '-' }}</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted">出生日期</td>
+                                    <td>{{ student.birth_date.strftime('%Y-%m-%d') if student.birth_date else '-' }}</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted">身份证号</td>
+                                    <td><small>{{ student.id_card or '-' }}</small></td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted">家庭地址</td>
+                                    <td>{{ student.address or '-' }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-sm table-borderless">
+                                <tr>
+                                    <td class="text-muted" width="120">家长1姓名</td>
+                                    <td>{{ student.parent1_name or '-' }}</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted">家长1关系</td>
+                                    <td>{{ student.parent1_relation or '-' }}</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted">家长1电话</td>
+                                    <td>
+                                        {% if student.parent1_phone %}
+                                        <a href="tel:{{ student.parent1_phone }}">{{ student.parent1_phone }}</a>
+                                        {% else %}-{% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted">家长2姓名</td>
+                                    <td>{{ student.parent2_name or '-' }}</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted">家长2关系</td>
+                                    <td>{{ student.parent2_relation or '-' }}</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted">家长2电话</td>
+                                    <td>
+                                        {% if student.parent2_phone %}
+                                        <a href="tel:{{ student.parent2_phone }}">{{ student.parent2_phone }}</a>
+                                        {% else %}-{% endif %}
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-12">
+                            <strong class="text-muted">标签：</strong>
+                            {% if student.tags %}
+                                {% for tag in student.tags.split(',') %}
+                                <span class="badge bg-primary me-1">{{ tag.strip() }}</span>
+                                {% endfor %}
+                            {% else %}
+                            <span class="text-muted">暂无标签</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 违纪记录 -->
+    <div class="card mb-3">
+        <div class="card-header">
+            <i class="bi bi-exclamation-triangle me-2"></i>违纪记录
+            <span class="badge bg-secondary">{{ disciplines|length }}</span>
+        </div>
+        <div class="card-body p-0">
+            {% if disciplines %}
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>日期</th>
+                            <th>类型</th>
+                            <th>类别</th>
+                            <th>描述</th>
+                            <th>扣分</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for d in disciplines %}
+                        <tr>
+                            <td><small>{{ d.created_at.strftime('%m-%d') }}</small></td>
+                            <td>
+                                {% if d.type == 'serious' %}
+                                <span class="badge bg-danger">严重</span>
+                                {% elif d.type == 'major' %}
+                                <span class="badge bg-warning">重大</span>
+                                {% elif d.type == 'minor' %}
+                                <span class="badge bg-info">轻微</span>
+                                {% else %}
+                                <span class="badge bg-secondary">警告</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ d.category or '-' }}</td>
+                            <td>{{ d.description[:30] }}...</td>
+                            <td>{% if d.points %}<span class="text-danger">{{ d.points }}</span>{% else %}-{% endif %}</td>
+                            <td>
+                                {% if d.status == 'active' %}
+                                <span class="badge bg-warning">处理中</span>
+                                {% elif d.status == 'resolved' %}
+                                <span class="badge bg-success">已解决</span>
+                                {% else %}
+                                <span class="badge bg-secondary">已申诉</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center text-muted py-4">
+                <i class="bi bi-emoji-smile fs-2"></i>
+                <p class="mt-2">该生暂无违纪记录</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 考勤记录 -->
+    <div class="card">
+        <div class="card-header">
+            <i class="bi bi-calendar-check me-2"></i>近期考勤记录
+        </div>
+        <div class="card-body p-0">
+            {% if attendances %}
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>日期</th>
+                            <th>状态</th>
+                            <th>备注</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for a in attendances %}
+                        <tr>
+                            <td>{{ a.record_date.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                {% if a.status == 'present' %}
+                                <span class="badge bg-success">出勤</span>
+                                {% elif a.status == 'late' %}
+                                <span class="badge bg-warning">迟到</span>
+                                {% elif a.status == 'early' %}
+                                <span class="badge bg-info">早退</span>
+                                {% elif a.status == 'absent' %}
+                                <span class="badge bg-danger">缺勤</span>
+                                {% else %}
+                                <span class="badge bg-secondary">请假</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ a.note or '-' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center text-muted py-4">
+                <p>暂无考勤记录</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="mt-3">
+    <a href="{{ url_for('class.student_list') }}" class="btn btn-sm btn-secondary">
+        <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+</div>
+{% endblock %}

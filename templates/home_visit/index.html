@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}家访记录管理{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+
+  <!-- 顶部标题和导出按钮 -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3><i class="bi bi-house-door text-primary"></i> 家访记录</h3>
+    <div>
+      <a href="{{ url_for('home_visit.export') }}" class="btn btn-outline-success">
+        <i class="bi bi-download"></i> 导出Excel
+      </a>
+    </div>
+  </div>
+
+  <!-- 统计卡片 -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card border-0 shadow-sm text-center p-3">
+        <div class="fs-1 text-primary">{{ stats.total if stats else 0 }}</div>
+        <div class="text-muted small">总记录</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card border-0 shadow-sm text-center p-3">
+        <div class="fs-1 text-success">{{ stats.home if stats else 0 }}</div>
+        <div class="text-muted small">上门家访</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card border-0 shadow-sm text-center p-3">
+        <div class="fs-1 text-info">{{ stats.phone if stats else 0 }}</div>
+        <div class="text-muted small">电话家访</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card border-0 shadow-sm text-center p-3">
+        <div class="fs-1 text-warning">{{ stats.school if stats else 0 }}</div>
+        <div class="text-muted small">来校面谈</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 筛选栏 + 新增按钮 -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <form method="GET" action="{{ url_for('home_visit.index') }}" class="row g-3 align-items-end">
+        <div class="col-md-4">
+          <label class="form-label small text-muted">学生姓名</label>
+          <input type="text" name="student_name" class="form-control" placeholder="输入学生姓名搜索" value="{{ student_name or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small text-muted">家访方式</label>
+          <select name="visit_type" class="form-select">
+            <option value="">全部方式</option>
+            {% for vt in visit_types %}
+            <option value="{{ vt }}" {% if visit_type == vt %}selected{% endif %}>{{ vt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small text-muted">班级</label>
+          <select name="class_id" class="form-select">
+            <option value="">全部班级</option>
+            {% for c in classes %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-search"></i> 筛选
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 新增记录按钮 -->
+  <div class="mb-3">
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createModal">
+      <i class="bi bi-plus-lg"></i> 新增记录
+    </button>
+  </div>
+
+  <!-- 数据表格 -->
+  <div class="card shadow-sm">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>日期</th>
+              <th>学生</th>
+              <th>班级</th>
+              <th>方式</th>
+              <th>教师</th>
+              <th>家访内容</th>
+              <th>家长反馈</th>
+              <th>后续跟进</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in visits %}
+            <tr>
+              <td>{{ v.visit_date }}</td>
+              <td>{{ v.student.name if v.student else '—' }}</td>
+              <td>{{ v.student.class_.name if v.student and v.student.class_ else '—' }}</td>
+              <td>
+                {% if v.visit_type == '上门家访' %}
+                  <span class="badge bg-success">{{ v.visit_type }}</span>
+                {% elif v.visit_type == '电话家访' %}
+                  <span class="badge bg-info">{{ v.visit_type }}</span>
+                {% elif v.visit_type == '来校面谈' %}
+                  <span class="badge bg-warning">{{ v.visit_type }}</span>
+                {% else %}
+                  <span class="badge bg-secondary">{{ v.visit_type }}</span>
+                {% endif %}
+              </td>
+              <td>{{ v.teacher_name or '—' }}</td>
+              <td>
+                {% if v.content_summary %}
+                  {{ v.content_summary[:50] }}{% if v.content_summary|length > 50 %}...{% endif %}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if v.parent_feedback %}
+                  {{ v.parent_feedback[:30] }}{% if v.parent_feedback|length > 30 %}...{% endif %}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if v.follow_up %}
+                  {{ v.follow_up[:30] }}{% if v.follow_up|length > 30 %}...{% endif %}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                <form method="POST" action="{{ url_for('home_visit.delete', vid=v.id) }}" class="d-inline" onsubmit="return confirm('确认删除该家访记录？')">
+                  <input type="hidden" name="_method" value="DELETE">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="9" class="text-center text-muted py-4">暂无家访记录，点击「新增记录」开始添加</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 新增记录模态框 -->
+<div class="modal fade" id="createModal" tabindex="-1" aria-labelledby="createModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form method="POST" action="{{ url_for('home_visit.create') }}">
+        <div class="modal-header">
+          <h5 class="modal-title" id="createModalLabel">
+            <i class="bi bi-plus-circle"></i> 新增家访记录
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <!-- 学生选择 -->
+            <div class="col-md-6">
+              <label class="form-label">学生 <span class="text-danger">*</span></label>
+              <select name="student_id" class="form-select" required>
+                <option value="">请选择学生</option>
+                {% for c in classes %}
+                  <optgroup label="{{ c.name }}">
+                    {% for s in c.students %}
+                    <option value="{{ s.id }}">{{ s.name }}</option>
+                    {% endfor %}
+                  </optgroup>
+                {% endfor %}
+              </select>
+            </div>
+            <!-- 家访日期 -->
+            <div class="col-md-6">
+              <label class="form-label">家访日期 <span class="text-danger">*</span></label>
+              <input type="date" name="visit_date" class="form-control" required value="{{ '' }}">
+            </div>
+            <!-- 家访方式 -->
+            <div class="col-md-6">
+              <label class="form-label">家访方式 <span class="text-danger">*</span></label>
+              <select name="visit_type" class="form-select" required>
+                <option value="">请选择方式</option>
+                {% for vt in visit_types %}
+                <option value="{{ vt }}">{{ vt }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <!-- 教师姓名 -->
+            <div class="col-md-6">
+              <label class="form-label">教师姓名</label>
+              <input type="text" name="teacher_name" class="form-control" placeholder="请输入教师姓名">
+            </div>
+            <!-- 家访内容 -->
+            <div class="col-12">
+              <label class="form-label">家访内容</label>
+              <textarea name="content_summary" class="form-control" rows="3" placeholder="请输入家访主要内容"></textarea>
+            </div>
+            <!-- 家长反馈 -->
+            <div class="col-12">
+              <label class="form-label">家长反馈</label>
+              <textarea name="parent_feedback" class="form-control" rows="3" placeholder="请输入家长反馈意见"></textarea>
+            </div>
+            <!-- 后续跟进 -->
+            <div class="col-12">
+              <label class="form-label">后续跟进</label>
+              <textarea name="follow_up" class="form-control" rows="3" placeholder="请输入后续跟进计划"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-lg"></i> 保存记录
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

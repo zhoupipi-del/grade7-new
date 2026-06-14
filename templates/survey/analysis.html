@@ -1,0 +1,40 @@
+<div class="d-flex align-items-center mb-3">
+  <a href="{{ url_for('survey.psych_list') }}" class="btn btn-outline-secondary btn-sm me-3">
+    <i class="bi bi-arrow-left me-1"></i> 返回
+  </a>
+  <h4 class="mb-0"><i class="bi bi-graph-up-arrow me-2"></i>问卷分析</h4>
+</div>
+
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-2"></i> 问卷调查结果将在家长完成问卷后生成分析报告。
+</div>
+
+{% if surveys %}
+<div class="row g-3">
+  {% for survey in surveys %}
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between">
+        <strong>{{ survey.student.name if survey.student else '?' }} - {{ survey.survey_type }}</strong>
+        <small class="text-muted">{{ survey.completed_at.strftime('%Y-%m-%d') if survey.completed_at }}</small>
+      </div>
+      <div class="card-body">
+        <div class="progress" style="height: 30px;">
+          {% set total = survey.total_score or 0 %}
+          {% set pct = (total / 275 * 100)|int if total else 0 %}
+          <div class="progress-bar {% if total > 160 %}bg-danger{% elif total > 120 %}bg-warning{% else %}bg-success{% endif %}"
+               style="width: {{ pct }}%">
+            {{ total|int }} / 275
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-file-earmark-bar-graph display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无问卷数据可供分析</p>
+</div>
+{% endif %}

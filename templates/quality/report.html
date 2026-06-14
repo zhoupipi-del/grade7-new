@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}{{ student.name }}的评价报告 - 梨江中学综合素质评价{% endblock %}
+
+{% block content %}
+<!-- 报告头部 -->
+<div class="card mb-3 border-primary">
+  <div class="card-body">
+    <div class="row align-items-center">
+      <div class="col-auto">
+        <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center"
+             style="width:64px;height:64px;">
+          <span class="fs-3 fw-bold text-white">{{ student.name[:1] }}</span>
+        </div>
+      </div>
+      <div class="col">
+        <h4 class="mb-1">{{ student.name }}
+          <span class="badge bg-primary fs-6 ms-2">{{ grand_total }} 分</span>
+        </h4>
+        <div class="text-muted">
+          学号：{{ student.student_no }}
+          &nbsp;|&nbsp;
+          班级：{{ student.class_.name if student.class_ else '-' }}
+          &nbsp;|&nbsp;
+          学期：{{ semester }}
+          {% if rank is not none %}
+          &nbsp;|&nbsp;
+          班级排名：<strong>#{{ rank }}</strong>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 五维雷达图 + 得分总览 -->
+<div class="row g-3 mb-3">
+  <div class="col-lg-7">
+    <div class="card h-100">
+      <div class="card-header"><strong>五维画像</strong></div>
+      <div class="card-body text-center">
+        <canvas id="reportRadar" style="max-height:360px;"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card h-100">
+      <div class="card-header"><strong>各维度得分</strong></div>
+      <div class="card-body">
+        {% for rd in report_data %}
+        <div class="d-flex align-items-center justify-content-between mb-3 pb-2 border-bottom">
+          <div>
+            <strong>{{ rd.dimension }}</strong><br>
+            <small class="text-muted">{{ rd.subs|length }} 个子指标</small>
+          </div>
+          <div class="text-end">
+            <div class="fs-4 fw-bold {% if rd.dim_total >= 80 %}text-success{% elif rd.dim_total >= 60 %}text-warning{% else %}text-danger{% endif %}">
+              {{ rd.dim_total }}
+            </div>
+            <small class="text-muted">/ 100</small>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 详细得分表 -->
+<div class="card mb-3">
+  <div class="card-header"><strong>详细得分明细</strong></div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>维度</th>
+          <th>评价指标</th>
+          <th class="text-center">权重</th>
+          <th class="text-center">自评</th>
+          <th class="text-center">互评均值</th>
+          <th class="text-center">教师评分</th>
+          <th class="text-center fw-bold">加权得分</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for rd in report_data %}
+        {% for sub in rd.subs %}
+        <tr>
+          {% if loop.first %}
+          <td rowspan="{{ rd.subs|length }}" class="align-middle fw-bold" style="background:#f8f9fa;width:100px;">
+            {{ rd.dimension }}
+          </td>
+          {% endif %}
+          <td>{{ sub.indicator.name }}</td>
+          <td class="text-center">{% if sub.indicator.weight > 0 %}{{ "%.0f"|format(sub.indicator.weight * 100) }}%{% else %}-{% endif %}</td>
+          <td class="text-center">{{ sub.self_score or '-' }}</td>
+          <td class="text-center">{{ sub.peer_avg or '-' }}</td>
+          <td class="text-center">{{ sub.teacher_score or '-' }}</td>
+          <td class="text-center fw-bold">{{ sub.weighted }}</td>
+        </tr>
+        {% endfor %}
+        <!-- 维度小计行 -->
+        <tr class="table-active">
+          <td colspan="2" class="text-end fw-bold">小计 - {{ rd.dimension }}</td>
+          <td colspan="4"></td>
+          <td class="text-center fw-bold">{{ rd.dim_total }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+      <tfoot class="table-warning">
+        <tr>
+          <td colspan="6" class="text-end fw-bold">总分合计</td>
+          <td class="text-center fw-bold fs-5">{{ grand_total }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- 评语区 -->
+{% if comments %}
+<div class="card mb-3">
+  <div class="card-header"><strong>评语记录</strong></div>
+  <div class="card-body">
+    {% for c in comments %}
+    <div class="border-start border-3 border-primary ps-3 mb-2">
+      <small class="text-muted">
+        {{ c.indicator.name }} | 
+        <span class="badge bg-{% if c.scorer_type=='teacher' %}primary{% elif c.scorer_type=='self' %}secondary{% elif c.scorer_type=='peer' %}info{% endif %}">
+          {%- if c.scorer_type=='teacher' -%} 教师评语
+          {%- elif c.scorer_type=='self' -%} 自我评语
+          {%- elif c.scorer_type=='peer' -%} 同学评语
+          {%- else -%}{{ c.scorer_type }}{% endif -%}
+        </span>
+        {{ c.created_at.strftime('%Y-%m-%d') if c.created_at }}
+      </small>
+      <p class="mb-0 mt-1">{{ c.comment }}</p>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- 班级排名 TOP10 -->
+{% if class_rankings and class_rankings|length > 1 %}
+<div class="card mb-3">
+  <div class="card-header"><strong>班级排名 Top{{ class_rankings|length }}</strong></div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead class="table-light">
+        <tr><th>#</th><th>姓名</th><th class="text-end">总分</th></tr>
+      </thead>
+      <tbody>
+      {% for rs, rt in class_rankings %}
+      <tr class="{% if rs.id == student.id %}table-primary{% endif %}">
+        <td>{{ loop.index }}</td>
+        <td>{% if rs.id == student.id %}<strong>{{ rs.name }}</strong> (本人){% else %}{{ rs.name }}{% endif %}</td>
+        <td class="text-end fw-bold">{{ "%.1f"|format(rt) }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<script>
+new Chart(document.getElementById('reportRadar'), {
+  type: 'radar',
+  data: {
+    labels: [{% for rd in report_data %}'{{ rd.dimension }}'{% if not loop.last %},{% endif %}{% endfor %}],
+    datasets: [{
+      label: '{{ student.name }}',
+      data: [{{ dim_radar|join(',') }}],
+      backgroundColor: 'rgba(13,110,253,0.2)',
+      borderColor: 'rgba(13,110,253,1)',
+      pointBackgroundColor: 'rgba(13,110,253,1)',
+      borderWidth: 2,
+      pointRadius: 4,
+    }]
+  },
+  options: {
+    responsive: true,
+    scales: { r: { min: 0, max: 100, ticks: { stepSize: 20 } } },
+    plugins: { legend: { position: 'bottom' } }
+  }
+});
+</script>
+{% endblock %}

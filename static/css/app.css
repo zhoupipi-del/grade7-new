@@ -1,0 +1,53 @@
+/* 梨江中学德育管理平台 - 主样式 */
+
+:root {
+    --primary: #2563eb;
+    --primary-dark: #1e3a5f;
+    --success: #16a34a;
+    --warning: #f59e0b;
+    --danger: #dc2626;
+    --info: #0ea5e9;
+}
+
+/* 角色导航栏颜色 */
+#main-nav {
+    background: linear-gradient(135deg, var(--primary-dark), var(--primary));
+}
+
+#main-nav .navbar-brand {
+    letter-spacing: 2px;
+}
+
+/* 快捷卡片悬浮 */
+.hover-shadow {
+    transition: all 0.2s ease;
+}
+.hover-shadow:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
+}
+
+/* 统计卡片 */
+.stat-card {
+    border-radius: 12px;
+    transition: transform 0.2s;
+}
+.stat-card:hover {
+    transform: scale(1.03);
+}
+
+/* 表格优化 */
+.table th {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    .navbar-brand {
+        font-size: 1rem;
+    }
+    h3 {
+        font-size: 1.2rem;
+    }
+}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}请假申请 - {{ student.name }}{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-5">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="bi bi-calendar-minus"></i> 请假申请 — {{ student.name }}</h6>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        <div class="mb-3">
+                            <label class="form-label">学生</label>
+                            <input type="text" class="form-control" value="{{ student.name }}（{{ student.class_.name if student.class_ else '' }}）" disabled>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">请假原因 <span class="text-danger">*</span></label>
+                            <textarea name="reason" class="form-control" rows="3" placeholder="请详细说明请假原因" required></textarea>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label class="form-label">开始日期 <span class="text-danger">*</span></label>
+                                <input type="date" name="start_date" class="form-control" required>
+                            </div>
+                            <div class="col">
+                                <label class="form-label">结束日期 <span class="text-danger">*</span></label>
+                                <input type="date" name="end_date" class="form-control" required>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <a href="{{ url_for('parent_portal.leave_list') }}" class="btn btn-outline-secondary">
+                                <i class="bi bi-arrow-left"></i> 返回
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-send"></i> 提交申请
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="card mt-3 bg-light">
+                <div class="card-body py-2 small text-muted">
+                    <i class="bi bi-info-circle"></i> 请假流程：提交申请 → 班主任审批 → 年级组长终审。审批结果将在此页面和消息中心通知您。
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

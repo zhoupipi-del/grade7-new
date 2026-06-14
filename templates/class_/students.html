@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}学生名册{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 顶部操作栏 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3><i class="bi bi-people-fill"></i> 学生名册</h3>
+        <div>
+            <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal">
+                <i class="bi bi-upload"></i> 批量导入
+            </button>
+            <a href="{{ url_for('class.add_student') }}" class="btn btn-primary btn-sm ms-2">
+                <i class="bi bi-plus-lg"></i> 添加学生
+            </a>
+        </div>
+    </div>
+
+    <!-- 搜索和筛选 -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <form method="GET" class="row g-2 align-items-center">
+                <div class="col-md-4">
+                    <input type="text" name="q" class="form-control form-control-sm" 
+                           placeholder="搜索姓名/学号..." value="{{ request.args.get('q', '') }}">
+                </div>
+                <div class="col-md-3">
+                    <select name="gender" class="form-select form-select-sm">
+                        <option value="">全部性别</option>
+                        <option value="男" {% if request.args.get('gender') == '男' %}selected{% endif %}>男</option>
+                        <option value="女" {% if request.args.get('gender') == '女' %}selected{% endif %}>女</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <input type="text" name="tag" class="form-control form-control-sm" 
+                           placeholder="标签筛选（如：班干部）" value="{{ request.args.get('tag', '') }}">
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-sm btn-outline-primary w-100" type="submit">
+                        <i class="bi bi-search"></i> 搜索
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 学生表格 -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-3">学号</th>
+                            <th>姓名</th>
+                            <th>性别</th>
+                            <th>家长1</th>
+                            <th>电话1</th>
+                            <th>家长2</th>
+                            <th>电话2</th>
+                            <th>标签</th>
+                            <th class="text-center">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in students %}
+                        <tr>
+                            <td class="ps-3"><small class="text-muted">{{ s.student_no }}</small></td>
+                            <td><strong>{{ s.name }}</strong></td>
+                            <td>{{ s.gender }}</td>
+                            <td>{{ s.parent1_name or '-' }}</td>
+                            <td><small>{{ s.parent1_phone or '-' }}</small></td>
+                            <td>{{ s.parent2_name or '-' }}</td>
+                            <td><small>{{ s.parent2_phone or '-' }}</small></td>
+                            <td>
+                                {% if s.tags %}
+                                    {% for tag in s.tags.split(',') %}
+                                    <span class="badge bg-light text-dark border me-1">{{ tag.strip() }}</span>
+                                    {% endfor %}
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <a href="{{ url_for('student_profile.detail', sid=s.id) }}" 
+                                   class="btn btn-xs btn-primary" title="学生画像">
+                                    <i class="bi bi-person-badge"></i>
+                                </a>
+                                <a href="{{ url_for('class.student_detail', sid=s.id) }}" 
+                                   class="btn btn-xs btn-outline-primary" title="查看">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                <a href="{{ url_for('class.edit_student', sid=s.id) }}" 
+                                   class="btn btn-xs btn-outline-secondary" title="编辑">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="9" class="text-center text-muted py-4">
+                                <i class="bi bi-inbox fs-2 d-block mb-2"></i>
+                                暂无学生数据，请点击"添加学生"或"批量导入"
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center">
+            <small class="text-muted">共 {{ students|length }} 名学生</small>
+            <button class="btn btn-sm btn-outline-secondary" onclick="exportExcel()">
+                <i class="bi bi-download"></i> 导出Excel
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 批量导入Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('class.import_students') }}" enctype="multipart/form-data">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-upload me-2"></i>批量导入学生</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">下载模板</label>
+                        <a href="{{ url_for('class.download_template') }}" class="btn btn-sm btn-outline-primary d-block">
+                            <i class="bi bi-file-excel"></i> 下载Excel模板
+                        </a>
+                        <div class="form-text">请先下载模板，按格式填写后上传</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">选择文件</label>
+                        <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">上传导入</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function exportExcel() {
+    window.location.href = "{{ url_for('class.export_students') }}";
+}
+</script>
+{% endblock %}

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}报名管理 - {{ activity.title }}{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <a href="{{ url_for('activity.detail', aid=activity.id) }}" class="btn btn-sm btn-secondary mb-1">&larr; 返回详情</a>
+      <h4>报名管理: {{ activity.title }}</h4>
+    </div>
+    <div>
+      <a href="{{ url_for('activity.batch_register', aid=activity.id) }}" class="btn btn-primary">
+        <i class="bi bi-plus-lg"></i> 批量报名
+      </a>
+    </div>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, msg in messages %}
+        <div class="alert alert-{{ 'danger' if category=='danger' else ('warning' if category=='warning' else 'success') }} alert-dismissible fade show">
+          {{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <!-- 筛选班级 -->
+  <div class="mb-3">
+    <form method="GET" class="row g-2">
+      <div class="col-md-3">
+        <select name="class_id" class="form-select" onchange="this.form.submit()">
+          <option value="">全部班级</option>
+          {% for c in all_classes %}
+          <option value="{{ c.id }}" {% if class_filter == c.id %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if class_filter %}
+      <div class="col-md-3">
+        <a href="{{ url_for('activity.registrations', aid=activity.id) }}" class="btn btn-outline-secondary">清除筛选</a>
+      </div>
+      {% endif %}
+    </form>
+  </div>
+
+  {% for cid, regs in reg_by_class.items() %}
+  <div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <strong>{{ class_map.get(cid).name if class_map.get(cid) else '班级ID: ' ~ cid }}</strong>
+      <span class="badge bg-primary">{{ regs|length }} 人</span>
+    </div>
+    <div class="card-body p-0">
+      <table class="table table-hover table-sm mb-0">
+        <thead>
+          <tr>
+            <th>学号</th>
+            <th>姓名</th>
+            <th>性别</th>
+            <th>报名时间</th>
+            <th>状态</th>
+            <th>备注</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in regs %}
+          <tr>
+            <td>{{ r.student.student_no if r.student else '—' }}</td>
+            <td>{{ r.student.name if r.student else '—' }}</td>
+            <td>{{ r.student.gender if r.student else '—' }}</td>
+            <td>{{ r.registered_at.strftime('%Y-%m-%d %H:%M') if r.registered_at else '—' }}</td>
+            <td>
+              {% if r.status == 'registered' %}
+              <span class="badge bg-warning">已报名</span>
+              {% elif r.status == 'confirmed' %}
+              <span class="badge bg-success">已确认</span>
+              {% else %}
+              <span class="badge bg-secondary">已取消</span>
+              {% endif %}
+            </td>
+            <td>{{ r.note or '—' }}</td>
+            <td>
+              {% if r.status in ('registered', 'confirmed') %}
+                {% if r.status != 'confirmed' %}
+                <button class="btn btn-sm btn-outline-success confirm-btn" data-rid="{{ r.id }}">确认</button>
+                {% endif %}
+                <button class="btn btn-sm btn-outline-danger cancel-btn" data-rid="{{ r.id }}">取消报名</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="text-center py-5 text-muted">
+    <p class="fs-5">暂无报名记录</p>
+    <a href="{{ url_for('activity.batch_register', aid=activity.id) }}" class="btn btn-primary">去批量报名</a>
+  </div>
+  {% endfor %}
+</div>
+
+<script>
+document.querySelectorAll('.confirm-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var rid = this.dataset.rid;
+    if (!confirm('确认该学生报名？')) return;
+    fetch('{{ url_for("activity.confirm_registration", aid=activity.id, rid=0) }}'.replace('/0', '/' + rid), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    }).then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.code === 0) { location.reload(); }
+        else { alert(d.msg); }
+      });
+  });
+});
+
+document.querySelectorAll('.cancel-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var rid = this.dataset.rid;
+    if (!confirm('确认取消该学生的报名？')) return;
+    fetch('{{ url_for("activity.cancel_registration", aid=activity.id, rid=0) }}'.replace('/0', '/' + rid), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    }).then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.code === 0) { location.reload(); }
+        else { alert(d.msg); }
+      });
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}{% if activity %}编辑活动{% else %}创建活动{% endif %}{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4" style="max-width: 800px;">
+  <a href="{{ url_for('activity.index') }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回列表</a>
+  <h3>{% if activity %}编辑活动{% else %}创建活动{% endif %}</h3>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, msg in messages %}
+        <div class="alert alert-{{ 'danger' if category=='danger' else ('warning' if category=='warning' else 'success') }} alert-dismissible fade show">
+          {{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <form method="POST">
+    <div class="mb-3">
+      <label class="form-label">活动标题 <span class="text-danger">*</span></label>
+      <input name="title" class="form-control" value="{{ activity.title if activity else '' }}" placeholder="例：2025年秋季运动会" required>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">活动类型 <span class="text-danger">*</span></label>
+      <select name="activity_type" class="form-select">
+        {% for t in types %}
+        <option value="{{ t }}" {% if activity and activity.activity_type == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-6">
+        <label class="form-label">开始日期 <span class="text-danger">*</span></label>
+        <input name="start_date" type="date" class="form-control" value="{{ activity.start_date if activity else '' }}" required>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">结束日期</label>
+        <input name="end_date" type="date" class="form-control" value="{{ activity.end_date if activity else '' }}">
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">地点</label>
+      <input name="location" class="form-control" value="{{ activity.location if activity else '' }}" placeholder="例：学校田径场">
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">所属年级</label>
+      <select name="grade_id" class="form-select" onchange="updateClassSelection()">
+        <option value="">全校活动</option>
+        {% for g in grades %}
+        <option value="{{ g.id }}" {% if activity and activity.grade_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+        {% endfor %}
+      </select>
+      <small class="text-muted">选择具体年级或留空为全校活动</small>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">目标班级</label>
+      <div class="border p-2 rounded" style="max-height: 200px; overflow-y: auto;">
+        {% for c in classes %}
+        <div class="form-check">
+          <input class="form-check-input class-checkbox" type="checkbox" name="target_classes" value="{{ c.id }}"
+                 id="cls_{{ c.id }}" data-grade="{{ c.grade_id }}"
+                 {% if target_class_ids and c.id in target_class_ids %}checked{% endif %}>
+          <label class="form-check-label" for="cls_{{ c.id }}">{{ c.name }}</label>
+        </div>
+        {% endfor %}
+      </div>
+      <small class="text-muted">选择年级后自动勾选对应班级</small>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-6">
+        <label class="form-label">人数上限</label>
+        <input name="max_participants" type="number" class="form-control" value="{{ activity.max_participants if activity else 0 }}" min="0" placeholder="0 表示不限">
+        <small class="text-muted">0 表示不限人数</small>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">组织者</label>
+        <input name="organizer" class="form-control" value="{{ activity.organizer if activity else '' }}" placeholder="例：德育处">
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">封面图片URL</label>
+      <input name="cover_image" class="form-control" value="{{ activity.cover_image if activity else '' }}" placeholder="输入图片URL或留空">
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">活动描述</label>
+      <textarea name="description" class="form-control" rows="5" placeholder="活动详细描述、注意事项等">{{ activity.description if activity else '' }}</textarea>
+    </div>
+
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">
+        {% if activity %}保存修改{% else %}创建活动{% endif %}
+      </button>
+      <a href="{{ url_for('activity.index') }}" class="btn btn-secondary">取消</a>
+    </div>
+  </form>
+</div>
+
+<script>
+function updateClassSelection() {
+    var gid = document.querySelector('[name="grade_id"]').value;
+    document.querySelectorAll('.class-checkbox').forEach(function(cb) {
+        if (gid === '' || cb.dataset.grade === gid) {
+            cb.checked = true;
+        } else {
+            cb.checked = false;
+        }
+    });
+}
+</script>
+{% endblock %}

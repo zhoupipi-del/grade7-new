@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}{% if action == 'add' %}添加学生{% else %}编辑学生{% endif %}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row justify-content-center">
+        <div class="col-md-10 col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-person-{% if action == 'add' %}plus{% else %}gear{% endif %} me-2"></i>
+                    {% if action == 'add' %}添加学生{% else %}编辑学生：{{ student.name }}{% endif %}
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        <!-- 基础信息 -->
+                        <h6 class="text-muted mb-3">基础信息</h6>
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-4">
+                                <label class="form-label">学号 <span class="text-danger">*</span></label>
+                                <input type="text" name="student_no" class="form-control" required
+                                       value="{{ student.student_no if student else '' }}"
+                                       placeholder="如：2024001">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">姓名 <span class="text-danger">*</span></label>
+                                <input type="text" name="name" class="form-control" required
+                                       value="{{ student.name if student else '' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">性别</label>
+                                <select name="gender" class="form-select">
+                                    <option value="男" {% if student and student.gender == '男' %}selected{% endif %}>男</option>
+                                    <option value="女" {% if student and student.gender == '女' %}selected{% endif %}>女</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">民族</label>
+                                <input type="text" name="ethnicity" class="form-control"
+                                       value="{{ student.ethnicity if student else '汉族' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">出生日期</label>
+                                <input type="date" name="birth_date" class="form-control"
+                                       value="{{ student.birth_date.strftime('%Y-%m-%d') if student and student.birth_date else '' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">全国学籍号</label>
+                                <input type="text" name="national_id" class="form-control"
+                                       value="{{ student.national_id if student else '' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">身份证号</label>
+                                <input type="text" name="id_card" class="form-control"
+                                       value="{{ student.id_card if student else '' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">家庭地址</label>
+                                <input type="text" name="address" class="form-control"
+                                       value="{{ student.address if student else '' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">小学毕业学校</label>
+                                <input type="text" name="primary_school" class="form-control"
+                                       value="{{ student.primary_school if student else '' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">标签（逗号分隔）</label>
+                                <input type="text" name="tags" class="form-control"
+                                       value="{{ student.tags if student else '' }}"
+                                       placeholder="如：班干部,优等生,重点关注">
+                                <div class="form-text">多个标签用逗号分隔</div>
+                            </div>
+                        </div>
+
+                        <!-- 家长信息 -->
+                        <h6 class="text-muted mb-3 mt-4">家长信息</h6>
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-4">
+                                <label class="form-label">家长1姓名</label>
+                                <input type="text" name="parent1_name" class="form-control"
+                                       value="{{ student.parent1_name if student else '' }}">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">与生源关系</label>
+                                <select name="parent1_relation" class="form-select">
+                                    <option value="父亲" {% if student and student.parent1_relation == '父亲' %}selected{% endif %}>父亲</option>
+                                    <option value="母亲" {% if student and student.parent1_relation == '母亲' %}selected{% endif %}>母亲</option>
+                                    <option value="祖父" {% if student and student.parent1_relation == '祖父' %}selected{% endif %}>祖父</option>
+                                    <option value="祖母" {% if student and student.parent1_relation == '祖母' %}selected{% endif %}>祖母</option>
+                                    <option value="其他" {% if student and student.parent1_relation == '其他' %}selected{% endif %}>其他</option>
+                                </select>
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label">家长1电话</label>
+                                <input type="tel" name="parent1_phone" class="form-control"
+                                       value="{{ student.parent1_phone if student else '' }}">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">家长2姓名</label>
+                                <input type="text" name="parent2_name" class="form-control"
+                                       value="{{ student.parent2_name if student else '' }}">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">与生源关系</label>
+                                <select name="parent2_relation" class="form-select">
+                                    <option value="母亲" {% if not student or student.parent2_relation == '母亲' %}selected{% endif %}>母亲</option>
+                                    <option value="父亲" {% if student and student.parent2_relation == '父亲' %}selected{% endif %}>父亲</option>
+                                    <option value="祖父" {% if student and student.parent2_relation == '祖父' %}selected{% endif %}>祖父</option>
+                                    <option value="祖母" {% if student and student.parent2_relation == '祖母' %}selected{% endif %}>祖母</option>
+                                    <option value="其他" {% if student and student.parent2_relation == '其他' %}selected{% endif %}>其他</option>
+                                </select>
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label">家长2电话</label>
+                                <input type="tel" name="parent2_phone" class="form-control"
+                                       value="{{ student.parent2_phone if student else '' }}">
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-between">
+                            <a href="{{ url_for('class.student_list') }}" class="btn btn-secondary">取消</a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-check-lg"></i> 保存
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

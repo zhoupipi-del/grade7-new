@@ -1,0 +1,135 @@
+<div class="d-flex align-items-center mb-3">
+  <a href="{{ url_for('ai_analysis.index') }}" class="btn btn-outline-secondary btn-sm me-3">
+    <i class="bi bi-arrow-left me-1"></i> 返回
+  </a>
+  <h4 class="mb-0"><i class="bi bi-grid-3x3-gap-fill me-2"></i>统一仪表盘</h4>
+  <span class="text-muted ms-3 small">问卷 / 评估 / 预警 三合一视图</span>
+</div>
+
+<!-- 统计卡片 -->
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-2"><div class="card border-primary"><div class="card-body text-center py-2">
+    <div class="fs-4 fw-bold text-primary">{{ stats.total }}</div>
+    <div class="text-muted small">学生总数</div>
+  </div></div></div>
+  <div class="col-6 col-md-2"><div class="card border-info"><div class="card-body text-center py-2">
+    <div class="fs-4 fw-bold text-info">{{ stats.has_psych }}</div>
+    <div class="text-muted small">已筛查</div>
+  </div></div></div>
+  <div class="col-6 col-md-2"><div class="card border-success"><div class="card-body text-center py-2">
+    <div class="fs-4 fw-bold text-success">{{ stats.has_assessment }}</div>
+    <div class="text-muted small">已评估</div>
+  </div></div></div>
+  <div class="col-6 col-md-2"><div class="card border-warning"><div class="card-body text-center py-2">
+    <div class="fs-4 fw-bold text-warning">{{ stats.has_risk }}</div>
+    <div class="text-muted small">有预警</div>
+  </div></div></div>
+  <div class="col-6 col-md-2"><div class="card border-danger"><div class="card-body text-center py-2">
+    <div class="fs-4 fw-bold text-danger">{{ stats.red }}</div>
+    <div class="text-muted small">综合高风险</div>
+  </div></div></div>
+  <div class="col-6 col-md-2"><div class="card border-secondary"><div class="card-body text-center py-2">
+    <div class="fs-4 fw-bold text-secondary">{{ stats.yellow }}</div>
+    <div class="text-muted small">综合中风险</div>
+  </div></div></div>
+</div>
+
+<!-- 学生列表 -->
+<div class="card">
+  <div class="card-header d-flex align-items-center">
+    <strong>学生综合视图</strong>
+    <div class="ms-auto small">
+      <span class="badge bg-danger me-1">红</span>高风险
+      <span class="badge bg-warning me-1">黄</span>中风险
+      <span class="badge bg-success me-1">绿</span>低风险
+    </div>
+  </div>
+  <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+    <table class="table table-sm table-hover mb-0">
+      <thead class="table-light sticky-top">
+        <tr>
+          <th style="width:40px">#</th>
+          <th>学生</th>
+          <th>班级</th>
+          <th class="text-center">问卷<br><small class="text-muted">MSSMHS-55</small></th>
+          <th class="text-center">心理评估<br><small class="text-muted">专业量表</small></th>
+          <th class="text-center">AI预警<br><small class="text-muted">行为数据</small></th>
+          <th class="text-center">综合<br><small class="text-muted">风险</small></th>
+          <th class="text-center">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for d in students %}
+      <tr class="{% if d.combined_risk == 'red' %}table-danger{% elif d.combined_risk == 'yellow' %}table-warning{% endif %}">
+        <td>{{ loop.index }}</td>
+        <td>
+          <strong>{{ d.student.name }}</strong>
+          {% if d.combined_risk == 'red' %}
+          <span class="badge bg-danger ms-1">⚠</span>
+          {% elif d.combined_risk == 'yellow' %}
+          <span class="badge bg-warning text-dark ms-1">!</span>
+          {% endif %}
+        </td>
+        <td class="small">{{ d.class_name }}</td>
+        <td class="text-center">
+          {% if d.psych_score is not none %}
+            {% if d.psych_risk == 'high' %}
+            <span class="badge bg-danger">{{ d.psych_score }}</span>
+            {% elif d.psych_risk == 'medium' %}
+            <span class="badge bg-warning text-dark">{{ d.psych_score }}</span>
+            {% else %}
+            <span class="badge bg-success">{{ d.psych_score }}</span>
+            {% endif %}
+          {% else %}
+          <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td class="text-center">
+          {% if d.assessment %}
+            {% if d.assessment.risk_level == 'high' %}
+            <span class="badge bg-danger">{{ d.assessment.scale_name or '评估' }}</span>
+            {% elif d.assessment.risk_level == 'medium' %}
+            <span class="badge bg-warning text-dark">{{ d.assessment.scale_name or '评估' }}</span>
+            {% else %}
+            <span class="badge bg-success">{{ d.assessment.scale_name or '评估' }}</span>
+            {% endif %}
+          {% else %}
+          <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td class="text-center">
+          {% if d.risk_record %}
+            {% if d.risk_record.risk_level == 'red' %}
+            <span class="badge bg-danger">{{ d.risk_record.warning_count }}条</span>
+            {% elif d.risk_record.risk_level == 'yellow' %}
+            <span class="badge bg-warning text-dark">{{ d.risk_record.warning_count }}条</span>
+            {% else %}
+            <span class="badge bg-success">正常</span>
+            {% endif %}
+          {% else %}
+          <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td class="text-center">
+          {% if d.combined_risk == 'red' %}
+          <span class="badge bg-danger">高风险</span>
+          {% elif d.combined_risk == 'yellow' %}
+          <span class="badge bg-warning text-dark">中风险</span>
+          {% else %}
+          <span class="badge bg-success">低风险</span>
+          {% endif %}
+        </td>
+        <td class="text-center">
+          <a href="{{ url_for('ai_analysis.dashboard_detail', sid=d.student.id) }}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-eye me-1"></i>详情
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not students %}
+      <tr><td colspan="8" class="text-center py-5 text-muted">暂无学生数据</td></tr>
+      {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>

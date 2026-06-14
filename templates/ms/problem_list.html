@@ -1,0 +1,122 @@
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-exclamation-triangle text-warning me-2"></i>问题学生管理</h4>
+  <a href="{{ url_for('ms.create_problem') }}" class="btn btn-primary btn-sm">
+    <i class="bi bi-plus-lg me-1"></i> 新建档案
+  </a>
+</div>
+
+<!-- 筛选 -->
+<form method="GET" class="row g-2 mb-3">
+  <div class="col-auto">
+    <select name="grade_id" class="form-select form-select-sm" style="width:140px;" onchange="this.form.submit()">
+      <option value="">全部年级</option>
+      {% for g in grades %}
+      <option value="{{ g.id }}" {% if request.args.get('grade_id')|int == g.id %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <select name="level" class="form-select form-select-sm" style="width:110px;" onchange="this.form.submit()">
+      <option value="">全部等级</option>
+      <option value="yellow" {% if request.args.get('level') == 'yellow' %}selected{% endif %}>🟡 黄色预警</option>
+      <option value="red" {% if request.args.get('red') == 'red' %}selected{% endif %}>🔴 红色预警</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <a href="{{ url_for('ms.problem_list') }}" class="btn btn-outline-secondary btn-sm">清除筛选</a>
+  </div>
+</form>
+
+{% if records.items %}
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>学生</th>
+        <th>班级</th>
+        <th>年级</th>
+        <th>类别</th>
+        <th>预警</th>
+        <th>状态</th>
+        <th>描述</th>
+        <th>更新时间</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in records.items %}
+      <tr>
+        <td>
+          <strong>{{ r.student.name if r.student else "?" }}</strong>
+        </td>
+        <td>{{ r.student.class_.name if r.student and r.student.class_ else "?" }}</td>
+        <td>{{ r.student.class_.grade.name if r.student and r.student.class_ and r.student.class_.grade else "?" }}</td>
+        <td>
+          {% set cat_colors = {"心理": "info", "家庭": "warning", "行为": "danger", "学习": "primary", "身体": "secondary", "混合": "dark"} %}
+          <span class="badge bg-{{ cat_colors.get(r.category, 'secondary') }}">{{ r.category }}</span>
+        </td>
+        <td>
+          {% if r.level == "red" %}
+          <span class="badge bg-danger">🔴 红色</span>
+          {% else %}
+          <span class="badge bg-warning text-dark">🟡 黄色</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if r.status == "active" %}
+          <span class="badge bg-warning text-dark">跟踪中</span>
+          {% elif r.status == "monitoring" %}
+          <span class="badge bg-info">观察中</span>
+          {% elif r.status == "resolved" %}
+          <span class="badge bg-success">已结案</span>
+          {% else %}
+          <span class="badge bg-secondary">{{ r.status }}</span>
+          {% endif %}
+        </td>
+        <td>
+          <small class="text-muted" title="{{ r.description }}">{{ r.description[:30] }}{% if r.description|length > 30 %}...{% endif %}</small>
+        </td>
+        <td><small class="text-muted">{{ r.updated_at.strftime("%m-%d %H:%M") if r.updated_at else "" }}</small></td>
+        <td>
+          <a href="{{ url_for('ms.problem_detail', pid=r.id) }}" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-eye"></i> 详情
+          </a>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 分页 -->
+{% if records.pages > 1 %}
+<nav>
+  <ul class="pagination pagination-sm justify-content-center">
+    <li class="page-item {% if not records.has_prev %}disabled{% endif %}">
+      <a class="page-link" href="?page={{ records.prev_num }}&grade_id={{ request.args.get('grade_id','') }}&level={{ request.args.get('level','') }}">&laquo;</a>
+    </li>
+    {% for p in records.iter_pages() %}
+      {% if p %}
+      <li class="page-item {% if p == records.page %}active{% endif %}">
+        <a class="page-link" href="?page={{ p }}&grade_id={{ request.args.get('grade_id','') }}&level={{ request.args.get('level','') }}">{{ p }}</a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">...</span></li>
+      {% endif %}
+    {% endfor %}
+    <li class="page-item {% if not records.has_next %}disabled{% endif %}">
+      <a class="page-link" href="?page={{ records.next_num }}&grade_id={{ request.args.get('grade_id','') }}&level={{ request.args.get('level','') }}">&raquo;</a>
+    </li>
+  </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-people display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无问题学生档案</p>
+  <a href="{{ url_for('ms.create_problem') }}" class="btn btn-primary mt-2">
+    <i class="bi bi-plus-lg me-1"></i> 新建档案
+  </a>
+</div>
+{% endif %}

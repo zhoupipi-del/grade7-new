@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ "编辑年级" if grade else "新建年级" }} — 德育平台{% endblock %}
+{% block content %}
+<div class="container-fluid" style="max-width:600px">
+  <div class="mb-3">
+    <a href="{{ url_for('ms.grade_manage') }}" class="text-decoration-none">&larr; 返回年级列表</a>
+  </div>
+  <h3 class="mb-3">{{ "编辑年级" if grade else "新建年级" }}</h3>
+
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in msgs %}
+      <div class="alert alert-{{ 'danger' if cat=='danger' else ('warning' if cat=='warning' else 'success') }} alert-dismissible fade show">
+        {{ msg }}<button class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endwith %}
+
+  <div class="card">
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('ms.grade_edit', gid=grade.id) if grade else url_for('ms.grade_create') }}">
+        <div class="mb-3">
+          <label class="form-label fw-bold">年级名称 <span class="text-danger">*</span></label>
+          <input name="name" class="form-control" required
+                 value="{{ grade.name if grade else '' }}" placeholder="如：2025级初一">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold">排序权重</label>
+          <input name="sort_order" type="number" class="form-control" style="width:120px"
+                 value="{{ grade.sort_order if grade else 0 }}">
+          <div class="form-text">数字越大越靠前</div>
+        </div>
+        <div>
+          <button class="btn btn-primary"><i class="bi bi-check-lg"></i> {{ "保存修改" if grade else "创建年级" }}</button>
+          <a href="{{ url_for('ms.grade_manage') }}" class="btn btn-outline-secondary ms-2">取消</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

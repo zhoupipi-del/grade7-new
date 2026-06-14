@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}心理健康评估 - 问题库管理{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <h2>📋 心理健康评估问题库管理</h2>
+    <p class="text-muted">管理心理健康评估的量表和问题</p>
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('mental_health.index') }}">评估记录</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link active" href="{{ url_for('mental_health.questions') }}">问题库管理</a>
+        </li>
+    </ul>
+
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <input type="text" class="form-control" placeholder="搜索量表或问题..." id="searchInput">
+        </div>
+        <div class="col-md-6 text-right">
+            <button class="btn btn-primary" onclick="showAddScaleModal()">
+                <i class="fas fa-plus"></i> 添加量表
+            </button>
+            <button class="btn btn-success" onclick="showAddQuestionModal()">
+                <i class="fas fa-plus-circle"></i> 添加问题
+            </button>
+        </div>
+    </div>
+
+    <!-- 量表列表 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">量表列表</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-hover" id="scaleTable">
+                <thead>
+                    <tr>
+                        <th>量表名称</th>
+                        <th>问题数量</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for scale_name, questions in questions_by_scale.items() %}
+                    <tr>
+                        <td><strong>{{ scale_name }}</strong></td>
+                        <td>{{ questions|length }}</td>
+                        <td>
+                            {% if questions[0].is_active %}
+                            <span class="badge badge-success">启用</span>
+                            {% else %}
+                            <span class="badge badge-secondary">停用</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-info" onclick="viewScale('{{ scale_name }}')">
+                                <i class="fas fa-eye"></i> 查看
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteScale('{{ scale_name }}')">
+                                <i class="fas fa-trash"></i> 删除
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center text-muted">暂无量表数据</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 问题列表 -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">问题列表</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-hover" id="questionTable">
+                <thead>
+                    <tr>
+                        <th>量表</th>
+                        <th>维度</th>
+                        <th>题号</th>
+                        <th>题目内容</th>
+                        <th>选项类型</th>
+                        <th>反向计分</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for q in questions %}
+                    <tr>
+                        <td>{{ q.scale_name }}</td>
+                        <td>{{ q.dimension }}</td>
+                        <td>{{ q.question_no }}</td>
+                        <td>{{ q.question_text[:50] }}{% if q.question_text|length > 50 %}...{% endif %}</td>
+                        <td>
+                            {% if q.option_type == '4point' %}
+                            4级评分
+                            {% elif q.option_type == '5point' %}
+                            5级评分
+                            {% elif q.option_type == 'yes_no' %}
+                            是否
+                            {% else %}
+                            文字
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if q.reverse_scoring %}
+                            <span class="badge badge-warning">是</span>
+                            {% else %}
+                            <span class="badge badge-secondary">否</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if q.is_active %}
+                            <span class="badge badge-success">启用</span>
+                            {% else %}
+                            <span class="badge badge-secondary">停用</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-primary" onclick="editQuestion({{ q.id }})">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteQuestion({{ q.id }})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center text-muted">暂无问题数据</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 添加量表模态框 -->
+<div class="modal fade" id="addScaleModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">添加量表</h5>
+                <button type="button" class="close" data-dismiss="modal">&times;</button>
+            </div>
+            <form method="POST" action="{{ url_for('mental_health.add_scale') }}">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>量表名称 *</label>
+                        <input type="text" class="form-control" name="scale_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>说明</label>
+                        <textarea class="form-control" name="description" rows="3"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function showAddScaleModal() {
+    $('#addScaleModal').modal('show');
+}
+
+function showAddQuestionModal() {
+    // TODO: 实现添加问题模态框
+    alert('功能开发中...');
+}
+
+function viewScale(scaleName) {
+    // TODO: 实现查看量表详情
+    alert('查看量表: ' + scaleName);
+}
+
+function editQuestion(qid) {
+    // TODO: 实现编辑问题
+    alert('编辑问题: ' + qid);
+}
+
+function deleteQuestion(qid) {
+    if (confirm('确定删除此问题？')) {
+        window.location.href = '/mental-health/questions/delete/' + qid;
+    }
+}
+
+function deleteScale(scaleName) {
+    if (confirm('确定删除此量表及其所有问题？')) {
+        window.location.href = '/mental-health/scales/delete/' + encodeURIComponent(scaleName);
+    }
+}
+
+// 搜索功能
+$('#searchInput').on('keyup', function() {
+    var value = $(this).val().toLowerCase();
+    $('#questionTable tbody tr').filter(function() {
+        $(this).toggle($(this).text().toLowerCase().indexOf(value) > -1)
+    });
+});
+</script>
+{% endblock %}

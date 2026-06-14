@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}家校沟通记录追踪{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <h2>💬 家校沟通记录追踪</h2>
+    <p class="text-muted">统计和分析家校沟通效果，提升沟通效率</p>
+
+    <!-- 时间筛选 -->
+    <form method="get" class="form-inline mb-3">
+        <label>时间范围：</label>
+        <select name="days" class="form-control mx-2" onchange="this.form.submit()">
+            <option value="7" {% if days==7 %}selected{% endif %}>最近7天</option>
+            <option value="30" {% if days==30 %}selected{% endif %}>最近30天</option>
+            <option value="90" {% if days==90 %}selected{% endif %}>最近90天</option>
+            <option value="365" {% if days==365 %}selected{% endif %}>最近1年</option>
+        </select>
+    </form>
+
+    <!-- 统计卡片 -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5>总消息数</h5>
+                    <h3>{{ total_messages }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5>已读率</h5>
+                    <h3>{{ read_rate }}%</h3>
+                    <small>{{ read_count }}/{{ total_messages }}</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5>回复率</h5>
+                    <h3>{{ reply_rate }}%</h3>
+                    <small>{{ replied_count }}/{{ total_messages }}</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-white">
+                <div class="card-body">
+                    <h5>平均响应时间</h5>
+                    <h3>{{ avg_response_time }}h</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 图表：按天统计消息量 -->
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">📈 消息趋势（近{{ days }}天）</div>
+                <div class="card-body">
+                    <canvas id="trendChart" height="100"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">📊 按分类统计</div>
+                <div class="card-body">
+                    <canvas id="categoryChart" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 未读超时消息 -->
+    {% if overdue_messages %}
+    <div class="card mb-4">
+        <div class="card-header bg-danger text-white">
+            ⚠️ 未读超时消息（超过24小时）
+            <span class="badge badge-light">{{ overdue_messages|length }}</span>
+        </div>
+        <div class="card-body">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>收件人</th>
+                        <th>标题</th>
+                        <th>分类</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for msg in overdue_messages %}
+                    <tr>
+                        <td>{{ msg.created_at.strftime('%m-%d %H:%M') }}</td>
+                        <td>{{ msg.recipient.display_name if msg.recipient else '未知' }}</td>
+                        <td>{{ msg.title }}</td>
+                        <td><span class="badge badge-secondary">{{ msg.category or '通用' }}</span></td>
+                        <td>
+                            <button class="btn btn-sm btn-warning" onclick="sendReminder({{ msg.id }})">
+                                <i class="fas fa-bell"></i> 提醒
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 按分类详细统计 -->
+    <div class="card">
+        <div class="card-header">📋 按分类详细统计</div>
+        <div class="card-body">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>分类</th>
+                        <th>总数</th>
+                        <th>已读</th>
+                        <th>已回复</th>
+                        <th>已读率</th>
+                        <th>回复率</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cat, stats in category_stats.items() %}
+                    <tr>
+                        <td><strong>{{ cat }}</strong></td>
+                        <td>{{ stats.total }}</td>
+                        <td>{{ stats.read }}</td>
+                        <td>{{ stats.replied }}</td>
+                        <td>
+                            {% set read_rate = (stats.read / stats.total * 100) | round(1) if stats.total > 0 else 0 %}
+                            <div class="progress">
+                                <div class="progress-bar bg-success" style="width: {{ read_rate }}%">
+                                    {{ read_rate }}%
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            {% set reply_rate = (stats.replied / stats.total * 100) | round(1) if stats.total > 0 else 0 %}
+                            <div class="progress">
+                                <div class="progress-bar bg-info" style="width: {{ reply_rate }}%">
+                                    {{ reply_rate }}%
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted">暂无数据</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Chart.js loaded from base.html via static/js/chart.umd.min.js -->
+<script>
+// 消息趋势图
+fetch('/communication/api/stats?days={{ days }}')
+    .then(r => r.json())
+    .then(data => {
+        new Chart(document.getElementById('trendChart'), {
+            type: 'line',
+            data: {
+                labels: data.date_labels,
+                datasets: [
+                    { label: '发送消息', data: data.msg_counts, borderColor: 'blue', fill: false },
+                    { label: '已读', data: data.read_counts, borderColor: 'green', fill: false },
+                    { label: '已回复', data: data.reply_counts, borderColor: 'orange', fill: false },
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+
+        // 分类饼图
+        // TODO: 从 category_stats 生成饼图
+    });
+
+// 发送提醒
+function sendReminder(msgId) {
+    if (!confirm('确定发送提醒？')) return;
+
+    fetch(`/communication/api/remind/${msgId}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                alert('提醒已发送！');
+            } else {
+                alert('发送失败：' + data.error);
+            }
+        });
+}
+</script>
+{% endblock %}

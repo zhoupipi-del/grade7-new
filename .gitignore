@@ -1,0 +1,104 @@
+# ── Python ──────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+
+# ── 虚拟环境 ────────────────────────────────────
+venv/
+env/
+ENV/
+
+# ── 环境变量（含密钥，绝不允许提交）──────────────
+.env
+.env.*
+!.env.example
+
+# ── 日志 ────────────────────────────────────────
+logs/
+*.log
+
+# ── 上传文件 ────────────────────────────────────
+uploads/
+*.sqlite
+*.sqlite-journal
+*.db
+
+# ── 根目录冗余/临时文件 ──────────────────────────
+grade7-new.service
+migration_*.sql
+reset_*.sql
+test_deploy.txt
+代码分析报告*.md
+系统结构报告.md
+
+# ── 根级文档（已有 docs/ 版本，排除冗余）──────────
+/系统说明书.md
+/overview.md
+
+# ── IDE ─────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.code-workspace
+
+# ── OS ──────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── 开发脚本（根目录一次性工具，不入库）─────────
+fix_*.py
+fix_*.ps1
+reset_*.py
+test_*.py
+verify_*.py
+audit_routes*.py
+smoke_test_*.py
+debug_*.py
+append_*.py
+vnc_*.py
+vnc_*.sh
+vnc_*.ps1
+inject_*.py
+_deploy_*.py
+_gen_*.py
+deploy_all.py
+deploy_via_http.py
+final_audit_report.py
+gen_placeholders.py
+seed_features.py
+markov_engine_debug.py
+migrate.py
+migrate_category.py
+migrate_feature_attribution.py
+
+# ── 开发目录（不含生产代码）──────────────────────
+deploy_scripts/
+scripts/
+tools/
+
+# ── 审计/报告产物（不入库）─────────────────────────
+audit_data.json
+audit_routes_output*.txt
+*_REPORT*.md
+
+# ── C# 手册生成器编译产物 ────────────────────────
+docs/generate_manual/bin/
+docs/generate_manual/obj/
+
+# ── 蓝图调试/示例文件（滞留生产目录）──────────────
+blueprints/markov_debug.py
+blueprints/markov_test.py
+blueprints/markov_test2.py
+blueprints/markov_clean.py
+blueprints/_briefing_endpoint.py
+blueprints/example_permissions.py
+
+# ── 沙箱部署产物（不入库）───────────────────────
+deploy_pkg/
+cloud_audit_*/

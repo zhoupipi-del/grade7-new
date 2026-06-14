@@ -1,0 +1,408 @@
+{% extends "base.html" %}
+{% block title %}标签管理{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap-icons.css') }}">
+<style>
+    .tag-badge {
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .tag-badge:hover {
+        transform: scale(1.1);
+        opacity: 0.85;
+    }
+    .tag-color-0 { background-color: #0d6efd; }
+    .tag-color-1 { background-color: #6610f2; }
+    .tag-color-2 { background-color: #6f42c1; }
+    .tag-color-3 { background-color: #d63384; }
+    .tag-color-4 { background-color: #dc3545; }
+    .tag-color-5 { background-color: #fd7e14; }
+    .tag-color-6 { background-color: #ffc107; color: #000; }
+    .tag-color-7 { background-color: #198754; }
+    .tag-color-8 { background-color: #20c997; }
+    .tag-color-9 { background-color: #0dcaf0; }
+    .tag-color-10 { background-color: #adb5bd; }
+    .tag-color-11 { background-color: #6c757d; }
+    .tag-color-12 { background-color: #343a40; }
+    .inline-edit-row {
+        background-color: #f8f9fa;
+    }
+    .batch-bar {
+        position: sticky;
+        bottom: 0;
+        z-index: 100;
+    }
+    .student-checkbox {
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- 页面标题 -->
+    <div class="row mb-4">
+        <div class="col">
+            <h2 class="mb-0">
+                <i class="bi bi-tags-fill text-primary"></i> 标签管理
+            </h2>
+            <p class="text-muted mb-0 mt-1">为学生打标签，支持批量操作和快速筛选</p>
+        </div>
+    </div>
+
+    <!-- 筛选栏 -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="GET" action="{{ url_for('tags.index') }}" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label fw-bold">班级筛选</label>
+                    <select name="class_id" class="form-select">
+                        <option value="">全部班级</option>
+                        {% for cls in classes %}
+                        <option value="{{ cls.id }}" {% if class_id == cls.id %}selected{% endif %}>{{ cls.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold">标签筛选</label>
+                    <select name="tag_filter" class="form-select">
+                        <option value="">全部标签</option>
+                        {% for tag in all_tags %}
+                        <option value="{{ tag }}" {% if tag_filter == tag %}selected{% endif %}>{{ tag }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">姓名搜索</label>
+                    <input type="text" name="search" class="form-control" placeholder="输入学生姓名..." value="{{ search or '' }}">
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-search"></i> 筛选
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 批量操作栏（选中时显示） -->
+    <div class="card mb-3 batch-bar d-none" id="batchBar">
+        <div class="card-body py-2">
+            <div class="row g-2 align-items-center">
+                <div class="col-auto">
+                    <span class="fw-bold" id="selectedCount">已选择 0 名学生</span>
+                </div>
+                <div class="col-md-3">
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control" id="batchAddTag" placeholder="添加标签">
+                        <button class="btn btn-success btn-sm" onclick="batchAddTag()">
+                            <i class="bi bi-plus-circle"></i> 添加
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control" id="batchRemoveTag" placeholder="移除标签">
+                        <button class="btn btn-danger btn-sm" onclick="batchRemoveTag()">
+                            <i class="bi bi-dash-circle"></i> 移除
+                        </button>
+                    </div>
+                </div>
+                <div class="col-auto ms-auto">
+                    <button class="btn btn-outline-secondary btn-sm" onclick="clearSelection()">
+                        <i class="bi bi-x-circle"></i> 清除选择
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 学生表格 -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0" id="studentTable">
+                    <thead class="table-dark">
+                        <tr>
+                            <th class="text-center" style="width: 40px;">
+                                <input type="checkbox" class="form-check-input" id="selectAll" onchange="toggleSelectAll()">
+                            </th>
+                            <th style="width: 100px;">学号</th>
+                            <th style="width: 100px;">姓名</th>
+                            <th style="width: 100px;">班级</th>
+                            <th>标签</th>
+                            <th style="width: 80px;" class="text-center">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for student in pagination.items %}
+                        <tr data-student-id="{{ student.id }}">
+                            <td class="text-center">
+                                <input type="checkbox" class="form-check-input student-checkbox" value="{{ student.id }}" onchange="updateBatchBar()">
+                            </td>
+                            <td class="fw-bold">{{ student.student_no }}</td>
+                            <td>{{ student.name }}</td>
+                            <td>{{ student.class_.name if student.class_ else '-' }}</td>
+                            <td>
+                                {% if student.tags_list %}
+                                    {% for tag in student.tags_list %}
+                                    <a href="{{ url_for('tags.index', tag_filter=tag) }}"
+                                       class="badge tag-color-{{ loop.index0 % 13 }} tag-badge text-decoration-none me-1 mb-1 d-inline-block py-2 px-2"
+                                       title="点击筛选此标签">
+                                        {{ tag }}
+                                    </a>
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="text-muted fst-italic">暂无标签</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <button class="btn btn-sm btn-outline-primary" onclick="toggleInlineEdit({{ student.id }})" title="编辑标签">
+                                    <i class="bi bi-pencil-square"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        <!-- 行内编辑区域 -->
+                        <tr class="inline-edit-row d-none" id="editRow{{ student.id }}">
+                            <td colspan="6" class="p-3">
+                                <form method="POST" action="{{ url_for('tags.update') }}" id="editForm{{ student.id }}">
+                                    <input type="hidden" name="student_id" value="{{ student.id }}">
+                                    <input type="hidden" name="next" value="{{ request.url }}">
+                                    <div class="row g-2 align-items-center">
+                                        <div class="col-md-5">
+                                            <label class="form-label small fw-bold mb-1">当前标签（逗号分隔）</label>
+                                            <textarea name="tags" class="form-control form-control-sm" rows="2"
+                                                      placeholder="例如：班长, 三好学生, 体育特长">{{ (student.tags_list | join(', ')) }}</textarea>
+                                        </div>
+                                        <div class="col-md-5">
+                                            <label class="form-label small fw-bold mb-1">快速添加常用标签</label>
+                                            <div>
+                                                {% for tag in all_tags %}
+                                                    {% if tag not in student.tags_list %}
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary me-1 mb-1"
+                                                            onclick="addTagToTextarea({{ student.id }}, '{{ tag }}')">
+                                                        <i class="bi bi-plus"></i> {{ tag }}
+                                                    </button>
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                        <div class="col-md-2 text-end align-self-end">
+                                            <button type="submit" class="btn btn-success btn-sm w-100 mb-1">
+                                                <i class="bi bi-check-circle"></i> 保存
+                                            </button>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm w-100"
+                                                    onclick="toggleInlineEdit({{ student.id }})">
+                                                <i class="bi bi-x-circle"></i> 取消
+                                            </button>
+                                        </div>
+                                    </div>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center text-muted py-5">
+                                <i class="bi bi-inbox-fill" style="font-size: 2rem;"></i>
+                                <p class="mt-2 mb-0">暂无符合条件的学生</p>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 统计信息 + 分页 -->
+    <div class="d-flex justify-content-between align-items-center mt-3">
+        <span class="text-muted small">
+            共 {{ pagination.total }} 名学生
+            {% if all_tags %} · {{ all_tags|length }} 种标签{% endif %}
+        </span>
+        {% if pagination.pages > 1 %}
+        <nav aria-label="标签列表分页">
+            <ul class="pagination pagination-sm mb-0">
+                {% if pagination.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('tags.index', page=pagination.prev_num, tag_filter=tag_filter, class_id=class_id, search=search) }}">&laquo; 上一页</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">&laquo; 上一页</span></li>
+                {% endif %}
+
+                {% for p in pagination.iter_pages(left_edge=2, left_current=2, right_current=3, right_edge=2) %}
+                    {% if p %}
+                    <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('tags.index', page=p, tag_filter=tag_filter, class_id=class_id, search=search) }}">{{ p }}</a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+
+                {% if pagination.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('tags.index', page=pagination.next_num, tag_filter=tag_filter, class_id=class_id, search=search) }}">下一页 &raquo;</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">下一页 &raquo;</span></li>
+                {% endif %}
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 批量操作表单（隐藏） -->
+<form id="batchForm" method="POST" action="{{ url_for('tags.batch_tag') }}" style="display:none;">
+    <input type="hidden" name="next" value="{{ request.url }}">
+    <div id="batchStudentIds"></div>
+    <input type="hidden" name="add_tag" id="batchAddTagField">
+    <input type="hidden" name="remove_tag" id="batchRemoveTagField">
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 切换全选
+    function toggleSelectAll() {
+        const selectAll = document.getElementById('selectAll');
+        const checkboxes = document.querySelectorAll('.student-checkbox');
+        checkboxes.forEach(cb => {
+            cb.checked = selectAll.checked;
+        });
+        updateBatchBar();
+    }
+
+    // 更新批量操作栏
+    function updateBatchBar() {
+        const checkboxes = document.querySelectorAll('.student-checkbox:checked');
+        const batchBar = document.getElementById('batchBar');
+        const countEl = document.getElementById('selectedCount');
+
+        if (checkboxes.length > 0) {
+            batchBar.classList.remove('d-none');
+            countEl.textContent = '已选择 ' + checkboxes.length + ' 名学生';
+        } else {
+            batchBar.classList.add('d-none');
+            document.getElementById('selectAll').checked = false;
+        }
+    }
+
+    // 清除选择
+    function clearSelection() {
+        const checkboxes = document.querySelectorAll('.student-checkbox:checked');
+        checkboxes.forEach(cb => cb.checked = false);
+        updateBatchBar();
+    }
+
+    // 切换行内编辑
+    function toggleInlineEdit(studentId) {
+        const editRow = document.getElementById('editRow' + studentId);
+        if (editRow.classList.contains('d-none')) {
+            // 先关闭其他打开的编辑行
+            document.querySelectorAll('.inline-edit-row').forEach(row => {
+                row.classList.add('d-none');
+            });
+            editRow.classList.remove('d-none');
+        } else {
+            editRow.classList.add('d-none');
+        }
+    }
+
+    // 向 textarea 添加标签
+    function addTagToTextarea(studentId, tag) {
+        const form = document.getElementById('editForm' + studentId);
+        const textarea = form.querySelector('textarea[name="tags"]');
+        let current = textarea.value.trim();
+        if (current === '') {
+            textarea.value = tag;
+        } else {
+            // 避免重复添加
+            const tags = current.split(',').map(t => t.trim());
+            if (!tags.includes(tag)) {
+                textarea.value = current + ', ' + tag;
+            }
+        }
+        textarea.focus();
+    }
+
+    // 批量添加标签
+    function batchAddTag() {
+        const tag = document.getElementById('batchAddTag').value.trim();
+        if (!tag) {
+            alert('请输入要添加的标签');
+            return;
+        }
+        const selectedIds = getSelectedIds();
+        if (selectedIds.length === 0) {
+            alert('请先选择学生');
+            return;
+        }
+        submitBatchForm(selectedIds, tag, '');
+    }
+
+    // 批量移除标签
+    function batchRemoveTag() {
+        const tag = document.getElementById('batchRemoveTag').value.trim();
+        if (!tag) {
+            alert('请输入要移除的标签');
+            return;
+        }
+        const selectedIds = getSelectedIds();
+        if (selectedIds.length === 0) {
+            alert('请先选择学生');
+            return;
+        }
+        submitBatchForm(selectedIds, '', tag);
+    }
+
+    // 获取选中的学生ID
+    function getSelectedIds() {
+        const checkboxes = document.querySelectorAll('.student-checkbox:checked');
+        return Array.from(checkboxes).map(cb => cb.value);
+    }
+
+    // 提交批量操作表单
+    function submitBatchForm(studentIds, addTag, removeTag) {
+        const form = document.getElementById('batchForm');
+        const idsContainer = document.getElementById('batchStudentIds');
+
+        // 清空旧的 input
+        idsContainer.innerHTML = '';
+
+        // 添加 student_ids[]
+        studentIds.forEach(id => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'student_ids[]';
+            input.value = id;
+            idsContainer.appendChild(input);
+        });
+
+        document.getElementById('batchAddTagField').value = addTag;
+        document.getElementById('batchRemoveTagField').value = removeTag;
+
+        form.submit();
+    }
+
+    // 点击行（除 checkbox 和操作按钮外）也可触发编辑
+    document.addEventListener('DOMContentLoaded', function() {
+        const rows = document.querySelectorAll('#studentTable tbody tr:not(.inline-edit-row)');
+        rows.forEach(row => {
+            row.addEventListener('click', function(e) {
+                // 不响应 checkbox 和操作按钮的点击
+                if (e.target.closest('.student-checkbox') || e.target.closest('button') || e.target.closest('a')) {
+                    return;
+                }
+                const studentId = this.getAttribute('data-student-id');
+                if (studentId) {
+                    toggleInlineEdit(studentId);
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

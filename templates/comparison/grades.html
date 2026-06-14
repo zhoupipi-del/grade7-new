@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>年级对比分析 - 梨江中学</title>
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Microsoft YaHei', sans-serif; background:#f5f7fa; color:#333; padding:20px; }
+.container { max-width:1400px; margin:0 auto; }
+h1 { color:#2c3e50; margin-bottom:20px; }
+.card { background:#fff; border-radius:12px; padding:24px; margin-bottom:20px; box-shadow:0 2px 12px rgba(0,0,0,0.08); }
+.card-title { font-size:16px; font-weight:600; color:#2c3e50; margin-bottom:16px; }
+.selector { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+.selector select { flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
+.btn { padding:10px 24px; border:none; border-radius:8px; cursor:pointer; font-size:14px; transition:all 0.3s; }
+.btn-primary { background:linear-gradient(135deg, #667eea, #764ba2); color:#fff; }
+.btn-primary:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(102,126,234,0.4); }
+.chart-wrap { position:relative; height:350px; margin-bottom:20px; }
+.loading { text-align:center; padding:40px; color:#7f8c8d; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>📊 年级对比分析</h1>
+  
+  <div class="card">
+    <div class="card-title">选择年级（可多选）</div>
+    <div class="selector">
+      <select id="grade-select" multiple size="5" style="min-height:120px;">
+        <option value="">加载中...</option>
+      </select>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <button class="btn btn-primary" onclick="compareGrades()">开始对比</button>
+        <button class="btn" style="background:#6c757d; color:#fff;" onclick="selectAllGrades()">全选</button>
+        <button class="btn" style="background:#e9ecef; color:#333;" onclick="clearGradeSelection()">清空</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="result" class="loading">请选择至少2个年级进行对比...</div>
+</div>
+
+<script>
+// 加载年级列表
+fetch('/api/grades')
+  .then(r => r.json())
+  .then(data => {
+    const sel = document.getElementById('grade-select');
+    sel.innerHTML = '';
+    (data.grades || []).forEach(g => {
+      const opt = document.createElement('option');
+      opt.value = g.id;
+      opt.textContent = g.name;
+      sel.appendChild(opt);
+    });
+  });
+
+function selectAllGrades() {
+  const sel = document.getElementById('grade-select');
+  for (let i = 0; i < sel.options.length; i++) {
+    sel.options[i].selected = true;
+  }
+}
+
+function clearGradeSelection() {
+  const sel = document.getElementById('grade-select');
+  for (let i = 0; i < sel.options.length; i++) {
+    sel.options[i].selected = false;
+  }
+}
+
+function getSelectedGrades() {
+  const sel = document.getElementById('grade-select');
+  const selected = [];
+  for (let i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].selected) {
+      selected.push(sel.options[i].value);
+    }
+  }
+  return selected;
+}
+
+function compareGrades() {
+  const gradeIds = getSelectedGrades();
+  if (gradeIds.length < 2) {
+    alert('请至少选择2个年级进行对比');
+    return;
+  }
+  
+  const resultDiv = document.getElementById('result');
+  resultDiv.className = 'loading';
+  resultDiv.innerHTML = '⏳ 正在获取年级数据，进行对比分析...';
+  
+  const params = new URLSearchParams();
+  gradeIds.forEach(id => params.append('grade_ids[]', id));
+  
+  fetch('/comparison/api/grades?' + params.toString())
+    .then(r => r.json())
+    .then(data => {
+      renderComparison(data);
+    })
+    .catch(err => {
+      resultDiv.innerHTML = '❌ 对比失败：' + err.message;
+    });
+}
+
+function renderComparison(data) {
+  const resultDiv = document.getElementById('result');
+  resultDiv.className = '';
+  resultDiv.innerHTML = '';
+  
+  const grades = data.grades || [];
+  if (grades.length === 0) {
+    resultDiv.innerHTML = '<div class="card"><p class="text-muted">未找到对比数据</p></div>';
+    return;
+  }
+  
+  // 1. 成绩对比图表
+  let html = '<div class="card"><div class="card-title">成绩对比（' + (data.latest_exam_name || '暂无考试') + '）</div>';
+  html += '<div class="chart-wrap"><canvas id="scoreChart"></canvas></div></div>';
+  
+  // 2. 学生人数对比
+  html += '<div class="card"><div class="card-title">学生人数对比</div>';
+  html += '<div class="chart-wrap"><canvas id="studentChart"></canvas></div></div>';
+  
+  // 3. 违纪次数对比
+  html += '<div class="card"><div class="card-title">违纪次数对比（近30天）</div>';
+  html += '<div class="chart-wrap"><canvas id="disciplineChart"></canvas></div></div>';
+  
+  resultDiv.innerHTML = html;
+  
+  // 渲染图表
+  renderCharts(grades);
+}
+
+function renderCharts(grades) {
+  const labels = grades.map(g => g.grade_name);
+  
+  // 成绩对比
+  new Chart(document.getElementById('scoreChart'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '平均成绩',
+        data: grades.map(g => g.avg_score),
+        backgroundColor: 'rgba(102,126,234,0.6)',
+        borderColor: 'rgba(102,126,234,1)',
+        borderWidth: 1,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { beginAtZero: true, max: 100, ticks: { color: '#7f8c8d' }, grid: { color: '#f0f0f0' } },
+        x: { ticks: { color: '#7f8c8d' }, grid: { display: false } }
+      },
+      plugins: {
+        legend: { labels: { color: '#2c3e50' } }
+      }
+    }
+  });
+  
+  // 学生人数对比
+  new Chart(document.getElementById('studentChart'), {
+    type: 'pie',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: grades.map(g => g.student_count),
+        backgroundColor: [
+          'rgba(102,126,234,0.6)',
+          'rgba(118,75,162,0.6)',
+          'rgba(231,76,60,0.6)',
+          'rgba(46,204,113,0.6)',
+        ],
+        borderColor: [
+          'rgba(102,126,234,1)',
+          'rgba(118,75,162,1)',
+          'rgba(231,76,60,1)',
+          'rgba(46,204,113,1)',
+        ],
+        borderWidth: 1,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#2c3e50' } }
+      }
+    }
+  });
+  
+  // 违纪次数对比
+  new Chart(document.getElementById('disciplineChart'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '违纪次数',
+        data: grades.map(g => g.discipline_count),
+        backgroundColor: 'rgba(231,76,60,0.6)',
+        borderColor: 'rgba(231,76,60,1)',
+        borderWidth: 1,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { beginAtZero: true, ticks: { color: '#7f8c8d' }, grid: { color: '#f0f0f0' } },
+        x: { ticks: { color: '#7f8c8d' }, grid: { display: false } }
+      },
+      plugins: {
+        legend: { labels: { color: '#2c3e50' } }
+      }
+    }
+  });
+}
+</script>
+</body>
+</html>

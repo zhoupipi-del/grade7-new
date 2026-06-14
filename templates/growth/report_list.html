@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<style>
+    .risk-high { background-color: #f8d7da !important; }
+    .risk-medium { background-color: #fff3cd !important; }
+    .risk-low { background-color: #d1e7dd !important; }
+    .score-badge {
+        display: inline-block;
+        width: 60px;
+        height: 60px;
+        line-height: 60px;
+        border-radius: 50%;
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: white;
+    }
+    .score-high { background-color: #dc3545; }
+    .score-medium { background-color: #ffc107; color: #000; }
+    .score-low { background-color: #198754; }
+</style>
+
+<div class="container-fluid mt-4">
+    <div class="row mb-3">
+        <div class="col">
+            <h2><i class="bi bi-file-earmark-text"></i> {{ page_title }}</h2>
+            <p class="text-muted mb-0">
+                报告周期：{{ start_date.strftime("%Y-%m-%d") }} 至 {{ end_date.strftime("%Y-%m-%d") }}
+            </p>
+        </div>
+        <div class="col-auto">
+            <div class="btn-group" role="group">
+                <a href="?period=week" class="btn btn-outline-primary {% if period_type == 'week' %}active{% endif %}">本周</a>
+                <a href="?period=month" class="btn btn-outline-primary {% if period_type == 'month' %}active{% endif %}">本月</a>
+                <a href="?period=semester" class="btn btn-outline-primary {% if period_type == 'semester' %}active{% endif %}">本学期</a>
+            </div>
+            <a href="{{ url_for('growth.export_excel') }}" class="btn btn-success ms-2">
+                <i class="bi bi-file-excel"></i> 导出Excel
+            </a>
+        </div>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-white bg-primary">
+                <div class="card-body">
+                    <h5 class="card-title">总学生数</h5>
+                    <h2>{{ reports|length }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <h5 class="card-title">低风险</h5>
+                    <h2>{{ reports|selectattr('risk_level', 'equalto', 'low')|list|length }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-dark bg-warning">
+                <div class="card-body">
+                    <h5 class="card-title">中风险</h5>
+                    <h2>{{ reports|selectattr('risk_level', 'equalto', 'medium')|list|length }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-white bg-danger">
+                <div class="card-body">
+                    <h5 class="card-title">高风险</h5>
+                    <h2>{{ reports|selectattr('risk_level', 'equalto', 'high')|list|length }}</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 报告列表 -->
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>学生姓名</th>
+                            <th>班级</th>
+                            <th>综合评分</th>
+                            <th>风险等级</th>
+                            <th>学业</th>
+                            <th>违纪</th>
+                            <th>出勤</th>
+                            <th>心理</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for report in reports %}
+                        <tr class="
+                            {% if report.risk_level == 'high' %}risk-high
+                            {% elif report.risk_level == 'medium' %}risk-medium
+                            {% else %}risk-low
+                            {% endif %}
+                        ">
+                            <td>{{ loop.index }}</td>
+                            <td><strong>{{ report.student_name }}</strong></td>
+                            <td>{{ report.class_name }}</td>
+                            <td>
+                                <span class="score-badge 
+                                    {% if report.overall_score >= 70 %}score-low
+                                    {% elif report.overall_score >= 40 %}score-medium
+                                    {% else %}score-high
+                                    {% endif %}
+                                ">
+                                    {{ report.overall_score }}
+                                </span>
+                            </td>
+                            <td>
+                                {% if report.risk_level == 'high' %}
+                                    <span class="badge bg-danger">高风险</span>
+                                {% elif report.risk_level == 'medium' %}
+                                    <span class="badge bg-warning">中风险</span>
+                                {% else %}
+                                    <span class="badge bg-success">低风险</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% set grade = report.details.grade %}
+                                {% if grade.trend == 'rising' %}
+                                    <span class="text-success"><i class="bi bi-arrow-up"></i> 上升</span>
+                                {% elif grade.trend == 'declining' %}
+                                    <span class="text-danger"><i class="bi bi-arrow-down"></i> 下降</span>
+                                {% else %}
+                                    <span class="text-muted"><i class="bi bi-dash"></i> 稳定</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% set disc = report.details.discipline %}
+                                {% if disc.score == 20 %}
+                                    <span class="text-success">无违纪</span>
+                                {% else %}
+                                    <span class="text-danger">{% if disc.total %}{{ disc.total }}次{% else %}有违纪{% endif %}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% set att = report.details.attendance %}
+                                {% if att.absent == 0 and att.late == 0 %}
+                                    <span class="text-success">全勤</span>
+                                {% elif att.absent > 0 %}
+                                    <span class="text-danger">缺勤{{ att.absent }}次</span>
+                                {% else %}
+                                    <span class="text-warning">迟到{{ att.late }}次</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% set psych = report.details.psych %}
+                                {% if psych.score == 20 %}
+                                    <span class="text-success">正常</span>
+                                {% elif psych.score == 10 %}
+                                    <span class="text-warning">需注意</span>
+                                {% else %}
+                                    <span class="text-danger">高风险</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <a href="{{ url_for('growth.report_detail', sid=report.student_id, period=period_type) }}" 
+                                   class="btn btn-sm btn-primary">
+                                    <i class="bi bi-eye"></i> 查看详情
+                                </a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="10" class="text-center text-muted">暂无数据</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

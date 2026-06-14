@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}使用模板 - 梨江中学{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-send"></i> 使用模板：{{ template.name }}</h4>
+    <a href="{{ url_for('message_templates.index') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+</div>
+
+<!-- 模板信息 -->
+<div class="alert alert-light border">
+    <strong>模板：</strong>{{ template.name }}
+    &nbsp;<span class="badge bg-secondary">{{ template.category }}</span>
+    <br><strong>标题：</strong>{{ template.title_template }}
+</div>
+
+<form method="post" id="useForm">
+    <!-- 第一步：选择收件人 -->
+    <div class="card shadow-sm mb-3">
+        <div class="card-header bg-primary text-white">
+            <i class="bi bi-people"></i> 第一步：选择收件人
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label fw-bold">发送对象</label>
+                <select name="target_type" id="targetType" class="form-select w-auto"
+                        onchange="toggleTargetMode(this.value)">
+                    <option value="individual">选择个别学生</option>
+                    <option value="class_all">整班发送</option>
+                </select>
+            </div>
+
+            <!-- 班级筛选 -->
+            <div class="mb-3" id="classFilterRow">
+                <label class="form-label form-label-sm">班级</label>
+                <select name="class_id_filter" id="classFilter" class="form-select form-select-sm w-auto"
+                        onchange="loadStudents(this.value)">
+                    <option value="">— 选择班级 —</option>
+                    {% for cls in classes_list %}
+                    <option value="{{ cls.id }}"
+                            {{ 'selected' if selected_class_id==cls.id }}>
+                        {{ cls.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 学生多选（individual模式） -->
+            <div id="studentList" class="border rounded p-2" style="max-height:200px; overflow-y:auto;">
+                {% if students_list %}
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" id="selectAll"
+                           onclick="toggleAllStudents(this.checked)">
+                    <label class="form-check-label fw-bold" for="selectAll">全选本班</label>
+                </div>
+                <hr class="my-1">
+                {% for stu in students_list %}
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input student-cb" type="checkbox"
+                           name="student_ids" value="{{ stu.id }}" id="stu_{{ stu.id }}">
+                    <label class="form-check-label small" for="stu_{{ stu.id }}">
+                        {{ stu.student_no }} {{ stu.name }}
+                    </label>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="text-muted small mb-0">请先选择班级以加载学生列表</p>
+                {% endif %}
+            </div>
+
+            <!-- 整班发送隐藏字段 -->
+            <input type="hidden" name="send_class_id" id="sendClassId"
+                   value="{{ selected_class_id or '' }}">
+        </div>
+    </div>
+
+    <!-- 第二步：填写变量 -->
+    <div class="card shadow-sm mb-3">
+        <div class="card-header bg-warning text-dark">
+            <i class="bi bi-pencil-square"></i> 第二步：填写变量值
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                {% for var, desc in TEMPLATE_VARIABLES %}
+                <div class="col-md-4">
+                    <label class="form-label form-label-sm">
+                        <code>{{ var }}</code>
+                        <small class="text-muted">{{ desc }}</small>
+                    </label>
+                    <input type="text" name="{{ var.strip('{}') }}" class="form-control form-control-sm"
+                           value="{{ form_values.get(var.strip('{}'), '') }}"
+                           placeholder="输入{{ desc }}">
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 预览区域 -->
+    {% if preview_title or preview_content %}
+    <div class="card shadow-sm mb-3 border-primary">
+        <div class="card-header bg-primary text-white">
+            <i class="bi bi-eye"></i> 预览效果
+        </div>
+        <div class="card-body">
+            <h6 class="fw-bold">{{ preview_title }}</h6>
+            <pre class="bg-light p-3 rounded border" style="white-space:pre-wrap;">{{ preview_content }}</pre>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 操作按钮 -->
+    <div class="d-flex gap-2">
+        <button type="submit" name="action" value="preview"
+                class="btn btn-outline-warning btn-lg flex-grow-1">
+            <i class="bi bi-eye"></i> 预览效果
+        </button>
+        <button type="submit" name="action" value="send"
+                class="btn btn-success btn-lg flex-grow-1"
+                onclick="return confirm('确认发送？将向选中学生的绑定家长发送消息');">
+            <i class="bi bi-send-fill"></i> 确认发送
+        </button>
+    </div>
+</form>
+
+<script>
+function toggleTargetMode(mode) {
+    const studentList = document.getElementById("studentList");
+    const classFilter = document.getElementById("classFilter");
+    if (mode === "class_all") {
+        studentList.style.display = "none";
+        classFilter.style.display = "";
+    } else {
+        studentList.style.display = "";
+        classFilter.style.display = "";
+    }
+}
+
+function toggleAllStudents(checked) {
+    document.querySelectorAll(".student-cb").forEach(function(cb) {
+        cb.checked = checked;
+    });
+}
+
+function loadStudents(classId) {
+    // 更新整班发送的隐藏字段
+    document.getElementById("sendClassId").value = classId;
+    // 刷新页面加载该班学生
+    window.location.search = "?class_id=" + classId;
+}
+</script>
+{% endblock %}

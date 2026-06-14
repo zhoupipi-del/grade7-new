@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}评语详情 - {{ student.name if student else '未知' }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 900px;">
+    <!-- 标题栏 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1"><i class="bi bi-file-text"></i> 期末评语详情</h4>
+            <p class="text-muted mb-0 small">{{ comment.semester }} 学期</p>
+        </div>
+        <a href="{{ url_for('endterm_comment.comment_list') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> 返回列表
+        </a>
+    </div>
+
+    <!-- 学生信息卡片 -->
+    {% if student %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-auto">
+                    <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center"
+                         style="width:64px;height:64px;font-size:26px;">
+                        {{ student.name[:1] }}
+                    </div>
+                </div>
+                <div class="col">
+                    <h4 class="mb-1">
+                        {{ student.name }}
+                        {% if student.gender == '男' %}<i class="bi bi-gender-male text-primary"></i>{% elif student.gender == '女' %}<i class="bi bi-gender-female text-danger"></i>{% endif %}
+                        <span class="ms-2">
+                            {% if comment.status == 'published' %}
+                            <span class="badge bg-success">已发布</span>
+                            {% else %}
+                            <span class="badge bg-warning text-dark">草稿</span>
+                            {% endif %}
+                        </span>
+                    </h4>
+                    <p class="text-muted mb-0">
+                        学号：{{ student.student_no }} &nbsp;|&nbsp;
+                        班级：{{ (class_.name if class_ else '') or '-' }} &nbsp;|&nbsp;
+                        填写人：{{ comment.created_by or '-' }} &nbsp;|&nbsp;
+                        时间：{{ comment.created_at.strftime('%Y-%m-%d') if comment.created_at else '-' }}
+                    </p>
+                </div>
+                <div class="col-auto d-flex gap-2">
+                    <a href="{{ url_for('endterm_comment.create_form', cid=comment.id) }}"
+                       class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-pencil"></i> 编辑
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 综合评语 -->
+    <div class="card mb-3">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-chat-quote"></i> 综合评语</span>
+            <small class="opacity-75">Overall Comment</small>
+        </div>
+        <div class="card-body" style="min-height:80px;">
+            {% if comment.overall_comment %}
+            <pre style="white-space: pre-wrap; font-family: inherit; margin-bottom:0; line-height:1.8;">{{ comment.overall_comment }}</pre>
+            {% else %}
+            <p class="text-muted mb-0 fst-italic">暂无内容</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 优点 -->
+    <div class="card mb-3">
+        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-hand-thumbs-up"></i> 优点 / 突出表现</span>
+            <small class="opacity-75">Strengths</small>
+        </div>
+        <div class="card-body" style="min-height:60px;">
+            {% if comment.strengths %}
+            <pre style="white-space: pre-wrap; font-family: inherit; margin-bottom:0; line-height:1.8;">{{ comment.strengths }}</pre>
+            {% else %}
+            <p class="text-muted mb-0 fst-italic">暂无内容</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 待改进 -->
+    <div class="card mb-3">
+        <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-exclamation-circle"></i> 需改进之处</span>
+            <small class="opacity-75">Improvements</small>
+        </div>
+        <div class="card-body" style="min-height:60px;">
+            {% if comment.improvements %}
+            <pre style="white-space: pre-wrap; font-family: inherit; margin-bottom:0; line-height:1.8;">{{ comment.improvements }}</pre>
+            {% else %}
+            <p class="text-muted mb-0 fst-italic">暂无内容</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 教师建议 -->
+    <div class="card mb-3">
+        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-lightbulb"></i> 教师寄语/建议</span>
+            <small class="opacity-75">Teacher Suggestion</small>
+        </div>
+        <div class="card-body" style="min-height:60px;">
+            {% if comment.teacher_suggestion %}
+            <pre style="white-space: pre-wrap; font-family: inherit; margin-bottom:0; line-height:1.8;">{{ comment.teacher_suggestion }}</pre>
+            {% else %}
+            <p class="text-muted mb-0 fst-italic">暂无内容</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 元数据 -->
+    <div class="card">
+        <div class="card-body">
+            <div class="row text-muted small">
+                <div class="col-md-6">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-5">创建时间：</dt>
+                        <dd class="col-sm-7">{{ comment.created_at.strftime('%Y-%m-%d %H:%M:%S') if comment.created_at else '-' }}</dd>
+                        <dt class="col-sm-5">更新时间：</dt>
+                        <dd class="col-sm-7">{{ comment.updated_at.strftime('%Y-%m-%d %H:%M:%S') if comment.updated_at else '-' }}</dd>
+                    </dl>
+                </div>
+                <div class="col-md-6">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-5">填写教师：</dt>
+                        <dd class="col-sm-7">{{ creator.display_name if creator else (comment.created_by or '-') }}</dd>
+                        <dt class="col-sm-5">状态：</dt>
+                        <dd class="col-sm-7">
+                            {% if comment.status == 'published' %}
+                            <span class="badge bg-success">已发布（学生和家长可见）</span>
+                            {% else %}
+                            <span class="badge bg-warning text-dark">草稿（未发布）</span>
+                            {% endif %}
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

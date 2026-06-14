@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}梨江中学德育管理平台{% endblock %}</title>
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/bootstrap-icons.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- 顶部导航栏 — 按角色渲染 -->
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top" id="main-nav">
+        <div class="container-fluid">
+            <a class="navbar-brand fw-bold" href="/">
+                <i class="bi bi-building"></i> 梨江中学
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                {% if session.logged_in %}
+                    {% if session.role == 'ms_admin' %}
+                        {% include 'components/nav_ms.html' %}
+                    {% elif session.role == 'grade_leader' %}
+                        {% include 'components/nav_grade.html' %}
+                    {% elif session.role in ('class_teacher', 'teacher') %}
+                        {% include 'components/nav_class.html' %}
+                    {% elif session.role == 'parent' %}
+                        {% include 'components/nav_parent.html' %}
+                    {% else %}
+                        {% include 'components/nav_default.html' %}
+                    {% endif %}
+
+                    <!-- 全局搜索框 -->
+                    <form class="d-flex me-3" action="{{ url_for('search.search_page') }}" method="get">
+                        <input class="form-control me-2" type="search" name="q" placeholder="全局搜索..." aria-label="Search">
+                        <button class="btn btn-outline-light" type="submit"><i class="bi bi-search"></i></button>
+                    </form>
+
+                    <!-- 消息铃铛 + 用户菜单（同一组） -->
+                    <ul class="navbar-nav ms-auto">
+                        <!-- 消息铃铛 -->
+                        <li class="nav-item dropdown">
+                            <a class="nav-link position-relative" href="#" role="button"
+                               data-bs-toggle="dropdown" aria-expanded="false"
+                               title="消息中心">
+                                <i class="bi bi-bell fs-5"></i>
+                                <span id="nav-unread-badge"
+                                      class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none"
+                                      style="font-size:.6rem;">
+                                </span>
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end" style="min-width:220px;">
+                                <li><h6 class="dropdown-header">消息通知</h6></li>
+                                <li><a class="dropdown-item" href="{{ url_for('common.messages') }}">
+                                    <i class="bi bi-envelope"></i> 收件箱
+                                    <span id="nav-unread-text" class="d-none ms-1 badge bg-danger rounded-pill"></span>
+                                </a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('common.compose_message') }}">
+                                    <i class="bi bi-pencil"></i> 写消息
+                                </a></li>
+                                <li><a class="dropdown-item" href="{{ url_for('common.announcements') }}">
+                                    <i class="bi bi-megaphone"></i> 系统公告
+                                </a></li>
+                            </ul>
+                        </li>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                <i class="bi bi-person-circle"></i>
+                                {{ session.display_name }}
+                                <span class="badge bg-light text-dark ms-1">{{ ROLES.get(session.role, session.role) }}</span>
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}">
+                                    <i class="bi bi-key"></i> 修改密码</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">
+                                    <i class="bi bi-box-arrow-right"></i> 退出登录</a></li>
+                            </ul>
+                        </li>
+                    </ul>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <!-- Toast 通知容器 -->
+    <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index:1090;"></div>
+
+    <!-- 主内容区 -->
+    <main class="container-fluid py-3">
+        <!-- 闪存消息 -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- 底部 -->
+    <footer class="text-center text-muted py-3 mt-4 border-top">
+        <small>梨江中学德育管理平台 &copy; 2025</small>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}?v=20260610"></script>
+    <script src="{{ url_for('static', filename='js/chart.umd.min.js') }}?v=20260610"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=20260610"></script>
+    <!-- 全局JS错误保护：防止某一个脚本出错导致整个页面按钮失效 -->
+    <script>
+    window.__jsErrors = [];
+    window.addEventListener('error', function(e) {
+        console.warn('[JS Error] ' + e.message + ' @ ' + (e.filename || '') + ':' + e.lineno);
+        window.__jsErrors.push({msg: e.message, file: e.filename, line: e.lineno});
+    });
+    </script>
+    {% block extra_js %}{% endblock %}
+    {% if session.logged_in %}
+    <script>
+    /* ── SSE 实时消息推送 ── */
+    (function() {
+        const badge   = document.getElementById('nav-unread-badge');
+        const txt     = document.getElementById('nav-unread-text');
+        const toasts  = document.getElementById('toast-container');
+
+        /* 显示桌面 toast */
+        function showToast(title, from) {
+            const el = document.createElement('div');
+            el.className = 'toast align-items-center border-0 show';
+            el.style = 'background:#fff; margin-bottom:8px; box-shadow:0 2px 8px rgba(0,0,0,.15); min-width:280px;';
+            el.innerHTML = '<div class="d-flex">' +
+                '<div class="toast-body">' +
+                    '<strong><i class="bi bi-envelope-fill text-primary"></i> 新消息</strong><br>' +
+                    '<small class="text-muted">' + (from || '系统') + '：' + title + '</small>' +
+                '</div>' +
+                '<button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>' +
+            '</div>';
+            toasts.appendChild(el);
+            setTimeout(function() { el.remove(); }, 6000);
+        }
+
+        /* 更新红点 */
+        function updateBadge(cnt) {
+            if (badge) {
+                if (cnt > 0) { badge.textContent = cnt > 99 ? '99+' : String(cnt); badge.classList.remove('d-none'); }
+                else        { badge.classList.add('d-none'); }
+            }
+            if (txt) {
+                if (cnt > 0) { txt.textContent = cnt; txt.classList.remove('d-none'); }
+                else      { txt.classList.add('d-none'); }
+            }
+        }
+
+        /* 首次加载：拉一次未读数 */
+        fetch('{{ url_for("common.api_unread_count") }}')
+            .then(function(r) { return r.json(); })
+            .then(function(d) { updateBadge(d.count || 0); })
+            .catch(function() {});
+
+        /* 建立 SSE 连接 */
+        const es = new EventSource('{{ url_for("common.sse_events") }}');
+        es.onmessage = function(e) {
+            try {
+                const data = JSON.parse(e.data);
+                if (data.type === 'new_message') {
+                    const cur = parseInt((badge && badge.textContent) || '0');
+                    updateBadge(cur + 1);
+                    showToast(data.msg.title, data.msg.from);
+                }
+            } catch (ex) {}
+        };
+        es.onerror = function() { /* EventSource 自动重连 */ };
+    })();
+    </script>
+    {% endif %}
+</body>
+</html>

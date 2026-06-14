@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}批量评分 - 梨江中学综合素质评价{% endblock %}
+
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-grid-3x3-gap me-2"></i>批量评分</h4>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="GET" class="d-flex align-items-center gap-2 flex-wrap">
+      <label class="form-label fw-bold mb-0">选择评价指标：</label>
+      <select name="indicator_id" class="form-select" style="width:auto;min-width:200px;"
+              onchange="this.form.submit()">
+        {% for ind in all_l2 %}
+        <option value="{{ ind.id }}"
+          {% if selected_indicator and selected_indicator.id == ind.id %}selected{% endif %}>
+          [{{ DIMENSION_NAMES.get(ind.dimension, '') }}] {{ ind.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+</div>
+
+{% if selected_indicator and students %}
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <strong>
+      当前指标：<span class="text-primary">{{ selected_indicator.name }}</span>
+      （{{ selected_indicator.max_score|int }}分制）
+    </strong>
+  </div>
+  <form method="POST" id="batchForm">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th width="40">#</th>
+            <th width="100">学号</th>
+            <th>姓名</th>
+            <th width="120">分数 (0-{{ selected_indicator.max_score|int }})</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for stu in students %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ stu.student_no }}</td>
+          <td><strong>{{ stu.name }}</strong></td>
+          <td>
+            <input type="number" name="score_{{ stu.id }}"
+                   class="form-control form-control-sm"
+                   min="0" max="{{ selected_indicator.max_score|int }}" step="0.5"
+                   value="{{ batch_scores.get(stu.id, '') }}"
+                   placeholder="0">
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer">
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-check-lg me-1"></i>批量保存（共 {{ students|length }} 人）
+      </button>
+    </div>
+  </form>
+</div>
+{% elif not students %}
+<div class="alert alert-warning">当前班级暂无学生数据。</div>
+{% else %}
+<div class="alert alert-info">请先选择一个评价指标开始批量评分。</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+{% block title %}{{ student.name }} - 成长报告{% endblock %}
+
+{% block content %}
+<style>
+    .score-circle {
+        width: 120px;
+        height: 120px;
+        line-height: 120px;
+        border-radius: 50%;
+        font-size: 2rem;
+        font-weight: bold;
+        color: white;
+        text-align: center;
+        margin: 0 auto;
+    }
+    .score-high { background: linear-gradient(135deg, #dc3545, #c82333); }
+    .score-medium { background: linear-gradient(135deg, #ffc107, #e0a800); color: #000; }
+    .score-low { background: linear-gradient(135deg, #198754, #146c43); }
+    
+    .dimension-card {
+        border-left: 4px solid #0d6efd;
+        padding: 15px;
+        margin-bottom: 15px;
+        background: #f8f9fa;
+        border-radius: 8px;
+    }
+    .dimension-card.discipline { border-left-color: #dc3545; }
+    .dimension-card.attendance { border-left-color: #fd7e14; }
+    .dimension-card.psych { border-left-color: #6f42c1; }
+    .dimension-card.quality { border-left-color: #20c997; }
+    .dimension-card.activity { border-left-color: #0dcaf0; }
+</style>
+
+<div class="container-fluid mt-4">
+    <!-- 返回按钮 + 标题 -->
+    <div class="row mb-3">
+        <div class="col">
+            <a href="{{ url_for('growth.report_list', period=period_type) }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> 返回列表
+            </a>
+        </div>
+        <div class="col-auto">
+            <div class="btn-group">
+                <a href="?period=week" class="btn btn-outline-primary {% if period_type == 'week' %}active{% endif %}">本周</a>
+                <a href="?period=month" class="btn btn-outline-primary {% if period_type == 'month' %}active{% endif %}">本月</a>
+                <a href="?period=semester" class="btn btn-outline-primary {% if period_type == 'semester' %}active{% endif %}">本学期</a>
+            </div>
+            <a href="{{ url_for('growth.export_pdf', sid=student.id, period=period_type) }}" class="btn btn-danger ms-2">
+                <i class="bi bi-file-pdf"></i> 导出PDF
+            </a>
+        </div>
+    </div>
+
+    <!-- 学生信息 + 综合评分 -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <div class="score-circle 
+                        {% if overall_score >= 70 %}score-low
+                        {% elif overall_score >= 40 %}score-medium
+                        {% else %}score-high
+                        {% endif %}
+                    ">
+                        {{ overall_score }}
+                    </div>
+                    <h5 class="mt-3">{{ student.name }}</h5>
+                    <p class="text-muted">{{ student.class_ }}</p>
+                    <span class="badge bg-{% if overall_score >= 70 %}success{% elif overall_score >= 40 %}warning{% else %}danger{% endif %} fs-6">
+                        综合评分：{{ "低风险" if overall_score >= 70 else ("中风险" if overall_score >= 40 else "高风险") }}
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-9">
+            <!-- 评分因子分解 -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-pie-chart"></i> 综合评分因子分解</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        {% for factor_name, factor_data in score_details.items() %}
+                        <div class="col-md-6 mb-3">
+                            <div class="dimension-card {{ factor_name }}">
+                                <div class="d-flex justify-content-between">
+                                    <strong>
+                                        {% if factor_name == 'grade' %}📈 学业表现
+                                        {% elif factor_name == 'discipline' %}📕 行为规范
+                                        {% elif factor_name == 'attendance' %}📅 出勤状态
+                                        {% elif factor_name == 'psych' %}🧠 心理健康
+                                        {% elif factor_name == 'quality' %}🏆 综合素质
+                                        {% elif factor_name == 'activity' %}🎯 活动参与
+                                        {% endif %}
+                                    </strong>
+                                    <span class="badge bg-primary">{{ factor_data.score }}分 (权重{{ (factor_data.weight * 100)|int }}%)</span>
+                                </div>
+                                <div class="progress mt-2" style="height: 10px;">
+                                    <div class="progress-bar {% if factor_data.score >= 80 %}bg-success
+                                                {% elif factor_data.score >= 50 %}bg-warning
+                                                {% else %}bg-danger{% endif %}" 
+                                         style="width: {{ factor_data.score }}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 6维度详细数据 -->
+    <div class="row">
+        <!-- 1. 学业表现 -->
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="bi bi-graph-up"></i> 学业表现</h5>
+                </div>
+                <div class="card-body">
+                    {% set grade = report_data.grade_trend %}
+                    <p><strong>趋势：</strong>
+                        {% if grade[0] == 'rising' %}
+                            <span class="text-success"><i class="bi bi-arrow-up"></i> 上升 ({{ grade[1] }}分)</span>
+                        {% elif grade[0] == 'declining' %}
+                            <span class="text-danger"><i class="bi bi-arrow-down"></i> 下降 ({{ grade[1] }}分)</span>
+                        {% else %}
+                            <span class="text-muted"><i class="bi bi-dash"></i> 稳定</span>
+                        {% endif %}
+                    </p>
+                    <p class="text-muted">最近考试成绩变化趋势</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. 行为规范 -->
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-danger text-white">
+                    <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> 行为规范</h5>
+                </div>
+                <div class="card-body">
+                    {% set disc = report_data.discipline %}
+                    <p><strong>违纪次数：</strong>{{ disc.total }}次</p>
+                    {% if disc.records %}
+                    <ul class="list-unstyled">
+                        {% for record in disc.records[:3] %}
+                        <li><i class="bi bi-dot"></i> {{ record.date }} - {{ record.type }}：{{ record.reason[:20] }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="text-success">✅ 本期无违纪记录</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 出勤状态 -->
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0"><i class="bi bi-calendar-check"></i> 出勤状态</h5>
+                </div>
+                <div class="card-body">
+                    {% set att = report_data.attendance %}
+                    <p><strong>出勤统计：</strong></p>
+                    <ul>
+                        <li>出勤：{{ att.present }}次</li>
+                        <li>缺勤：<span class="{% if att.absent > 0 %}text-danger{% endif %}">{{ att.absent }}次</span></li>
+                        <li>迟到：<span class="{% if att.late > 0 %}text-warning{% endif %}">{{ att.late }}次</span></li>
+                        <li>请假：{{ att.leave }}次</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. 心理健康 -->
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-purple text-white" style="background-color: #6f42c1;">
+                    <h5 class="mb-0"><i class="bi bi-heart-pulse"></i> 心理健康</h5>
+                </div>
+                <div class="card-body">
+                    {% set psych = report_data.psych %}
+                    {% if psych.has_data %}
+                        <p><strong>MSSMHS-55总分：</strong>
+                            <span class="
+                                {% if psych.risk_level == 'high' %}text-danger
+                                {% elif psych.risk_level == 'medium' %}text-warning
+                                {% else %}text-success
+                                {% endif %}
+                            ">{{ psych.total_score }}分 ({{ "高风险" if psych.risk_level == 'high' else ("中风险" if psych.risk_level == 'medium' else "低风险") }})</span>
+                        </p>
+                        <p class="text-muted">测评日期：{{ psych.completed_at }}</p>
+                    {% else %}
+                        <p class="text-muted">暂无心理健康测评数据</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. 综合素质 -->
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-award"></i> 综合素质评价</h5>
+                </div>
+                <div class="card-body">
+                    {% set quality = report_data.quality %}
+                    {% if quality %}
+                        {% for dim, data in quality.items() %}
+                        <p><strong>{{ dim }}：</strong>平均分 {{ data.average }} ({{ data.count }}次评价)</p>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted">暂无综合素质评价数据</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 6. 活动参与 -->
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="bi bi-calendar-event"></i> 活动参与</h5>
+                </div>
+                <div class="card-body">
+                    {% set activity = report_data.activity %}
+                    <p><strong>参与活动：</strong>{{ activity.total }}次</p>
+                    {% if activity.activities %}
+                    <ul class="list-unstyled">
+                        {% for act in activity.activities[:3] %}
+                        <li><i class="bi bi-dot"></i> {{ act.name }} ({{ act.date }})</li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 干预建议 -->
+    <div class="row mt-4">
+        <div class="col">
+            <div class="card border-warning">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0"><i class="bi bi-lightbulb"></i> 干预建议</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="mb-0">
+                        {% for suggestion in suggestions %}
+                        <li class="mb-2">{{ suggestion }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

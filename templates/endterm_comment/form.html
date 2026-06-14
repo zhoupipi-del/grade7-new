@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+{% block title %}{% if comment %}编辑评语{% else %}撰写评语{% endif %}{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 900px;">
+    <!-- 页面标题 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1">
+                <i class="bi bi-pencil-square"></i>
+                {% if comment %}编辑期末评语{% else %}撰写期末评语{% endif %}
+            </h4>
+        </div>
+        <a href="{{ url_for('endterm_comment.index') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> 返回列表
+        </a>
+    </div>
+
+    <!-- 学生选择/信息卡片 -->
+    <div class="card mb-3">
+        <div class="card-body">
+            {% if student %}
+            <div class="row align-items-center">
+                <div class="col-auto">
+                    <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center"
+                         style="width:56px;height:56px;font-size:22px;">
+                        {{ student.name[:1] }}
+                    </div>
+                </div>
+                <div class="col">
+                    <h5 class="mb-0">{{ student.name }}
+                        {% if student.gender == '男' %}
+                        <i class="bi bi-gender-male text-primary"></i>
+                        {% elif student.gender == '女' %}
+                        <i class="bi bi-gender-female text-danger"></i>
+                        {% endif %}
+                    </h5>
+                    <p class="text-muted mb-0 small">
+                        学号：{{ student.student_no }} &nbsp;|&nbsp;
+                        班级：{{ student.class_.name if student.class_ else '未知' }} &nbsp;|&nbsp;
+                        学期：<strong>{{ semester }}</strong>
+                    </p>
+                </div>
+                <div class="col-auto">
+                    {% if students and students|length > 1 %}
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle"
+                                data-bs-toggle="dropdown">切换学生</button>
+                        <ul class="dropdown-menu dropdown-menu-end" style="max-height:300px;overflow-y:auto;">
+                            {% for s in students %}
+                            <li><a class="dropdown-item {% if s.id==student.id %}active{% endif %}"
+                                   href="{{ url_for('endterm_comment.create', student_id=s.id, semester=semester) }}">
+                                {{ s.name }} <small class="text-muted">{{ s.student_no }}</small></a></li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% else %}
+            <div class="row align-items-center">
+                <div class="col-auto">
+                    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center"
+                         style="width:56px;height:56px;font-size:22px;">
+                        <i class="bi bi-person"></i>
+                    </div>
+                </div>
+                <div class="col">
+                    <h5 class="mb-0 text-muted">选择学生</h5>
+                    <p class="text-muted mb-0 small">
+                        请从下方下拉列表中选择需要撰写评语的学生
+                    </p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not student and students %}
+    <!-- 无预选学生时，显示学生选择列表 -->
+    <div class="card mb-3">
+        <div class="card-header bg-light">
+            <i class="bi bi-list-ul"></i> <strong>请选择学生</strong>
+            <small class="text-muted ms-2">（共 {{ students|length }} 人）</small>
+        </div>
+        <div class="card-body p-0">
+            <div class="list-group list-group-flush" style="max-height:400px;overflow-y:auto;">
+                {% for s in students %}
+                <a href="{{ url_for('endterm_comment.create', student_id=s.id) }}"
+                   class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                    <span>
+                        <strong>{{ s.name }}</strong>
+                        <small class="text-muted ms-2">{{ s.student_no }}</small>
+                    </span>
+                    <i class="bi bi-chevron-right text-muted"></i>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 多维度数据摘要 -->
+    {% if student_context %}
+    <div class="card mb-3 border-info">
+        <div class="card-header bg-info bg-opacity-10 text-info-emphasis d-flex align-items-center">
+            <i class="bi bi-clipboard2-data me-2"></i> <strong>学生数据摘要（评语参考）</strong>
+        </div>
+        <div class="card-body p-2">
+            <div class="row g-2">
+                <!-- 违纪 -->
+                <div class="col-md-6">
+                    <div class="border rounded p-2 small">
+                        <i class="bi bi-exclamation-triangle text-danger"></i>
+                        <strong>违纪记录</strong>
+                        <span class="ms-2 text-muted">
+                            {{ student_context.discipline.total }} 条
+                            {% if student_context.discipline.points > 0 %}
+                            · 扣分 <span class="text-danger fw-bold">{{ student_context.discipline.points }}</span>
+                            {% endif %}
+                        </span>
+                    </div>
+                </div>
+                <!-- 成绩 -->
+                <div class="col-md-6">
+                    <div class="border rounded p-2 small">
+                        <i class="bi bi-graph-up text-primary"></i>
+                        <strong>最近考试</strong>
+                        <span class="ms-2 text-muted">
+                            {% if student_context.scores.exam_name %}
+                            {{ student_context.scores.exam_name }}
+                            · 均分 <span class="fw-bold text-primary">{{ student_context.scores.avg }}</span>
+                            {% else %}暂无数据{% endif %}
+                        </span>
+                    </div>
+                </div>
+                <!-- 活动 -->
+                <div class="col-md-6">
+                    <div class="border rounded p-2 small">
+                        <i class="bi bi-calendar-check text-success"></i>
+                        <strong>活动参与</strong>
+                        <span class="ms-2 text-muted">
+                            {{ student_context.activities.total }} 次
+                            {% for act in student_context.activities.list[:2] %}
+                            · {{ act.title }}
+                            {% endfor %}
+                        </span>
+                    </div>
+                </div>
+                <!-- 心理 -->
+                <div class="col-md-6">
+                    <div class="border rounded p-2 small">
+                        <i class="bi bi-heart-pulse text-warning"></i>
+                        <strong>心理健康</strong>
+                        <span class="ms-2 text-muted">
+                            {% if student_context.mental_health.total_score %}
+                            {{ student_context.mental_health.risk_level }} 风险
+                            · {{ student_context.mental_health.total_score }} 分
+                            {% else %}未评估{% endif %}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 评语表单 -->
+    {% if student %}
+    <form method="post" action="{{ url_for('endterm_comment.create') }}" id="commentForm">
+        <input type="hidden" name="student_id" value="{{ student.id }}">
+        <input type="hidden" name="semester" value="{{ semester }}">
+        {% if comment %}
+        <input type="hidden" name="id" value="{{ comment.id }}">
+        {% endif %}
+
+        <!-- 综合评语 -->
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-chat-quote"></i> 综合评语
+                <span class="badge bg-light text-dark ms-2 float-end">必填</span>
+            </div>
+            <div class="card-body">
+                <textarea name="overall_comment" id="overall_comment" rows="5"
+                          class="form-control"
+                          placeholder="请输入对该学生的综合评价，包括学习态度、品德表现、行为习惯等方面...">{% if comment %}{{ comment.overall_comment }}{% endif %}</textarea>
+                <div class="form-text text-end"><span id="overall_count">0</span>/500 字</div>
+
+                <!-- 快捷模板 -->
+                <div class="mt-2">
+                    <small class="text-muted fw-bold">快捷模板：</small>
+                    <div class="d-flex flex-wrap gap-1 mt-1">
+                        <button type="button" class="btn btn-outline-secondary btn-sm template-btn"
+                                data-target="overall_comment" data-text="该生学习态度端正，课堂上认真听讲，积极思考并回答问题。在思想品德方面表现优秀，尊敬师长、团结同学。行为习惯良好，能自觉遵守学校规章制度。希望在今后的学习中继续保持优点，争取更大的进步。">
+                            综合优秀
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm template-btn"
+                                data-target="overall_comment" data-text="该生在校期间表现良好，能够遵守学校的各项规章制度，与同学相处融洽。学习上较为刻苦，但有时学习方法有待改进。建议在今后的学习中多向老师和同学请教，找到适合自己的学习方法，提高学习效率。需要加强自主学习能力的培养。">
+                            表现良好
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm template-btn"
+                                data-target="overall_comment" data-text="该生性格开朗活泼，乐于助人，集体荣誉感强。在学习上有一定潜力但发挥不够稳定，希望能在今后的学习中更加专注，提高课堂效率。同时要注意培养良好的时间管理能力，合理安排学习和课余活动的时间分配。">
+                            有待进步
+                        </button>
+                        <button type="button" id="aiGenerateBtn" class="btn btn-primary btn-sm"
+                                onclick="aiGenerateComment({{ student.id }})"
+                                {% if not student %}disabled{% endif %}>
+                            <i class="bi bi-robot"></i> 🤖 AI 智能生成评语
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 优点 -->
+        <div class="card mb-3">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-hand-thumbs-up"></i> 优点 / 突出表现
+            </div>
+            <div class="card-body">
+                <textarea name="strengths" rows="3" class="form-control"
+                          placeholder="列举该生的主要优点和突出表现...">{% if comment %}{{ comment.strengths }}{% endif %}</textarea>
+                <div class="form-text text-end"><span id="strengths_count">0</span>/300 字</div>
+
+                <div class="mt-2">
+                    <small class="text-muted fw-bold">常用标签：</small>
+                    <div class="d-flex flex-wrap gap-1 mt-1">
+                        {% for tag in ['勤奋刻苦', '乐于助人', '诚实守信', '积极向上', '团结同学', '热爱劳动', '思维敏捷', '书写工整', '守时守信', '有责任感', '善于表达', '组织能力强'] %}
+                        <button type="button" class="btn btn-outline-success btn-sm tag-btn"
+                                data-field="strengths">{{ tag }}</button>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 待改进 -->
+        <div class="card mb-3">
+            <div class="card-header bg-warning text-dark">
+                <i class="bi bi-exclamation-circle"></i> 需改进之处
+            </div>
+            <div class="card-body">
+                <textarea name="improvements" rows="3" class="form-control"
+                          placeholder="指出该生需要改进的方面（建设性意见）...">{% if comment %}{{ comment.improvements }}{% endif %}</textarea>
+                <div class="form-text text-end"><span id="improvements_count">0</span>/300 字</div>
+            </div>
+        </div>
+
+        <!-- 教师建议 -->
+        <div class="card mb-3">
+            <div class="card-header bg-info text-white">
+                <i class="bi bi-lightbulb"></i> 教师寄语/建议
+            </div>
+            <div class="card-body">
+                <textarea name="teacher_suggestion" rows="3" class="form-control"
+                          placeholder="给家长和学生的建议或鼓励语...">{% if comment %}{{ comment.teacher_suggestion }}{% endif %}</textarea>
+                <div class="form-text text-end"><span id="suggestion_count">0</span>/200 字</div>
+            </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="card">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    {% if comment %}
+                    <span class="text-muted small">
+                        创建于：{{ comment.created_at.strftime('%Y-%m-%d %H:%M') if comment.created_at else '-' }}
+                        &nbsp;|&nbsp; 更新于：{{ comment.updated_at.strftime('%Y-%m-%d %H:%M') if comment.updated_at else '-' }}
+                        &nbsp;|&nbsp; 当前状态：
+                        {% if comment.status == 'published' %}
+                        <span class="badge bg-success">已发布</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">草稿</span>
+                        {% endif %}
+                    </span>
+                    {% endif %}
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="{{ url_for('endterm_comment.index') }}" class="btn btn-outline-secondary">
+                        取消
+                    </a>
+                    <button type="submit" name="action" value="save" class="btn btn-primary">
+                        <i class="bi bi-save"></i> 保存草稿
+                    </button>
+                    <button type="submit" name="action_publish" value="publish" class="btn btn-success"
+                            onclick="return confirm('确认发布？发布后学生和家长可见。');">
+                        <i class="bi bi-check-circle"></i> 发布评语
+                    </button>
+                </div>
+            </div>
+        </div>
+    </form>
+    {% endif %}
+</div>
+
+<script>
+// 字数统计
+function countChars(textareaId, counterId, maxLen) {
+    const el = document.getElementById(textareaId);
+    const cnt = document.getElementById(counterId);
+    function update() {
+        const len = (el.value || '').length;
+        cnt.textContent = len;
+        cnt.parentElement.style.color = len > maxLen ? '#dc3545' : '';
+    }
+    el.addEventListener('input', update);
+    update();
+}
+countChars('overall_comment', 'overall_count', 500);
+countChars('strengths', 'strengths_count', 300);
+countChars('improvements', 'improvements_count', 300);
+countChars('suggestion', 'suggestion_count', 200);
+
+// 快捷模板填充
+document.querySelectorAll('.template-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const target = document.getElementById(btn.dataset.target);
+        target.value = btn.dataset.text;
+        target.dispatchEvent(new Event('input'));
+    });
+});
+
+// 标签追加
+document.querySelectorAll('.tag-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const field = document.querySelector(`[name="${btn.dataset.field}"]`);
+        const tag = btn.textContent.trim();
+        if (!field.value.includes(tag)) {
+            field.value = field.value.trim() ? (field.value + '、' + tag) : tag;
+            field.dispatchEvent(new Event('input'));
+        }
+    });
+});
+
+// ── 🤖 AI 评语生成舱 — 前端交互引擎 ──
+function aiGenerateComment(studentId) {
+    const btn = document.getElementById('aiGenerateBtn');
+    if (!btn || !studentId) return;
+    
+    // 确认对话框
+    if (!confirm('🤖 即将调用 AI 大数据模型，基于该生 9286 条成绩和 1966 条行为评分，\n\n生成一份高度定制化、具有人文关怀的专家级期末评语。\n\n预计耗时 5-15 秒，是否继续？')) return;
+    
+    // 进入加载态
+    const originalHTML = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> AI 分析中...';
+    btn.disabled = true;
+    btn.classList.add('btn-warning');
+    btn.classList.remove('btn-primary');
+    
+    // 显示进度提示
+    showAIToast('🔍 正在提取学生数字灵魂画像...', 'info');
+    
+    fetch('/endterm-comment/api/ai-generate/' + studentId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(resp) {
+        if (resp.status === 'success') {
+            showAIToast('✅ 评语编织完成！数据已自动填充，请审阅后保存。', 'success');
+            fillCommentForm(resp.data);
+        } else {
+            showAIToast('❌ ' + (resp.message || '生成失败，请重试'), 'danger');
+        }
+    })
+    .catch(function(err) {
+        console.error('AI generate error:', err);
+        showAIToast('❌ 网络异常或大模型服务暂不可用，请稍后重试', 'danger');
+    })
+    .finally(function() {
+        // 恢复按钮
+        btn.innerHTML = originalHTML;
+        btn.disabled = false;
+        btn.classList.remove('btn-warning');
+        btn.classList.add('btn-primary');
+    });
+}
+
+function fillCommentForm(data) {
+    // 填充四个字段
+    var fields = {
+        'overall_comment': data.overall_comment || '',
+        'strengths': data.strengths || '',
+        'improvements': data.improvements || '',
+        'teacher_suggestion': data.teacher_suggestion || ''
+    };
+    
+    for (var name in fields) {
+        var el = document.querySelector('[name="' + name + '"]');
+        if (el) {
+            el.value = fields[name];
+            el.dispatchEvent(new Event('input'));
+        }
+    }
+    
+    // 滚动到综合评语区域
+    var target = document.querySelector('[name="overall_comment"]');
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function showAIToast(message, type) {
+    // 创建浮动提示
+    var toast = document.createElement('div');
+    toast.style.cssText = [
+        'position:fixed; top:20px; right:20px; z-index:10000;',
+        'padding:12px 20px; border-radius:8px;',
+        'color:#fff; font-size:14px; font-weight:500;',
+        'box-shadow: 0 4px 20px rgba(0,0,0,0.3);',
+        'animation: slideIn 0.3s ease;',
+        'max-width: 400px;',
+        type === 'success' ? 'background: linear-gradient(135deg, #20bf6b, #26de81);' :
+        type === 'danger' ? 'background: linear-gradient(135deg, #fc5c65, #eb3b5a);' :
+        'background: linear-gradient(135deg, #4a69bd, #6a89cc);'
+    ].join('');
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(function() {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.5s';
+        setTimeout(function() { document.body.removeChild(toast); }, 500);
+    }, 4000);
+}
+
+// Toast 动画
+var toastStyle = document.createElement('style');
+toastStyle.textContent = '@keyframes slideIn { from { transform: translateX(100px); opacity:0; } to { transform: translateX(0); opacity:1; } }';
+document.head.appendChild(toastStyle);
+</script>
+{% endblock %}

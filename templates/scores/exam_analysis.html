@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}成绩分析{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <a href="{{ url_for('scores.exam_list') }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回列表</a>
+  <h3>{{ exam.name }} — 成绩分析</h3>
+  <div class="text-muted mb-3">{{ exam.exam_date }} | {{ exam.grade.name if exam.grade else '' }}</div>
+
+  {% for sname, data in analysis_data.items() %}
+  <div class="card mb-3">
+    <div class="card-header"><strong>{{ sname }}</strong></div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-8">
+          <canvas id="chart_{{ loop.index }}" height="120"></canvas>
+        </div>
+        <div class="col-md-4">
+          <table class="table table-sm">
+            <tr><td>参考人数</td><td><strong>{{ data.count }}</strong></td></tr>
+            <tr><td>平均分</td><td><strong>{{ "%.1f"|format(data.avg) }}</strong></td></tr>
+            <tr><td>最高分</td><td><strong>{{ "%.1f"|format(data.max) }}</strong></td></tr>
+            <tr><td>最低分</td><td><strong>{{ "%.1f"|format(data.min) }}</strong></td></tr>
+            <tr><td>及格率</td><td><strong>{{ "%.1f"|format(data.pass_rate) }}%</strong></td></tr>
+            <tr><td>优秀率</td><td><strong>{{ "%.1f"|format(data.excellent_rate) }}%</strong></td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="alert alert-info">暂无分析数据，请先录入成绩</div>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<script>
+  {% for sname, data in analysis_data.items() %}
+  (function(){
+    const ctx = document.getElementById('chart_{{ loop.index }}').getContext('2d');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['平均分', '最高分', '最低分', '及格率(%)', '优秀率(%)'],
+        datasets: [{
+          label: '{{ sname }}',
+          data: [{{ "%.1f"|format(data.avg) }}, {{ "%.1f"|format(data.max) }}, {{ "%.1f"|format(data.min) }}, {{ "%.1f"|format(data.pass_rate) }}, {{ "%.1f"|format(data.excellent_rate) }}],
+          backgroundColor: 'rgba(54, 162, 235, 0.6)',
+          borderColor: 'rgba(54, 162, 235, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+    });
+  })();
+  {% endfor %}
+</script>
+{% endblock %}

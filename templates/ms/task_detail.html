@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ task.title }} · 任务详情{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <!-- 面包屑 -->
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('ms.task_list') }}">任务管理</a></li>
+            <li class="breadcrumb-item active">任务详情</li>
+        </ol>
+    </nav>
+
+    <div class="row">
+        <!-- 任务信息 -->
+        <div class="col-lg-8">
+            <div class="card shadow-sm mb-4">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                        <h4 class="mb-0">{{ task.title }}</h4>
+                        <div>
+                            {% if task.status == 'pending' %}
+                                <span class="badge bg-warning text-dark fs-6">待处理</span>
+                            {% elif task.status == 'assigned' %}
+                                <span class="badge bg-info fs-6">已分配</span>
+                            {% elif task.status == 'done' %}
+                                <span class="badge bg-success fs-6">已完成</span>
+                            {% elif task.status == 'closed' %}
+                                <span class="badge bg-secondary fs-6">已关闭</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-sm-3 text-muted">发起人</div>
+                        <div class="col-sm-9">{{ task.from_user.display_name if task.from_user else '未知' }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-sm-3 text-muted">目标</div>
+                        <div class="col-sm-9"><strong>{{ target_label }}</strong></div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-sm-3 text-muted">截止日期</div>
+                        <div class="col-sm-9">
+                            {% if task.deadline %}
+                                {{ task.deadline.strftime('%Y-%m-%d') }}
+                                {% if task.status == 'pending' %}
+                                    {% set days = (task.deadline - now.date()).days if now else 0 %}
+                                    {% if days < 0 %}<span class="text-danger ms-2"><i class="bi bi-exclamation-circle"></i> 已逾期 {{ -days }} 天</span>
+                                    {% elif days == 0 %}<span class="text-warning ms-2">今天截止</span>
+                                    {% elif days < 4 %}<span class="text-muted ms-2">剩余 {{ days }} 天</span>
+                                    {% endif %}
+                                {% endif %}
+                            {% else %}
+                                无截止日期
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-sm-3 text-muted">创建时间</div>
+                        <div class="col-sm-9">{{ task.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                    </div>
+                    {% if task.content %}
+                    <hr>
+                    <h6>任务内容</h6>
+                    <div class="p-3 bg-light rounded">{{ task.content | replace('\n', '<br>') | safe }}</div>
+                    {% endif %}
+                </div>
+                {% if task.status != 'closed' %}
+                <div class="card-footer text-end">
+                    <form method="POST" action="{{ url_for('ms.close_task', tid=task.id) }}" style="display:inline"
+                          onsubmit="return confirm('确定关闭此任务？关闭后不可恢复。')">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-check-circle"></i> 关闭任务
+                        </button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 反馈列表 -->
+        <div class="col-lg-4">
+            <div class="card shadow-sm">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-chat-dots"></i> 反馈记录</span>
+                    <span class="badge bg-primary">{{ feedbacks | length }}</span>
+                </div>
+                <div class="card-body" style="max-height:500px;overflow-y:auto">
+                    {% if feedbacks %}
+                        {% for fb in feedbacks %}
+                        <div class="mb-3 pb-3 {% if not loop.last %}border-bottom{% endif %}">
+                            <div class="d-flex justify-content-between mb-1">
+                                <strong>{{ fb.user.display_name }}</strong>
+                                <small class="text-muted">{{ fb.created_at.strftime('%m-%d %H:%M') }}</small>
+                            </div>
+                            <p class="mb-0 text-muted">{{ fb.content }}</p>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="text-center py-4 text-muted">
+                            <i class="bi bi-chat-square-text fs-3 d-block mb-2"></i>
+                            暂无反馈
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

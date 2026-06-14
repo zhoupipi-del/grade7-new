@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}账号管理{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h3><i class="bi bi-people text-primary"></i> 账号管理</h3>
+        <p class="text-muted">管理系统用户账号与权限</p>
+    </div>
+    <div class="col-auto d-flex align-items-center">
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createModal">
+            <i class="bi bi-person-plus me-1"></i> 新建账号
+        </button>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th class="px-3">用户名</th>
+                <th class="px-3">显示名</th>
+                <th class="px-3">角色</th>
+                <th class="px-3">班级</th>
+                <th class="px-3">状态</th>
+                <th class="px-3">创建时间</th>
+                <th class="px-3">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for u in users %}
+            <tr>
+              <td class="px-3"><strong>{{ u.username }}</strong></td>
+              <td class="px-3">{{ u.display_name or '-' }}</td>
+              <td class="px-3"><span class="badge bg-info">{{ u.role }}</span></td>
+              <td class="px-3"><small>{{ u.class_id or '-' }}</small></td>
+              <td class="px-3">
+                {% if u.is_active %}
+                <span class="badge bg-success">启用</span>
+                {% else %}
+                <span class="badge bg-secondary">禁用</span>
+                {% endif %}
+              </td>
+              <td class="px-3"><small>{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '' }}</small></td>
+              <td class="px-3">
+                <div class="btn-group btn-group-sm">
+                  <button class="btn btn-outline-warning" onclick="resetPw({{ u.id }})" title="重置密码">
+                    <i class="bi bi-key"></i>
+                  </button>
+                  <button class="btn {% if u.is_active %}btn-outline-danger{% else %}btn-outline-success{% endif %}" onclick="toggleUser({{ u.id }})" title="{% if u.is_active %}禁用{% else %}启用{% endif %}">
+                    <i class="bi {% if u.is_active %}bi-lock{% else %}bi-unlock{% endif %}"></i>
+                  </button>
+                  {% if u.id != session.user_id %}
+                  <button class="btn btn-outline-danger" onclick="deleteUser({{ u.id }}, '{{ u.display_name }}')" title="删除账号">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+    </div>
+</div>
+
+<!-- 新建账号 Modal -->
+<div class="modal fade" id="createModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-person-plus me-2"></i>新建账号</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-md-6"><label class="form-label">用户名</label><input type="text" class="form-control" id="crUsername" required></div>
+          <div class="col-md-6"><label class="form-label">显示名</label><input type="text" class="form-control" id="crDisplay"></div>
+          <div class="col-md-6"><label class="form-label">角色</label>
+            <select class="form-select" id="crRole">
+              <option value="ms_admin">德育处</option>
+              <option value="grade_leader">年级组</option>
+              <option value="class_teacher">班主任</option>
+              <option value="parent">家长</option>
+            </select>
+          </div>
+          <div class="col-md-6"><label class="form-label">密码</label><input type="text" class="form-control" id="crPw" value="123456"></div>
+          <div class="col-md-6"><label class="form-label">班级ID</label><input type="number" class="form-control" id="crClass" placeholder="选填"></div>
+          <div class="col-md-6"><label class="form-label">年级ID</label><input type="number" class="form-control" id="crGrade" placeholder="选填"></div>
+          <div class="col-md-6"><label class="form-label">绑定学生ID</label><input type="number" class="form-control" id="crBound" placeholder="家长用"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" onclick="createUser()">创建</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function createUser() {
+  var data = {
+    username: document.getElementById('crUsername').value,
+    display_name: document.getElementById('crDisplay').value,
+    role: document.getElementById('crRole').value,
+    password: document.getElementById('crPw').value,
+    class_id: document.getElementById('crClass').value || null,
+    grade_id: document.getElementById('crGrade').value || null,
+    bound_student_id: document.getElementById('crBound').value || null
+  };
+  if (!data.username) { alert('请输入用户名'); return; }
+  fetch('/accounts/create', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  }).then(function(r) {
+    return r.json().then(function(d) {
+      if (r.ok && d.ok) { location.reload(); }
+      else { alert(d.error || '创建失败(' + r.status + ')'); }
+    }).catch(function() {
+      alert('响应异常，请检查是否已登录(' + r.status + ')');
+    });
+  }).catch(function(e) { alert('网络错误: ' + e.message); });
+}
+function toggleUser(id) {
+  fetch('/accounts/' + id + '/toggle', {
+    method: 'POST',
+    credentials: 'same-origin'
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) { if (d.ok) location.reload(); });
+}
+function resetPw(id) {
+  if (!confirm('确定重置密码为 123456？')) return;
+  fetch('/accounts/' + id + '/reset-password', {
+    method: 'POST',
+    credentials: 'same-origin'
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) { alert(d.message); });
+}
+function deleteUser(id, name) {
+  if (!confirm('⚠️ 确定要删除账号「' + name + '」吗？\n\n删除后将无法登录，但相关历史数据会保留。')) return;
+  fetch('/accounts/' + id + '/delete', {
+    method: 'POST',
+    credentials: 'same-origin'
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { location.reload(); }
+      else { alert(d.error || '删除失败'); }
+    })
+    .catch(function(e) { alert('网络错误: ' + e.message); });
+}
+</script>
+{% endblock %}

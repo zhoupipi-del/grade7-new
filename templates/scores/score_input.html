@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}成绩录入{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <a href="{{ url_for('scores.exam_detail', eid=exam.id) }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回考试详情</a>
+  <h3>成绩录入 — {{ exam.name }}</h3>
+  <div class="text-muted mb-3">{{ exam.exam_date }} | {{ exam.grade.name if exam.grade else '' }}</div>
+
+  <!-- 班级选择 -->
+  <form class="row g-2 mb-3" method="GET">
+    <div class="col-auto">
+      <select name="class_id" class="form-select" onchange="this.form.submit()">
+        <option value="">全部班级</option>
+        {% for c in classes %}
+        <option value="{{ c.id }}" {% if class_id==c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
+  {% if class_id %}
+  <form method="POST" action="{{ url_for('scores.save_scores', eid=exam.id, class_id=class_id) }}">
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered table-hover">
+        <thead>
+          <tr>
+            <th>学号</th>
+            <th>姓名</th>
+            {% for s in subjects %}
+            <th>{{ s.name }}<br><small class="text-muted">满分{{ s.full_score }}</small></th>
+            {% endfor %}
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for stu in students %}
+          <tr>
+            <td>{{ stu.student_no }}</td>
+            <td>{{ stu.name }}</td>
+            {% for s in subjects %}
+              {% set val = score_dict.get((stu.id, s.id), '') %}
+              <td>
+                <input type="number" step="0.5" min="0" max="{{ s.full_score }}"
+                       name="score_{{ stu.id }}_{{ s.id }}"
+                       value="{{ val if val!=None else '' }}"
+                       class="form-control form-control-sm" style="width:80px;">
+              </td>
+            {% endfor %}
+              <td>
+                <form method="POST" action="{{ url_for('scores.delete_student_scores', eid=exam.id, sid=stu.id) }}"
+                      class="d-inline" onsubmit="return confirm('确定删除该学生本场考试所有成绩？')">
+                  <button class="btn btn-sm btn-outline-danger">删除</button>
+                </form>
+              </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="{{ 2 + subjects|length }}" class="text-center text-muted">请选择班级</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button type="submit" class="btn btn-primary mt-2">
+      <i class="bi bi-check-lg"></i> 保存成绩
+    </button>
+  </form>
+  {% else %}
+  <div class="alert alert-info">请选择班级开始录入成绩</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ "编辑班级" if class_ else "新建班级" }} — 德育平台{% endblock %}
+{% block content %}
+<div class="container-fluid" style="max-width:600px">
+  <div class="mb-3">
+    <a href="{{ url_for('ms.class_manage') }}" class="text-decoration-none">&larr; 返回班级列表</a>
+  </div>
+  <h3 class="mb-3">{{ "编辑班级" if class_ else "新建班级" }}</h3>
+
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in msgs %}
+      <div class="alert alert-{{ 'danger' if cat=='danger' else ('warning' if cat=='warning' else 'success') }} alert-dismissible fade show">
+        {{ msg }}<button class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endwith %}
+
+  <div class="card">
+    <div class="card-body">
+      <form method="POST" action="{{ url_for('ms.class_edit', cid=class_.id) if class_ else url_for('ms.class_create') }}">
+        <div class="mb-3">
+          <label class="form-label fw-bold">班级名称 <span class="text-danger">*</span></label>
+          <input name="name" class="form-control" required
+                 value="{{ class_.name if class_ else '' }}" placeholder="如：2501班">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold">所属年级 <span class="text-danger">*</span></label>
+          <select name="grade_id" class="form-select" required>
+            <option value="">— 请选择年级 —</option>
+            {% for g in grades %}
+            <option value="{{ g.id }}" {{ 'selected' if class_ and class_.grade_id==g.id else '' }}>{{ g.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <button class="btn btn-primary"><i class="bi bi-check-lg"></i> {{ "保存修改" if class_ else "创建班级" }}</button>
+          <a href="{{ url_for('ms.class_manage') }}" class="btn btn-outline-secondary ms-2">取消</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

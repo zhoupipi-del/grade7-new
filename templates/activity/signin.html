@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}签到管理 - {{ activity.title }}{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <a href="{{ url_for('activity.detail', aid=activity.id) }}" class="btn btn-sm btn-secondary mb-1">&larr; 返回详情</a>
+      <h4>签到管理: {{ activity.title }}</h4>
+    </div>
+    <div>
+      <a href="{{ url_for('activity.signin_stats', aid=activity.id) }}" class="btn btn-outline-info">
+        <i class="bi bi-bar-chart"></i> 签到统计
+      </a>
+    </div>
+  </div>
+
+  <!-- Counter -->
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="card text-bg-success">
+        <div class="card-body text-center py-2">
+          <small>已签到</small>
+          <h4 class="mb-0" id="signed-counter">{{ signed_count }}</h4>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card text-bg-warning">
+        <div class="card-body text-center py-2">
+          <small>总人数</small>
+          <h4 class="mb-0">{{ total_count }}</h4>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card text-bg-danger">
+        <div class="card-body text-center py-2">
+          <small>缺席</small>
+          <h4 class="mb-0" id="absent-counter">{{ absent_count }}</h4>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch Buttons -->
+  <div class="mb-3 d-flex gap-2">
+    <button class="btn btn-success" onclick="batchSignin('on_time')" id="btn-batch-on-time">
+      <i class="bi bi-check-all"></i> 一键全签（准时）
+    </button>
+    <button class="btn btn-warning" onclick="batchSignin('late')">
+      <i class="bi bi-clock"></i> 一键全签（迟到）
+    </button>
+  </div>
+
+  <!-- Student Table -->
+  <div class="card">
+    <div class="card-header d-flex justify-content-between">
+      <span>签到列表</span>
+      <span id="progress-text">{{ signed_count }}/{{ total_count }} 已签到</span>
+    </div>
+    <div class="card-body p-0">
+      <table class="table table-hover table-sm mb-0">
+        <thead>
+          <tr>
+            <th width="30"><input type="checkbox" id="select-all" onchange="toggleAll(this)"></th>
+            <th>学号</th>
+            <th>姓名</th>
+            <th>班级</th>
+            <th>签到状态</th>
+            <th>签到时间</th>
+            <th>备注</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in students %}
+          <tr id="row-{{ s.id }}">
+            <td><input type="checkbox" class="student-check" value="{{ s.id }}"></td>
+            <td>{{ s.student_no }}</td>
+            <td>{{ s.name }}</td>
+            <td>{{ class_map.get(s.class_id, '—') }}</td>
+            <td>
+              {% if signin_map.get(s.id) %}
+                {% if signin_map[s.id].status == 'on_time' %}
+                <span class="badge bg-success">准时</span>
+                {% elif signin_map[s.id].status == 'late' %}
+                <span class="badge bg-warning">迟到</span>
+                {% elif signin_map[s.id].status == 'absent' %}
+                <span class="badge bg-danger">缺席</span>
+                {% endif %}
+              {% else %}
+              <span class="badge bg-secondary">未签到</span>
+              {% endif %}
+            </td>
+            <td>{{ signin_map[s.id].signin_time.strftime('%H:%M') if signin_map.get(s.id) and signin_map[s.id].signin_time else '—' }}</td>
+            <td>{{ signin_map[s.id].note if signin_map.get(s.id) else '—' }}</td>
+            <td>
+              <button class="btn btn-sm btn-outline-success signin-btn" data-sid="{{ s.id }}" data-status="on_time" title="签到">签到</button>
+              <button class="btn btn-sm btn-outline-warning signin-btn" data-sid="{{ s.id }}" data-status="late" title="迟到">迟到</button>
+              <button class="btn btn-sm btn-outline-danger absent-btn" data-sid="{{ s.id }}" title="缺席">缺席</button>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="text-center text-muted">暂无已报名的学生</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+function signin(sid, status, note) {
+  var fd = new FormData();
+  fd.append('student_id', sid);
+  fd.append('status', status);
+  fd.append('note', note || '');
+  return fetch('{{ url_for("activity.signin", aid=activity.id) }}', {
+    method: 'POST',
+    body: fd
+  }).then(function(r) { return r.json(); });
+}
+
+document.querySelectorAll('.signin-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var sid = this.dataset.sid;
+    var status = this.dataset.status;
+    signin(sid, status).then(function(d) {
+      if (d.code === 0) { location.reload(); }
+      else { alert(d.msg); }
+    });
+  });
+});
+
+document.querySelectorAll('.absent-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var sid = this.dataset.sid;
+    var note = prompt('缺席原因（可选）:');
+    fetch('{{ url_for("activity.mark_absent", aid=activity.id, sid=0) }}'.replace('/0', '/' + sid), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'note=' + encodeURIComponent(note || '')
+    }).then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.code === 0) { location.reload(); }
+        else { alert(d.msg); }
+      });
+  });
+});
+
+function toggleAll(cb) {
+  document.querySelectorAll('.student-check').forEach(function(c) { c.checked = cb.checked; });
+}
+
+function batchSignin(status) {
+  var ids = [];
+  document.querySelectorAll('.student-check:checked').forEach(function(c) { ids.push(c.value); });
+  if (ids.length === 0) {
+    alert('请先勾选学生');
+    return;
+  }
+  if (!confirm('确认对 ' + ids.length + ' 名学生进行批量签到（' + (status === 'on_time' ? '准时' : '迟到') + '）？')) return;
+
+  var fd = new FormData();
+  ids.forEach(function(id) { fd.append('student_ids', id); });
+  fd.append('status', status);
+
+  fetch('{{ url_for("activity.signin_batch", aid=activity.id) }}', {
+    method: 'POST',
+    body: fd
+  }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.code === 0) { location.reload(); }
+      else { alert(d.msg); }
+    });
+}
+</script>
+{% endblock %}

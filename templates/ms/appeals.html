@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}申诉管理{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5><i class="bi bi-shield-exclamation me-2"></i>申诉管理</h5>
+        <div>
+            <a href="{{ url_for('ms.appeal_list') }}" class="btn btn-sm btn-outline-secondary active">全部 ({{ pending_count + approved_count + rejected_count }})</a>
+            <a href="{{ url_for('ms.appeal_list', status='pending') }}" class="btn btn-sm btn-outline-warning">待处理 ({{ pending_count }})</a>
+            <a href="{{ url_for('ms.appeal_list', status='approved') }}" class="btn btn-sm btn-outline-success">已通过 ({{ approved_count }})</a>
+            <a href="{{ url_for('ms.appeal_list', status='rejected') }}" class="btn btn-sm btn-outline-danger">已驳回 ({{ rejected_count }})</a>
+        </div>
+    </div>
+
+    {% if appeals %}
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>学生</th>
+                        <th>类别</th>
+                        <th>违纪描述</th>
+                        <th>申诉理由</th>
+                        <th>状态</th>
+                        <th>时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in appeals %}
+                    {% set disc = a.discipline %}
+                    <tr>
+                        <td><strong>{{ a.student.name }}</strong></td>
+                        <td>{{ disc.category or '-' }}</td>
+                        <td class="text-truncate" style="max-width:200px;">{{ disc.description[:60] }}</td>
+                        <td class="text-truncate" style="max-width:200px;">{{ a.reason[:60] }}</td>
+                        <td>
+                            {% if a.status == 'pending' %}<span class="badge bg-warning text-dark">待处理</span>
+                            {% elif a.status == 'reviewing' %}<span class="badge bg-info">复核中</span>
+                            {% elif a.status == 'approved' %}<span class="badge bg-success">已通过</span>
+                            {% elif a.status == 'rejected' %}<span class="badge bg-danger">已驳回</span>
+                            {% endif %}
+                        </td>
+                        <td><small>{{ a.created_at.strftime('%m-%d %H:%M') }}</small></td>
+                        <td>
+                            {% if a.status == 'pending' %}
+                            <a href="{{ url_for('ms.appeal_review', aid=a.id) }}" class="btn btn-sm btn-primary">
+                                <i class="bi bi-search"></i> 复核
+                            </a>
+                            {% else %}
+                            <a href="{{ url_for('ms.appeal_review', aid=a.id) }}" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-eye"></i> 查看
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if pagination.pages > 1 %}
+    <nav class="mt-3">
+        <ul class="pagination pagination-sm justify-content-center">
+            {% for p in range(1, pagination.pages + 1) %}
+            <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                <a class="page-link" href="{{ url_for('ms.appeal_list', page=p, status=status_filter) }}">{{ p }}</a>
+            </li>
+            {% endfor %}
+        </ul>
+    </nav>
+    {% endif %}
+
+    {% else %}
+    <div class="text-center py-5 text-muted">
+        <i class="bi bi-shield-check fs-1 d-block mb-3"></i>
+        <p>暂无申诉记录</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

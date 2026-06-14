@@ -1,0 +1,609 @@
+{% extends "base.html" %}
+{% block title %}数据驾驶舱{% endblock %}
+
+{% block head_extra %}
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<style>
+.cockpit-filter { background: #fff; border-radius: 12px; padding: 14px 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.kpi-card { background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); transition: transform .15s; cursor: default; }
+.kpi-card:hover { transform: translateY(-2px); }
+.kpi-card .kpi-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+.kpi-card .kpi-value { font-size: 28px; font-weight: 600; line-height: 1.2; }
+.kpi-card .kpi-label { font-size: 12px; color: #6c757d; margin-top: 2px; }
+.kpi-card .kpi-sub { font-size: 11px; color: #adb5bd; }
+.panel { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.panel-header { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; cursor: move; }
+.panel-header h6 { margin: 0; font-size: 14px; }
+.panel-body { padding: 14px 16px; }
+.panel-actions { display: flex; gap: 2px; }
+.panel-actions .btn { padding: 1px 6px; font-size: 11px; line-height: 1.4; }
+.pulse { animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.6; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- ====== 顶部栏 ====== -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0"><i class="bi bi-speedometer2 text-primary"></i> 数据驾驶舱</h4>
+            <small class="text-muted">全景监控 · 多维度分析 · 实时数据</small>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="/cockpit/export/excel?grade_id={{ current_grade_id }}" class="btn btn-sm btn-outline-success">
+                <i class="bi bi-file-earmark-excel"></i> 导出Excel
+            </a>
+            <a href="/cockpit/export/pdf?grade_id={{ current_grade_id }}" class="btn btn-sm btn-outline-secondary" target="_blank">
+                <i class="bi bi-file-earmark-pdf"></i> 导出PDF
+            </a>
+            <button class="btn btn-sm btn-outline-info" onclick="resetLayout()">
+                <i class="bi bi-arrow-repeat"></i> 重置布局
+            </button>
+        </div>
+    </div>
+
+    <!-- ====== 筛选栏 ====== -->
+    <div class="cockpit-filter mb-3">
+        <div class="row g-2 align-items-center">
+            <div class="col-auto">
+                <label class="form-label small mb-0">年级</label>
+                <select id="filterGrade" class="form-select form-select-sm" onchange="reloadData()" style="width:130px">
+                    {% for g in grades %}
+                    <option value="{{ g.id }}" {% if g.id == current_grade_id %}selected{% endif %}>{{ g.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">考试</label>
+                <select id="filterExam" class="form-select form-select-sm" onchange="reloadData()" style="width:180px">
+                    <option value="">最新考试</option>
+                    {% for e in exams %}
+                    <option value="{{ e.id }}">{{ e.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">时间范围</label>
+                <select id="filterDays" class="form-select form-select-sm" onchange="reloadData()" style="width:120px">
+                    <option value="7">近7天</option>
+                    <option value="30" selected>近30天</option>
+                    <option value="60">近60天</option>
+                    <option value="90">近90天</option>
+                </select>
+            </div>
+            <div class="col-auto ms-auto">
+                <span class="badge bg-light text-dark pulse" id="updateBadge" style="display:none">
+                    <i class="bi bi-arrow-repeat"></i> 更新中...
+                </span>
+                <small class="text-muted" id="lastUpdate"></small>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== KPI 卡片行 ====== -->
+    <div class="row g-3 mb-3" id="kpiRow">
+        <div class="col-md-2"><div class="kpi-card"><div class="d-flex justify-content-between align-items-start"><div><div class="kpi-value text-primary">--</div><div class="kpi-label">在校学生</div></div><div class="kpi-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-people-fill"></i></div></div></div></div>
+        <div class="col-md-2"><div class="kpi-card"><div class="d-flex justify-content-between align-items-start"><div><div class="kpi-value text-success">--</div><div class="kpi-label">考试均分</div></div><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="bi bi-trophy-fill"></i></div></div></div></div>
+        <div class="col-md-2"><div class="kpi-card"><div class="d-flex justify-content-between align-items-start"><div><div class="kpi-value text-info">--</div><div class="kpi-label">及格率</div></div><div class="kpi-icon bg-info bg-opacity-10 text-info"><i class="bi bi-check-circle-fill"></i></div></div></div></div>
+        <div class="col-md-2"><div class="kpi-card"><div class="d-flex justify-content-between align-items-start"><div><div class="kpi-value text-warning">--</div><div class="kpi-label">违纪人次</div></div><div class="kpi-icon bg-warning bg-opacity-10 text-warning"><i class="bi bi-exclamation-triangle-fill"></i></div></div></div></div>
+        <div class="col-md-2"><div class="kpi-card"><div class="d-flex justify-content-between align-items-start"><div><div class="kpi-value text-danger">--</div><div class="kpi-label">出勤率</div></div><div class="kpi-icon bg-danger bg-opacity-10 text-danger"><i class="bi bi-calendar-check-fill"></i></div></div></div></div>
+        <div class="col-md-2"><div class="kpi-card"><div class="d-flex justify-content-between align-items-start"><div><div class="kpi-value" style="color:#7f77dd;">--</div><div class="kpi-label">五翼均分</div></div><div class="kpi-icon bg-opacity-10" style="background:#eeedfe;color:#7f77dd;"><i class="bi bi-star-fill"></i></div></div></div></div>
+    </div>
+
+    <!-- ====== 面板网格（可拖拽排序） ====== -->
+    <div class="row g-3" id="panelGrid">
+        <!-- 面板1: 成绩对比 (col-lg-6) -->
+        <div class="col-lg-6 panel-item" data-panel="scores">
+            <div class="panel">
+                <div class="panel-header">
+                    <h6><i class="bi bi-bar-chart-fill text-primary"></i> 各班成绩对比</h6>
+                    <div class="panel-actions">
+                        <button class="btn btn-light btn-sm" onclick="movePanel('scores','up')" title="上移">↑</button>
+                        <button class="btn btn-light btn-sm" onclick="movePanel('scores','down')" title="下移">↓</button>
+                    </div>
+                </div>
+                <div class="panel-body"><canvas id="chartScores" height="260"></canvas></div>
+            </div>
+        </div>
+
+        <!-- 面板2: 成绩趋势 (col-lg-6) -->
+        <div class="col-lg-6 panel-item" data-panel="examTrend">
+            <div class="panel">
+                <div class="panel-header">
+                    <h6><i class="bi bi-graph-up text-success"></i> 考试趋势（均分/及格率/优秀率）</h6>
+                    <div class="panel-actions">
+                        <button class="btn btn-light btn-sm" onclick="movePanel('examTrend','up')" title="上移">↑</button>
+                        <button class="btn btn-light btn-sm" onclick="movePanel('examTrend','down')" title="下移">↓</button>
+                    </div>
+                </div>
+                <div class="panel-body"><canvas id="chartExamTrend" height="260"></canvas></div>
+            </div>
+        </div>
+
+        <!-- 面板3: 违纪分布 (col-lg-4) -->
+        <div class="col-lg-4 panel-item" data-panel="discipline">
+            <div class="panel">
+                <div class="panel-header">
+                    <h6><i class="bi bi-pie-chart-fill text-warning"></i> 违纪类型分布</h6>
+                    <div class="panel-actions">
+                        <button class="btn btn-light btn-sm" onclick="movePanel('discipline','up')" title="上移">↑</button>
+                        <button class="btn btn-light btn-sm" onclick="movePanel('discipline','down')" title="下移">↓</button>
+                    </div>
+                </div>
+                <div class="panel-body"><canvas id="chartDiscCat" height="260"></canvas></div>
+            </div>
+        </div>
+
+        <!-- 面板4: 考勤趋势 (col-lg-4) -->
+        <div class="col-lg-4 panel-item" data-panel="attendance">
+            <div class="panel">
+                <div class="panel-header">
+                    <h6><i class="bi bi-activity text-danger"></i> 考勤 & 违纪趋势</h6>
+                    <div class="panel-actions">
+                        <button class="btn btn-light btn-sm" onclick="movePanel('attendance','up')" title="上移">↑</button>
+                        <button class="btn btn-light btn-sm" onclick="movePanel('attendance','down')" title="下移">↓</button>
+                    </div>
+                </div>
+                <div class="panel-body"><canvas id="chartTrend" height="260"></canvas></div>
+            </div>
+        </div>
+
+        <!-- 面板5: 五翼维度 (col-lg-4) -->
+        <div class="col-lg-4 panel-item" data-panel="wings">
+            <div class="panel">
+                <div class="panel-header">
+                    <h6><i class="bi bi-hexagon-fill" style="color:#7f77dd;"></i> 五翼各维度均分</h6>
+                    <div class="panel-actions">
+                        <button class="btn btn-light btn-sm" onclick="movePanel('wings','up')" title="上移">↑</button>
+                        <button class="btn btn-light btn-sm" onclick="movePanel('wings','down')" title="下移">↓</button>
+                    </div>
+                </div>
+                <div class="panel-body"><canvas id="chartWings" height="260"></canvas></div>
+            </div>
+        </div>
+
+        <!-- 面板6: 通知 & 家访 (col-lg-6) -->
+        <div class="col-lg-6 panel-item" data-panel="notices">
+            <div class="panel">
+                <div class="panel-header">
+                    <h6><i class="bi bi-envelope-paper-fill text-info"></i> 通知阅读率 & 家访统计</h6>
+                    <div class="panel-actions">
+                        <button class="btn btn-light btn-sm" onclick="movePanel('notices','up')" title="上移">↑</button>
+                        <button class="btn btn-light btn-sm" onclick="movePanel('notices','down')" title="下移">↓</button>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <div class="row g-3">
+                        <div class="col-6"><canvas id="chartNotices" height="200"></canvas></div>
+                        <div class="col-6"><canvas id="chartVisits" height="200"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 面板7: 班级出勤率 (col-lg-6) -->
+        <div class="col-lg-6 panel-item" data-panel="classAtt">
+            <div class="panel">
+                <div class="panel-header">
+                    <h6><i class="bi bi-building text-secondary"></i> 各班出勤率 & 违纪数</h6>
+                    <div class="panel-actions">
+                        <button class="btn btn-light btn-sm" onclick="movePanel('classAtt','up')" title="上移">↑</button>
+                        <button class="btn btn-light btn-sm" onclick="movePanel('classAtt','down')" title="下移">↓</button>
+                    </div>
+                </div>
+                <div class="panel-body"><canvas id="chartClassAtt" height="260"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── 图表实例引用 ──
+const charts = {};
+
+// ── 配色 ──
+const COLORS = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#86bcb6','#b6992d'];
+
+// ── 面板拖拽排序 ──
+function getLayout() {
+    try { return JSON.parse(localStorage.getItem('cockpit_layout') || '[]'); } catch(e) { return []; }
+}
+function saveLayout(order) {
+    localStorage.setItem('cockpit_layout', JSON.stringify(order));
+}
+function applyLayout() {
+    const order = getLayout();
+    if (!order.length) return;
+    const grid = document.getElementById('panelGrid');
+    const items = Array.from(grid.querySelectorAll('.panel-item'));
+    const sorted = order.map(id => items.find(el => el.dataset.panel === id)).filter(Boolean);
+    sorted.forEach(el => grid.appendChild(el));
+}
+function movePanel(panelId, direction) {
+    const grid = document.getElementById('panelGrid');
+    const items = Array.from(grid.querySelectorAll('.panel-item'));
+    const idx = items.findIndex(el => el.dataset.panel === panelId);
+    if (idx === -1) return;
+    const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= items.length) return;
+    if (direction === 'up') {
+        grid.insertBefore(items[idx], items[newIdx]);
+    } else {
+        grid.insertBefore(items[newIdx], items[idx]);
+    }
+    const newOrder = Array.from(grid.querySelectorAll('.panel-item')).map(el => el.dataset.panel);
+    saveLayout(newOrder);
+}
+function resetLayout() {
+    localStorage.removeItem('cockpit_layout');
+    location.reload();
+}
+applyLayout();
+
+// ── 加载数据 ──
+function reloadData() {
+    document.getElementById('updateBadge').style.display = '';
+    const params = new URLSearchParams({
+        grade_id: document.getElementById('filterGrade').value,
+        days: document.getElementById('filterDays').value,
+    });
+    const examId = document.getElementById('filterExam').value;
+    if (examId) params.set('exam_id', examId);
+
+    fetch('/cockpit/data?' + params.toString())
+        .then(r => r.json())
+        .then(resp => {
+            if (resp.code !== 0) { console.error(resp.msg); return; }
+            renderAll(resp.data);
+            document.getElementById('lastUpdate').textContent =
+                '更新于 ' + new Date().toLocaleTimeString();
+        })
+        .catch(err => console.error('加载失败:', err))
+        .finally(() => {
+            document.getElementById('updateBadge').style.display = 'none';
+        });
+}
+
+// ── 渲染全部 ──
+function renderAll(d) {
+    updateKPIs(d);
+    renderScoreBar(d);
+    renderExamTrend(d);
+    renderDiscCategory(d);
+    renderTrendChart(d);
+    renderWings(d);
+    renderNotices(d);
+    renderVisits(d);
+    renderClassAtt(d);
+}
+
+// ── KPI 卡片 ──
+function updateKPIs(d) {
+    const row = document.getElementById('kpiRow');
+    const cards = row.querySelectorAll('.kpi-card');
+    const values = [
+        d.total_students,
+        d.score_stats.avg_score || '--',
+        (d.score_stats.pass_rate || '--') + (d.score_stats.pass_rate ? '%' : ''),
+        d.discipline_count,
+        (d.attendance_rate || '--') + (d.attendance_rate ? '%' : ''),
+        d.wing_avg || '--',
+    ];
+    cards.forEach((card, i) => {
+        card.querySelector('.kpi-value').textContent = values[i];
+    });
+}
+
+// ── 成绩对比柱状图 ──
+function renderScoreBar(d) {
+    const ctx = document.getElementById('chartScores').getContext('2d');
+    if (charts.scores) charts.scores.destroy();
+    if (!d.class_scores.length) return;
+    charts.scores = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: d.class_scores.map(c => c.name),
+            datasets: [{
+                label: '均分',
+                data: d.class_scores.map(c => c.score),
+                backgroundColor: COLORS.slice(0, d.class_scores.length),
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: c => c.parsed.y + ' 分 (' + d.class_scores[c.dataIndex].count + '人)' } }
+            },
+            scales: { y: { beginAtZero: false, title: { display: true, text: '均分' } } }
+        }
+    });
+}
+
+// ── 考试趋势 ──
+function renderExamTrend(d) {
+    const ctx = document.getElementById('chartExamTrend').getContext('2d');
+    if (charts.examTrend) charts.examTrend.destroy();
+    if (!d.exam_trend.labels.length) return;
+    charts.examTrend = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: d.exam_trend.labels,
+            datasets: [
+                {
+                    label: '均分', data: d.exam_trend.avgs,
+                    borderColor: '#4e79a7', backgroundColor: 'rgba(78,121,167,0.1)',
+                    fill: true, tension: 0.3, yAxisID: 'y',
+                    pointRadius: 4, pointHoverRadius: 6,
+                },
+                {
+                    label: '及格率%', data: d.exam_trend.pass_rates,
+                    borderColor: '#59a14f', backgroundColor: 'rgba(89,161,79,0.1)',
+                    fill: true, tension: 0.3, yAxisID: 'y1',
+                    pointRadius: 4, pointHoverRadius: 6,
+                    borderDash: [5, 3],
+                },
+                {
+                    label: '优秀率%', data: d.exam_trend.excel_rates,
+                    borderColor: '#f28e2b', backgroundColor: 'rgba(242,142,43,0.1)',
+                    fill: true, tension: 0.3, yAxisID: 'y1',
+                    pointRadius: 4, pointHoverRadius: 6,
+                    borderDash: [3, 2],
+                }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { usePointStyle: true, padding: 14 } },
+                tooltip: { mode: 'index', intersect: false }
+            },
+            scales: {
+                y: {
+                    type: 'linear', position: 'left',
+                    beginAtZero: false,
+                    title: { display: true, text: '均分' }
+                },
+                y1: {
+                    type: 'linear', position: 'right',
+                    min: 0, max: 100,
+                    title: { display: true, text: '百分比' },
+                    grid: { drawOnChartArea: false }
+                }
+            },
+            interaction: { mode: 'nearest', axis: 'x', intersect: false }
+        }
+    });
+}
+
+// ── 违纪类型饼图 ──
+function renderDiscCategory(d) {
+    const ctx = document.getElementById('chartDiscCat').getContext('2d');
+    if (charts.discCat) charts.discCat.destroy();
+    if (!d.discipline_categories.length) {
+        charts.discCat = new Chart(ctx, {
+            type: 'doughnut',
+            data: { labels: ['无数据'], datasets: [{ data: [1], backgroundColor: ['#e0e0e0'] }] },
+            options: { plugins: { legend: { display: false } } }
+        });
+        return;
+    }
+    charts.discCat = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: d.discipline_categories.map(c => c.name),
+            datasets: [{
+                data: d.discipline_categories.map(c => c.count),
+                backgroundColor: COLORS.slice(0, d.discipline_categories.length),
+                borderWidth: 0,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: { usePointStyle: true, padding: 10, font: { size: 11 } }
+                }
+            }
+        }
+    });
+}
+
+// ── 考勤&违纪趋势 ──
+function renderTrendChart(d) {
+    const ctx = document.getElementById('chartTrend').getContext('2d');
+    if (charts.trend) charts.trend.destroy();
+    charts.trend = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: d.trend.dates,
+            datasets: [
+                {
+                    label: '违纪人次', data: d.trend.discipline,
+                    borderColor: '#e15759', backgroundColor: 'rgba(225,87,89,0.08)',
+                    fill: true, tension: 0.3, pointRadius: 2, yAxisID: 'y',
+                },
+                {
+                    label: '出勤率%', data: d.trend.attendance,
+                    borderColor: '#4e79a7', backgroundColor: 'transparent',
+                    fill: false, tension: 0.3, pointRadius: 2, yAxisID: 'y1',
+                    borderDash: [4, 2],
+                }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { usePointStyle: true, padding: 10 } },
+                tooltip: { mode: 'index', intersect: false }
+            },
+            scales: {
+                y: {
+                    type: 'linear', position: 'left',
+                    beginAtZero: true, title: { display: true, text: '人次' }
+                },
+                y1: {
+                    type: 'linear', position: 'right',
+                    min: 80, max: 100,
+                    title: { display: true, text: '%' },
+                    grid: { drawOnChartArea: false }
+                }
+            },
+            interaction: { mode: 'nearest', axis: 'x', intersect: false }
+        }
+    });
+}
+
+// ── 五翼雷达图 ──
+function renderWings(d) {
+    const ctx = document.getElementById('chartWings').getContext('2d');
+    if (charts.wings) charts.wings.destroy();
+    if (!d.wing_dimensions.length) return;
+    charts.wings = new Chart(ctx, {
+        type: 'radar',
+        data: {
+            labels: d.wing_dimensions.map(w => w.name),
+            datasets: [{
+                label: '年级均分',
+                data: d.wing_dimensions.map(w => w.score),
+                borderColor: '#7f77dd',
+                backgroundColor: 'rgba(127,119,221,0.15)',
+                pointBackgroundColor: '#7f77dd',
+                pointRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                r: {
+                    beginAtZero: false,
+                    suggestedMin: 30,
+                    ticks: { stepSize: 10, backdropColor: 'transparent' }
+                }
+            }
+        }
+    });
+}
+
+// ── 通知阅读率环形图 ──
+function renderNotices(d) {
+    const ctx = document.getElementById('chartNotices').getContext('2d');
+    if (charts.notices) charts.notices.destroy();
+    const read = d.notice_read_rate || 0;
+    const unread = Math.max(0, 100 - read);
+    charts.notices = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['已读', '未读'],
+            datasets: [{
+                data: [read, unread],
+                backgroundColor: ['#59a14f', '#e0e0e0'],
+                borderWidth: 0,
+            }]
+        },
+        options: {
+            cutout: '65%',
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 8 } },
+                tooltip: { callbacks: { label: c => c.label + ': ' + c.parsed + '%' } }
+            }
+        }
+    });
+}
+
+// ── 家访类型饼图 ──
+function renderVisits(d) {
+    const ctx = document.getElementById('chartVisits').getContext('2d');
+    if (charts.visits) charts.visits.destroy();
+    if (!d.visit_types.length) {
+        charts.visits = new Chart(ctx, {
+            type: 'doughnut',
+            data: { labels: ['暂无'], datasets: [{ data: [1], backgroundColor: ['#e0e0e0'] }] },
+            options: { plugins: { legend: { display: false } } }
+        });
+        return;
+    }
+    charts.visits = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: d.visit_types.map(v => v.name),
+            datasets: [{
+                data: d.visit_types.map(v => v.count),
+                backgroundColor: COLORS.slice(0, d.visit_types.length),
+                borderWidth: 0,
+            }]
+        },
+        options: {
+            cutout: '55%',
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: { usePointStyle: true, font: { size: 10 }, padding: 6 }
+                }
+            }
+        }
+    });
+}
+
+// ── 班级出勤率+违纪 ──
+function renderClassAtt(d) {
+    const ctx = document.getElementById('chartClassAtt').getContext('2d');
+    if (charts.classAtt) charts.classAtt.destroy();
+    const labels = d.class_attendance ? d.class_attendance.map(c => c.name) : [];
+    if (!labels.length) return;
+    const discMap = {};
+    if (d.class_discipline) d.class_discipline.forEach(c => { discMap[c.name] = c.count; });
+
+    charts.classAtt = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: '出勤率%', data: d.class_attendance.map(c => c.rate),
+                    backgroundColor: 'rgba(78,121,167,0.6)', borderRadius: 4,
+                    yAxisID: 'y',
+                },
+                {
+                    label: '违纪数', data: labels.map(l => discMap[l] || 0),
+                    backgroundColor: 'rgba(225,87,89,0.5)', borderRadius: 4,
+                    yAxisID: 'y1',
+                }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { usePointStyle: true, padding: 10 } },
+                tooltip: { mode: 'index' }
+            },
+            scales: {
+                y: {
+                    type: 'linear', position: 'left',
+                    min: 80, max: 100,
+                    title: { display: true, text: '出勤率%' }
+                },
+                y1: {
+                    type: 'linear', position: 'right',
+                    beginAtZero: true,
+                    title: { display: true, text: '违纪数' },
+                    grid: { drawOnChartArea: false }
+                }
+            }
+        }
+    });
+}
+
+// ── 初始加载 + 每60秒自动刷新 ──
+reloadData();
+setInterval(reloadData, 60000);
+</script>
+{% endblock %}

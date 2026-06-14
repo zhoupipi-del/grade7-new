@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}签到统计 - {{ activity.title }}{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <a href="{{ url_for('activity.signin', aid=activity.id) }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回签到管理</a>
+  <h4>签到统计: {{ activity.title }}</h4>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card text-bg-primary">
+        <div class="card-body text-center">
+          <h6>报名总人数</h6>
+          <h3>{{ total_registered }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-bg-success">
+        <div class="card-body text-center">
+          <h6>已签到</h6>
+          <h3>{{ on_time }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-bg-warning">
+        <div class="card-body text-center">
+          <h6>迟到</h6>
+          <h3>{{ late }}</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-bg-danger">
+        <div class="card-body text-center">
+          <h6>缺席</h6>
+          <h3>{{ absent }}</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 未签到 -->
+  {% if not_checked > 0 %}
+  <div class="alert alert-secondary mb-3">
+    <i class="bi bi-info-circle"></i> 还有 {{ not_checked }} 人未签到
+  </div>
+  {% endif %}
+
+  <div class="row g-3">
+    <!-- 饼图 -->
+    <div class="col-md-5">
+      <div class="card">
+        <div class="card-header">签到状态分布</div>
+        <div class="card-body">
+          <canvas id="pieChart" height="280"></canvas>
+        </div>
+      </div>
+    </div>
+    <!-- 柱状图 -->
+    <div class="col-md-7">
+      <div class="card">
+        <div class="card-header">按班级签到统计</div>
+        <div class="card-body">
+          <canvas id="barChart" height="280"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 班级统计表 -->
+  <div class="card mt-3">
+    <div class="card-header">班级签到明细</div>
+    <div class="card-body p-0">
+      <table class="table table-hover table-sm mb-0">
+        <thead>
+          <tr>
+            <th>班级</th>
+            <th>总人数</th>
+            <th>已签到</th>
+            <th>缺席</th>
+            <th>未签到</th>
+            <th>签到率</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cs in class_stats %}
+          <tr>
+            <td>{{ cs.class_name }}</td>
+            <td>{{ cs.total }}</td>
+            <td><span class="text-success">{{ cs.signed }}</span></td>
+            <td><span class="text-danger">{{ cs.absent }}</span></td>
+            <td><span class="text-warning">{{ cs.not_checked }}</span></td>
+            <td>
+              {% set rate = ((cs.signed / cs.total * 100) if cs.total > 0 else 0) | int %}
+              <div class="progress" style="height: 18px;">
+                <div class="progress-bar {% if rate >= 80 %}bg-success{% elif rate >= 50 %}bg-warning{% else %}bg-danger{% endif %}"
+                     style="width: {{ rate }}%">{{ rate }}%</div>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-center text-muted">暂无数据</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+  // Pie Chart
+  var pieCtx = document.getElementById('pieChart').getContext('2d');
+  new Chart(pieCtx, {
+    type: 'pie',
+    data: {
+      labels: ['已签到（准时）', '迟到', '缺席', '未签到'],
+      datasets: [{
+        data: [{{ on_time }}, {{ late }}, {{ absent }}, {{ not_checked }}],
+        backgroundColor: ['#198754', '#ffc107', '#dc3545', '#6c757d']
+      }]
+    },
+    options: {
+      plugins: {
+        legend: { position: 'bottom' },
+        title: { display: false }
+      }
+    }
+  });
+
+  // Bar Chart
+  var barCtx = document.getElementById('barChart').getContext('2d');
+  var classNames = [];
+  var signedData = [];
+  var absentData = [];
+  var notCheckedData = [];
+  {% for cs in class_stats %}
+  classNames.push('{{ cs.class_name }}');
+  signedData.push({{ cs.signed }});
+  absentData.push({{ cs.absent }});
+  notCheckedData.push({{ cs.not_checked }});
+  {% endfor %}
+
+  new Chart(barCtx, {
+    type: 'bar',
+    data: {
+      labels: classNames,
+      datasets: [
+        { label: '已签到', data: signedData, backgroundColor: '#198754' },
+        { label: '缺席', data: absentData, backgroundColor: '#dc3545' },
+        { label: '未签到', data: notCheckedData, backgroundColor: '#6c757d' }
+      ]
+    },
+    options: {
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } }
+      },
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+})();
+</script>
+{% endblock %}

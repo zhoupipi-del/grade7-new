@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% block title %}家长端 - {{ student.name if student else '首页' }}{% endblock %}
+
+{% block content %}
+{% if not student %}
+<div class="text-center py-5">
+    <i class="bi bi-exclamation-circle display-1 text-warning"></i>
+    <h4 class="mt-3">尚未绑定学生</h4>
+    <p class="text-muted">请联系班主任为您绑定孩子信息</p>
+</div>
+{% else %}
+
+<div class="row mb-4">
+    <div class="col">
+        <h3><i class="bi bi-house-door text-primary"></i> 家长端首页</h3>
+        <p class="text-muted">您好，{{ session.display_name }} — {{ student.name }} 的家长</p>
+    </div>
+</div>
+
+<!-- 学生基本信息卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-1 text-primary">{{ student.name }}</div>
+            <div class="text-muted small">{{ student.student_no }}</div>
+            <div class="mt-2">
+                <span class="badge bg-info">{{ class_obj.name if class_obj else '-' }}</span>
+                <span class="badge bg-secondary">{{ student.gender }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-1 {% if today_att %}{% if today_att.status=='present' %}text-success{% elif today_att.status=='late' %}text-warning{% else %}text-danger{% endif %}{% else %}text-muted{% endif %}">
+                {% if today_att %}
+                    {% if today_att.status=='present' %}√{% elif today_att.status=='late' %}迟{% elif today_att.status=='early' %}早{% elif today_att.status=='absent' %}缺{% else %}假{% endif %}
+                {% else %}—{% endif %}
+            </div>
+            <div class="text-muted small">今日考勤</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-1 text-warning">{{ discipline_count }}</div>
+            <div class="text-muted small">本月违纪</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-1 {% if unread_count>0 %}text-danger{% else %}text-success{% endif %}">{{ unread_count }}</div>
+            <div class="text-muted small">未读通知</div>
+        </div>
+    </div>
+</div>
+
+<!-- AI风险预警卡片 -->
+{% if latest_risk %}
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <a href="{{ url_for('parent_portal.risk') }}" class="text-decoration-none">
+            <div class="card shadow-sm border-0 {% if latest_risk.risk_level=='red' %}bg-danger bg-opacity-10 border-danger{% elif latest_risk.risk_level=='yellow' %}bg-warning bg-opacity-10 border-warning{% else %}bg-success bg-opacity-10 border-success{% endif %} border-start border-4">
+                <div class="card-body py-2 d-flex align-items-center justify-content-between">
+                    <div>
+                        {% if latest_risk.risk_level == 'red' %}
+                        <i class="bi bi-x-octagon-fill text-danger me-2"></i>
+                        <strong class="text-danger">高风险预警</strong>
+                        <span class="text-muted small ms-2">共 {{ latest_risk.warning_count }} 项</span>
+                        {% elif latest_risk.risk_level == 'yellow' %}
+                        <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
+                        <strong class="text-warning">中等风险</strong>
+                        <span class="text-muted small ms-2">共 {{ latest_risk.warning_count }} 项</span>
+                        {% else %}
+                        <i class="bi bi-check-circle-fill text-success me-2"></i>
+                        <strong class="text-success">状态正常</strong>
+                        <span class="text-muted small ms-2">未触发预警</span>
+                        {% endif %}
+                    </div>
+                    <span class="text-muted small">{{ latest_risk.scan_date.strftime('%m-%d') }} <i class="bi bi-chevron-right"></i></span>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+{% endif %}
+
+<!-- 成长数据 — 五翼雷达 + 出勤/请假概况 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header"><i class="bi bi-star-fill text-warning"></i> 五翼综合素质</div>
+            <div class="card-body text-center">
+                {% if wings_scores %}
+                <canvas id="wingsRadar" style="max-height:220px;"></canvas>
+                {% else %}
+                <p class="text-muted">暂无五翼评价数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header"><i class="bi bi-graph-up text-success"></i> 成长数据周报</div>
+            <div class="card-body">
+                <div class="row g-2 text-center">
+                    <div class="col-4">
+                        <div class="fs-4 fw-bold {% if att_total > 0 and att_present / att_total >= 0.9 %}text-success{% elif att_total > 0 %}text-warning{% else %}text-muted{% endif %}">
+                            {% if att_total > 0 %}{{ (att_present / att_total * 100)|round|int }}%{% else %}—{% endif %}
+                        </div>
+                        <small class="text-muted">本月出勤率</small>
+                    </div>
+                    <div class="col-4">
+                        <div class="fs-4 fw-bold text-primary">{{ discipline_count }}</div>
+                        <small class="text-muted">本月违纪</small>
+                    </div>
+                    <div class="col-4">
+                        <div class="fs-4 fw-bold text-info">{{ leave_approved }}/{{ leave_count }}</div>
+                        <small class="text-muted">已批/总请假</small>
+                    </div>
+                </div>
+                <hr class="my-2">
+                <div class="text-center">
+                    <a href="{{ url_for('parent_portal.attendance') }}" class="btn btn-sm btn-outline-success me-1">详细考勤</a>
+                    <a href="{{ url_for('student_profile.detail', sid=student.id) }}" class="btn btn-sm btn-outline-primary">学生画像</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <!-- 最近考勤 -->
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-calendar-check"></i> 最近考勤</span>
+                <a href="{{ url_for('parent_portal.attendance') }}" class="btn btn-sm btn-outline-primary">查看全部</a>
+            </div>
+            <div class="card-body p-0">
+                {% if recent_att %}
+                <table class="table table-sm mb-0">
+                    <thead class="table-light">
+                        <tr><th>日期</th><th>状态</th></tr>
+                    </thead>
+                    <tbody>
+                    {% for a in recent_att %}
+                    <tr>
+                        <td>{{ a.record_date.strftime('%m-%d') }}</td>
+                        <td>
+                            {% if a.status=='present' %}<span class="badge bg-success">出勤</span>
+                            {% elif a.status=='late' %}<span class="badge bg-warning">迟到</span>
+                            {% elif a.status=='early' %}<span class="badge bg-info">早退</span>
+                            {% elif a.status=='absent' %}<span class="badge bg-danger">缺勤</span>
+                            {% else %}<span class="badge bg-secondary">请假</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-center text-muted py-3">暂无考勤记录</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 最近违纪 -->
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-journal-x"></i> 最近违纪</span>
+                <a href="{{ url_for('parent_portal.discipline') }}" class="btn btn-sm btn-outline-warning">查看全部</a>
+            </div>
+            <div class="card-body p-0">
+                {% if recent_disc %}
+                <table class="table table-sm mb-0">
+                    <thead class="table-light">
+                        <tr><th>日期</th><th>类型</th><th>说明</th></tr>
+                    </thead>
+                    <tbody>
+                    {% for d in recent_disc %}
+                    <tr>
+                        <td>{{ d.created_at.strftime('%m-%d') }}</td>
+                        <td><span class="badge bg-warning">{{ d.category or d.type }}</span></td>
+                        <td class="small text-truncate" style="max-width:200px;">{{ d.description[:30] }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-center text-muted py-3">暂无违纪记录</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 最新评语 -->
+{% if latest_comment %}
+<div class="card shadow-sm mt-3">
+    <div class="card-header"><i class="bi bi-journal-text"></i> 最新期末评语（{{ latest_comment.semester }}）</div>
+    <div class="card-body">
+        <p>{{ latest_comment.overall_comment[:200] }}{% if latest_comment.overall_comment|length > 200 %}...{% endif %}</p>
+        <a href="{{ url_for('parent_portal.comments') }}" class="btn btn-sm btn-outline-primary">查看全部评语</a>
+    </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if wings_scores %}
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<script>
+(function(){
+    var ctx = document.getElementById('wingsRadar');
+    if (!ctx) return;
+    var labels = [{% for name, score in wings_scores.items() %}"{{ name }}"{% if not loop.last %},{% endif %}{% endfor %}];
+    var data = [{% for name, score in wings_scores.items() %}{{ score }}{% if not loop.last %},{% endif %}{% endfor %}];
+    new Chart(ctx, {
+        type: 'radar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '当前得分',
+                data: data,
+                backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 2,
+                pointBackgroundColor: 'rgba(54, 162, 235, 1)',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            scales: {
+                r: {
+                    beginAtZero: true,
+                    max: 100,
+                    ticks: { stepSize: 20, font: { size: 10 } },
+                    pointLabels: { font: { size: 11 } }
+                }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

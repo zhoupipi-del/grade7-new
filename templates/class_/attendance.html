@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}考勤管理{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 顶栏：日期 + 操作 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h5 class="mb-1"><i class="bi bi-clipboard-check me-2"></i>考勤管理</h5>
+            <small class="text-muted">{{ today.strftime('%Y年%m月%d日') }} · {{ ['周一','周二','周三','周四','周五','周六','周日'][today.weekday()] }}</small>
+        </div>
+        <div>
+            <a href="{{ url_for('class.attendance_history') }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-calendar3"></i> 历史记录
+            </a>
+        </div>
+    </div>
+
+    <!-- 状态统计卡片 -->
+    <div class="row g-2 mb-3">
+        {% set stats = {'present': 0, 'late': 0, 'early': 0, 'absent': 0, 'leave': 0, 'unrecorded': 0} %}
+        {% for s in students %}
+            {% set st = today_records.get(s.id, 'unrecorded') %}
+            {% set _ = stats.update({st: stats.get(st, 0) + 1}) %}
+        {% endfor %}
+        <div class="col">
+            <div class="card border-success text-center py-1 stat-card" data-status="present">
+                <div class="card-body py-2">
+                    <div class="fs-4 fw-bold text-success">{{ stats.present }}</div>
+                    <small class="text-muted">出勤</small>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card border-warning text-center py-1 stat-card" data-status="late">
+                <div class="card-body py-2">
+                    <div class="fs-4 fw-bold text-warning">{{ stats.late }}</div>
+                    <small class="text-muted">迟到</small>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card border-info text-center py-1 stat-card" data-status="early">
+                <div class="card-body py-2">
+                    <div class="fs-4 fw-bold text-info">{{ stats.early }}</div>
+                    <small class="text-muted">早退</small>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card border-danger text-center py-1 stat-card" data-status="absent">
+                <div class="card-body py-2">
+                    <div class="fs-4 fw-bold text-danger">{{ stats.absent }}</div>
+                    <small class="text-muted">缺勤</small>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card border-secondary text-center py-1 stat-card" data-status="leave">
+                <div class="card-body py-2">
+                    <div class="fs-4 fw-bold text-secondary">{{ stats.leave }}</div>
+                    <small class="text-muted">请假</small>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card border-light text-center py-1 bg-light stat-card" data-status="unrecorded">
+                <div class="card-body py-2">
+                    <div class="fs-4 fw-bold text-muted">{{ stats.unrecorded }}</div>
+                    <small class="text-muted">未录</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 快捷操作 -->
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <small class="text-muted">共 {{ students|length }} 人</small>
+        <div>
+            <button class="btn btn-sm btn-outline-success me-1" onclick="setAll('present')" title="一键出勤">
+                <i class="bi bi-check-all"></i> 全部出勤
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="resetAll()" title="清空重选">
+                <i class="bi bi-arrow-counterclockwise"></i> 清空
+            </button>
+        </div>
+    </div>
+
+    <!-- 考勤表 -->
+    <form method="POST" id="attendanceForm">
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive" style="max-height: 62vh; overflow-y: auto;">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th class="ps-3" width="80">学号</th>
+                            <th width="90">姓名</th>
+                            <th>状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in students %}
+                        {% set current = today_records.get(s.id, 'unrecorded') %}
+                        <tr class="student-row {% if current != 'present' and current != 'unrecorded' %}table-{% if current == 'late' %}warning{% elif current == 'absent' %}danger{% elif current == 'early' %}info{% elif current == 'leave' %}secondary{% endif %}{% endif %}">
+                            <td class="ps-3 text-muted"><small>{{ s.student_no }}</small></td>
+                            <td><strong>{{ s.name }}</strong></td>
+                            <td>
+                                <input type="hidden" name="status_{{ s.id }}" value="{{ current }}">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <button type="button" class="btn status-btn btn-outline-success {{ 'active' if current == 'present' }}"
+                                            onclick="setStatus({{ s.id }}, 'present', this)" title="出勤">
+                                        <i class="bi bi-check-lg"></i>
+                                    </button>
+                                    <button type="button" class="btn status-btn btn-outline-warning {{ 'active' if current == 'late' }}"
+                                            onclick="setStatus({{ s.id }}, 'late', this)" title="迟到">
+                                        <i class="bi bi-clock"></i>
+                                    </button>
+                                    <button type="button" class="btn status-btn btn-outline-info {{ 'active' if current == 'early' }}"
+                                            onclick="setStatus({{ s.id }}, 'early', this)" title="早退">
+                                        <i class="bi bi-arrow-left-circle"></i>
+                                    </button>
+                                    <button type="button" class="btn status-btn btn-outline-danger {{ 'active' if current == 'absent' }}"
+                                            onclick="setStatus({{ s.id }}, 'absent', this)" title="缺勤">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                    <button type="button" class="btn status-btn btn-outline-secondary {{ 'active' if current == 'leave' }}"
+                                            onclick="setStatus({{ s.id }}, 'leave', this)" title="请假">
+                                        <i class="bi bi-envelope"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer">
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-circle"></i> 保存考勤
+            </button>
+        </div>
+    </div>
+    </form>
+</div>
+
+<script>
+// 设置单个学生状态
+function setStatus(sid, status, btn) {
+    document.querySelector('input[name="status_' + sid + '"]').value = status;
+    // 更新行颜色
+    var row = btn.closest('tr');
+    row.classList.remove('table-warning', 'table-danger', 'table-info', 'table-secondary');
+    if (status === 'late') row.classList.add('table-warning');
+    else if (status === 'absent') row.classList.add('table-danger');
+    else if (status === 'early') row.classList.add('table-info');
+    else if (status === 'leave') row.classList.add('table-secondary');
+    // 更新按钮样式
+    var btns = row.querySelectorAll('.status-btn');
+    btns.forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    updateStats();
+}
+
+// 一键全部出勤
+function setAll(status) {
+    document.querySelectorAll('.student-row').forEach(function(row) {
+        var sid = row.querySelector('input[type=hidden]').name.replace('status_', '');
+        document.querySelector('input[name="status_' + sid + '"]').value = status;
+        row.classList.remove('table-warning', 'table-danger', 'table-info', 'table-secondary');
+        row.querySelectorAll('.status-btn').forEach(function(b) { b.classList.remove('active'); });
+        row.querySelector('.btn-outline-success').classList.add('active');
+    });
+    updateStats();
+}
+
+// 清空
+function resetAll() {
+    document.querySelectorAll('.student-row').forEach(function(row) {
+        var sid = row.querySelector('input[type=hidden]').name.replace('status_', '');
+        document.querySelector('input[name="status_' + sid + '"]').value = 'unrecorded';
+        row.classList.remove('table-warning', 'table-danger', 'table-info', 'table-secondary');
+        row.querySelectorAll('.status-btn').forEach(function(b) { b.classList.remove('active'); });
+    });
+    updateStats();
+}
+
+// 更新顶部统计
+function updateStats() {
+    var counts = {present: 0, late: 0, early: 0, absent: 0, leave: 0, unrecorded: 0};
+    document.querySelectorAll('.student-row').forEach(function(row) {
+        var status = row.querySelector('input[type=hidden]').value;
+        counts[status] = (counts[status] || 0) + 1;
+    });
+    ['present','late','early','absent','leave','unrecorded'].forEach(function(s) {
+        var el = document.querySelector('.stat-card[data-status="' + s + '"] .fw-bold');
+        if (el) el.textContent = counts[s];
+    });
+}
+
+// 提交前确认未录学生
+document.getElementById('attendanceForm').addEventListener('submit', function(e) {
+    var unrecorded = document.querySelectorAll('input[value="unrecorded"]').length;
+    if (unrecorded > 0) {
+        if (!confirm('还有 ' + unrecorded + ' 名学生未录入考勤状态，确认提交？')) {
+            e.preventDefault();
+        }
+    }
+});
+</script>
+
+<style>
+.status-btn { width: 38px; height: 32px; padding: 0; border-radius: 0; }
+.status-btn.active { font-weight: bold; }
+.status-btn:first-child { border-radius: 5px 0 0 5px; }
+.status-btn:last-child { border-radius: 0 5px 5px 0; }
+.sticky-top { position: sticky; top: 0; z-index: 1; }
+.stat-card { cursor: default; transition: transform 0.15s; }
+.stat-card:hover { transform: translateY(-2px); }
+</style>
+{% endblock %}

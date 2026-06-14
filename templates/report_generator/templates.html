@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}报表模板{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-3">
+        <div class="col">
+            <h2>报表模板</h2>
+        </div>
+        <div class="col text-right">
+            {% if current_user.has_role('ms_admin') %}
+            <a href="{{ url_for('report_generator.create_template') }}" class="btn btn-primary">创建模板</a>
+            {% endif %}
+            <a href="{{ url_for('report_generator.index') }}" class="btn btn-secondary">返回报表列表</a>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="row">
+        {% for template in templates %}
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">{{ template.name }}</h5>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">{{ template.description }}</p>
+
+                    {% if template.id == 'weekly' %}
+                    <h6>包含内容：</h6>
+                    <ul>
+                        <li>本周违纪统计（按班级）</li>
+                        <li>本周加分统计（按班级）</li>
+                        <li>本周扣分统计（按班级）</li>
+                        <li>本周消息发送统计</li>
+                    </ul>
+                    {% elif template.id == 'monthly' %}
+                    <h6>包含内容：</h6>
+                    <ul>
+                        <li>本月各班级违纪排名</li>
+                        <li>本月各班级德育总分排名</li>
+                        <li>本月学生违纪Top 20</li>
+                        <li>本月教师反馈统计</li>
+                    </ul>
+                    {% elif template.id == 'semester' %}
+                    <h6>包含内容：</h6>
+                    <ul>
+                        <li>学期各班级综合素质评价汇总</li>
+                        <li>学期学生成绩分析</li>
+                        <li>学期活动参与统计</li>
+                        <li>学期家长互动统计</li>
+                    </ul>
+                    {% endif %}
+                </div>
+                <div class="card-footer text-center">
+                    <a href="{{ url_for('report_generator.generate') }}?template={{ template.id }}"
+                       class="btn btn-primary">使用此模板生成</a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- 自定义模板提示 -->
+    <div class="card mt-4">
+        <div class="card-body">
+            <h5>需要自定义报表？</h5>
+            <p>如果您需要更灵活的数据统计，可以使用自定义报表功能，自由选择：</p>
+            <ul>
+                <li>时间范围（开始日期 ~ 结束日期）</li>
+                <li>数据维度（违纪、加分、扣分、消息、活动等）</li>
+                <li>统计维度（按班级、按学生、按教师）</li>
+                <li>输出格式（汇总表、明细表）</li>
+            </ul>
+            <a href="{{ url_for('report_generator.create_custom') }}" class="btn btn-success">创建自定义报表</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

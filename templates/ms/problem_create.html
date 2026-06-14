@@ -1,0 +1,96 @@
+<div class="d-flex align-items-center mb-3">
+  <a href="{{ url_for('ms.problem_list') }}" class="btn btn-outline-secondary btn-sm me-3">
+    <i class="bi bi-arrow-left me-1"></i> 返回列表
+  </a>
+  <h4 class="mb-0"><i class="bi bi-person-plus me-2"></i>新建问题学生档案</h4>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <form method="POST">
+      <div class="row g-3">
+        <!-- 查找学生 -->
+        <div class="col-md-6">
+          <label class="form-label">选择学生</label>
+          <div class="input-group">
+            <select name="class_filter" class="form-select" style="max-width:180px;" id="classFilter" onchange="loadStudents()">
+              <option value="">选择班级</option>
+              {% for c in classes %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+              {% endfor %}
+            </select>
+            <select name="student_id" class="form-select" id="studentSelect" required>
+              <option value="">请先选择班级</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 预警等级 -->
+        <div class="col-md-3">
+          <label class="form-label">预警等级</label>
+          <select name="level" class="form-select" required>
+            <option value="yellow">🟡 黄色预警</option>
+            <option value="red">🔴 红色预警</option>
+          </select>
+        </div>
+
+        <!-- 问题类别 -->
+        <div class="col-md-3">
+          <label class="form-label">问题类别</label>
+          <select name="category" class="form-select" required>
+            <option value="心理">心理</option>
+            <option value="家庭">家庭</option>
+            <option value="行为">行为</option>
+            <option value="学习">学习</option>
+            <option value="身体">身体</option>
+            <option value="混合">混合</option>
+          </select>
+        </div>
+
+        <!-- 描述 -->
+        <div class="col-12">
+          <label class="form-label">问题描述 <span class="text-danger">*</span></label>
+          <textarea name="description" class="form-control" rows="4" required
+                    placeholder="请详细描述学生的问题表现、背景情况等..."></textarea>
+        </div>
+
+        <!-- 干预措施 -->
+        <div class="col-12">
+          <label class="form-label">干预措施</label>
+          <textarea name="intervention" class="form-control" rows="3"
+                    placeholder="已采取或将采取的干预措施（选填）"></textarea>
+        </div>
+
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-lg me-1"></i> 提 交
+          </button>
+          <a href="{{ url_for('ms.problem_list') }}" class="btn btn-secondary ms-2">取消</a>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function loadStudents() {
+  var classId = document.getElementById('classFilter').value;
+  var sel = document.getElementById('studentSelect');
+  sel.innerHTML = '<option value="">加载中...</option>';
+  if (!classId) {
+    sel.innerHTML = '<option value="">请先选择班级</option>';
+    return;
+  }
+  fetch('/ms/api/students/search?class_id=' + classId + '&q=')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.length === 0) {
+        sel.innerHTML = '<option value="">该班级暂无学生</option>';
+        return;
+      }
+      sel.innerHTML = data.map(function(s) {
+        return '<option value="' + s.id + '">' + s.name + '</option>';
+      }).join('');
+    });
+}
+</script>

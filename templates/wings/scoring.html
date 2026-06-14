@@ -1,0 +1,41 @@
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-pencil-square me-2"></i>五翼评分</h4>
+</div>
+
+<div class="row g-3">
+  {% set cards = [
+    ('teacher', 'bi-person-badge', '教师评分', '班主任/科任老师评分', 'primary'),
+    ('student', 'bi-person', '学生自评', '学生自评+互评', 'success'),
+    ('parent', 'bi-house-heart', '家长评分', '家长给孩子评分', 'warning'),
+  ] %}
+  {% for t, icon, title, desc, color in cards %}
+  <div class="col-md-4">
+    <a href="{{ url_for('wings.score_page') }}?type={{ t }}" class="text-decoration-none">
+      <div class="card border-{{ color }} h-100">
+        <div class="card-body text-center py-4">
+          <div class="display-4 text-{{ color }}"><i class="bi {{ icon }}"></i></div>
+          <h5 class="mt-2">{{ title }}</h5>
+          <p class="text-muted small mb-0">{{ desc }}</p>
+        </div>
+      </div>
+    </a>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><strong>评分维度说明</strong></div>
+  <div class="card-body">
+    <div class="row g-2">
+      {% for d, desc in {'德': '道德品质、行为规范、社会责任', '智': '学业成绩、学习态度、思维能力', '体': '体育健康、运动技能、体能素质', '美': '艺术修养、审美能力、创造表达', '劳': '劳动实践、动手能力、生活技能'}.items() %}
+      <div class="col">
+        <div class="text-center p-2 bg-light rounded">
+          <div class="fs-3">{{ d }}</div>
+          <small class="text-muted">{{ desc }}</small>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="mt-2 mb-0 small text-muted">每项评分 0-10 分</p>
+  </div>
+</div>

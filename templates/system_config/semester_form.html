@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑学期' if semester else '创建学期' }}{% endblock %}
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">{{ '编辑学期' if semester else '创建学期' }}</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        <div class="mb-3">
+                            <label for="name" class="form-label">学期名称 *</label>
+                            <input type="text" class="form-control" id="name" name="name" 
+                                   value="{{ semester.name if semester else '' }}" 
+                                   placeholder="如：2025-2026-1" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="display_name" class="form-label">显示名称</label>
+                            <input type="text" class="form-control" id="display_name" name="display_name" 
+                                   value="{{ semester.display_name if semester else '' }}" 
+                                   placeholder="如：2025-2026学年第一学期">
+                        </div>
+                        <div class="mb-3">
+                            <label for="start_date" class="form-label">开始日期 *</label>
+                            <input type="date" class="form-control" id="start_date" name="start_date" 
+                                   value="{{ semester.start_date if semester else '' }}" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="end_date" class="form-label">结束日期 *</label>
+                            <input type="date" class="form-control" id="end_date" name="end_date" 
+                                   value="{{ semester.end_date if semester else '' }}" required>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="is_current" name="is_current" 
+                                   {{ 'checked' if semester and semester.is_current else '' }}>
+                            <label class="form-check-label" for="is_current">设为当前学期</label>
+                        </div>
+                        <button type="submit" class="btn btn-primary">保存</button>
+                        <a href="{{ url_for('system_config.semesters') }}" class="btn btn-secondary">取消</a>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

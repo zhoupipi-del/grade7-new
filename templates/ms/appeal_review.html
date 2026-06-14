@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}申诉复核 · 德育处{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('ms.appeal_list') }}">申诉管理</a></li>
+            <li class="breadcrumb-item active">申诉复核</li>
+        </ol>
+    </nav>
+
+    <div class="row">
+        <!-- 左侧：申诉信息 -->
+        <div class="col-lg-7">
+            <!-- 申诉详情 -->
+            <div class="card shadow-sm mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0"><i class="bi bi-file-text me-1"></i>申诉详情</h6>
+                    {% if appeal.status == 'pending' %}
+                    <span class="badge bg-warning text-dark">待处理</span>
+                    {% elif appeal.status == 'reviewing' %}
+                    <span class="badge bg-info">复核中</span>
+                    {% elif appeal.status == 'approved' %}
+                    <span class="badge bg-success">已通过</span>
+                    {% elif appeal.status == 'rejected' %}
+                    <span class="badge bg-danger">已驳回</span>
+                    {% endif %}
+                </div>
+                <div class="card-body">
+                    <div class="row mb-2">
+                        <div class="col-sm-3 text-muted">学生</div>
+                        <div class="col-sm-9"><strong>{{ appeal.student.name }}</strong></div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-3 text-muted">申请人</div>
+                        <div class="col-sm-9">{{ appeal.applicant.display_name }}</div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-3 text-muted">提交时间</div>
+                        <div class="col-sm-9">{{ appeal.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-sm-3 text-muted">申诉理由</div>
+                        <div class="col-sm-9">
+                            <div class="p-3 bg-light rounded">{{ appeal.reason }}</div>
+                        </div>
+                    </div>
+
+                    {% if appeal.status != 'pending' %}
+                    <div class="row mb-2">
+                        <div class="col-sm-3 text-muted">处理结果</div>
+                        <div class="col-sm-9">
+                            {{ appeal.review_comment or '-' }}
+                        </div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-3 text-muted">处理人</div>
+                        <div class="col-sm-9">{{ appeal.reviewer.display_name if appeal.reviewer else '-' }}</div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-3 text-muted">处理时间</div>
+                        <div class="col-sm-9">{{ appeal.reviewed_at.strftime('%Y-%m-%d %H:%M') if appeal.reviewed_at else '-' }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- 原始违纪记录 -->
+            <div class="card shadow-sm mb-3">
+                <div class="card-header"><h6 class="mb-0"><i class="bi bi-journal-x me-1"></i>原始违纪记录</h6></div>
+                <div class="card-body">
+                    {% set disc = appeal.discipline %}
+                    <div class="row mb-2">
+                        <div class="col-sm-3 text-muted">类别</div>
+                        <div class="col-sm-9">{{ disc.category or '未分类' }}</div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-3 text-muted">等级</div>
+                        <div class="col-sm-9">
+                            {% set type_map = {'warning': '警告', 'minor': '轻微', 'major': '重大', 'serious': '严重'} %}
+                            <span class="badge {% if disc.type == 'serious' %}bg-danger{% elif disc.type == 'major' %}bg-warning text-dark{% elif disc.type == 'minor' %}bg-info{% else %}bg-secondary{% endif %}">
+                                {{ type_map.get(disc.type, disc.type) }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-3 text-muted">描述</div>
+                        <div class="col-sm-9">{{ disc.description }}</div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-3 text-muted">处理措施</div>
+                        <div class="col-sm-9">{{ disc.action_taken or '-' }}</div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-3 text-muted">扣分</div>
+                        <div class="col-sm-9"><span class="text-danger fw-bold">{{ disc.points }}分</span></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-3 text-muted">记录时间</div>
+                        <div class="col-sm-9">{{ disc.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 处理表单（仅待处理时显示） -->
+            {% if appeal.status == 'pending' %}
+            <div class="card shadow-sm">
+                <div class="card-header"><h6 class="mb-0"><i class="bi bi-check-circle me-1"></i>处理操作</h6></div>
+                <div class="card-body">
+                    <form method="post">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">审核意见</label>
+                            <textarea name="review_comment" class="form-control" rows="3"
+                                placeholder="请填写审核意见..."></textarea>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button type="submit" name="action" value="approve" class="btn btn-success"
+                                onclick="return confirm('确认通过申诉？通过后原违纪记录将被撤销。')">
+                                <i class="bi bi-check-lg"></i> 通过申诉
+                            </button>
+                            <button type="submit" name="action" value="reject" class="btn btn-danger"
+                                onclick="return confirm('确认驳回申诉？')">
+                                <i class="bi bi-x-lg"></i> 驳回申诉
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- 右侧：学生违纪历史 -->
+        <div class="col-lg-5">
+            <div class="card shadow-sm">
+                <div class="card-header"><h6 class="mb-0"><i class="bi bi-clock-history me-1"></i>该学生违纪历史 (最近10条)</h6></div>
+                <div class="card-body p-0">
+                    {% if discipline_history %}
+                    <div class="list-group list-group-flush">
+                        {% for dh in discipline_history %}
+                        <div class="list-group-item py-3">
+                            <div class="d-flex justify-content-between align-items-start mb-1">
+                                <span class="badge {% if dh.type == 'serious' %}bg-danger{% elif dh.type == 'major' %}bg-warning text-dark{% elif dh.type == 'minor' %}bg-info{% else %}bg-secondary{% endif %}">
+                                    {{ {'warning':'警告','minor':'轻微','major':'重大','serious':'严重'}.get(dh.type, dh.type) }}
+                                </span>
+                                <small class="text-muted">{{ dh.created_at.strftime('%m-%d') }}</small>
+                            </div>
+                            <p class="mb-1 small">{{ dh.description[:100] }}</p>
+                            <div class="d-flex justify-content-between">
+                                <small class="text-muted">{{ dh.category or '' }}</small>
+                                <small><span class="text-danger">{{ dh.points }}分</span></small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-center py-4 text-muted">暂无其他违纪记录</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

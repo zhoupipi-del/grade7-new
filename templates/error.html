@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}错误{% endblock %}
+
+{% block content %}
+<div class="text-center mt-5">
+    <i class="bi bi-exclamation-triangle text-warning fs-1"></i>
+    <h3 class="mt-3">{{ message }}</h3>
+    <a href="/" class="btn btn-primary mt-3">返回首页</a>
+</div>
+{% endblock %}

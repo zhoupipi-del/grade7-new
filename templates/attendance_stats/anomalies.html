@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}异常预警 - 考勤统计看板 - 梨江中学{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-exclamation-octagon"></i> 考勤异常预警</h4>
+    <a href="{{ url_for('attendance_stats.index') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回概览
+    </a>
+</div>
+
+{% if not anomaly_list %}
+<div class="alert alert-info">
+    <i class="bi bi-check-circle"></i> 当前没有需要关注的考勤异常，表现良好！
+</div>
+{% else %}
+<div class="mb-2">
+    <span class="badge bg-danger me-1">红色=严重（连续缺勤≥3天）</span>
+    <span class="badge bg-warning text-dark">黄色=关注（周迟到≥3次 / 月缺勤≥5次）</span>
+</div>
+
+<div class="row g-3">
+    {% for item in anomaly_list %}
+    <div class="col-md-6 col-xl-4">
+        <div class="card shadow-sm
+            {% if item.max_level == 'danger' %}border-danger{% else %}border-warning{% endif %}">
+            <div class="card-header d-flex justify-content-between align-items-center
+                {% if item.max_level == 'danger' %}bg-danger text-white{% else %}bg-warning text-dark{% endif %}">
+                <span>
+                    <i class="bi bi-person-exclamation"></i>
+                    {{ item.student.name }}
+                </span>
+                <span class="badge
+                    {% if item.max_level == 'danger' %}bg-dark{% else %}bg-white text-dark{% endif %}">
+                    {{ item.student.class_.name }}
+                </span>
+            </div>
+            <div class="card-body">
+                <p class="mb-2 small text-muted">
+                    学号：{{ item.student.student_no }} |
+                    <a href="{{ url_for('attendance_stats.student_detail', sid=item.student.id) }}"
+                       class="link-primary">查看详情 &raquo;</a>
+                </p>
+                {% for w in item.warnings %}
+                <div class="alert alert-{{ w.level }} alert-dismissible fade show p-2 mb-2" role="alert">
+                    <i class="bi bi-{% if w.level == 'danger' %}exclamation-triangle-fill{% else %}exclamation-circle{% endif %}"></i>
+                    {{ w.text }}
+                </div>
+                {% endfor %}
+            </div>
+            <div class="card-footer bg-transparent">
+                <a href="{{ url_for('attendance_stats.student_detail', sid=item.student.id) }}"
+                   class="btn btn-sm btn-outline-primary w-100">
+                    <i class="bi bi-calendar-check"></i> 查看考勤详情
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+<p class="text-muted mt-3">共发现 <strong>{{ anomaly_list|length }}</strong> 名学生存在异常。</p>
+{% endif %}
+{% endblock %}

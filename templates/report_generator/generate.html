@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}生成报表{% endblock %}
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8 offset-md-2">
+            <div class="card">
+                <div class="card-header">
+                    <h4>生成报表</h4>
+                </div>
+                <div class="card-body">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }}">{{ message }}</div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+
+                    <form method="POST" action="">
+                        {% if not is_custom %}
+                        <!-- 报表类型选择 -->
+                        <div class="form-group mb-3">
+                            <label for="report_type">报表类型 <span class="text-danger">*</span></label>
+                            <select class="form-control" id="report_type" name="report_type" required onchange="toggleOptions()">
+                                <option value="">-- 请选择 --</option>
+                                <option value="weekly">周报表</option>
+                                <option value="monthly">月报表</option>
+                                <option value="semester">学期报表</option>
+                                <option value="custom">自定义报表</option>
+                            </select>
+                        </div>
+
+                        <!-- 报表标题 -->
+                        <div class="form-group mb-3">
+                            <label for="title">报表标题 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="title" name="title" required
+                                   placeholder="例如：2024-2025学年第一学期周报表">
+                        </div>
+
+                        <!-- 学期 -->
+                        <div class="form-group mb-3">
+                            <label for="semester">学期</label>
+                            <input type="text" class="form-control" id="semester" name="semester"
+                                   placeholder="例如：2024-2025-1">
+                        </div>
+
+                        <!-- 年级选择 -->
+                        <div class="form-group mb-3">
+                            <label for="grade_id">年级（留空=全校）</label>
+                            <select class="form-control" id="grade_id" name="grade_id">
+                                <option value="">-- 全校 --</option>
+                                {% for grade in grades %}
+                                <option value="{{ grade.id }}">{{ grade.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- 班级选择 -->
+                        <div class="form-group mb-3">
+                            <label for="class_id">班级（留空=全年级）</label>
+                            <select class="form-control" id="class_id" name="class_id">
+                                <option value="">-- 全年级 --</option>
+                                {% for class in classes %}
+                                <option value="{{ class.id }}">{{ class.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {% endif %}
+
+                        {% if is_custom or is_template %}
+                        <!-- 自定义报表选项 -->
+                        <div id="custom_options">
+                            <h5>自定义报表设置</h5>
+
+                            <div class="form-group mb-3">
+                                <label for="title">报表标题 <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="title" name="title" required
+                                       placeholder="例如：2024年9月违纪统计报表">
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label for="start_date">开始日期 <span class="text-danger">*</span></label>
+                                        <input type="date" class="form-control" id="start_date" name="start_date" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group mb-3">
+                                        <label for="end_date">结束日期 <span class="text-danger">*</span></label>
+                                        <input type="date" class="form-control" id="end_date" name="end_date" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-group mb-3">
+                                <label>数据维度（可多选）</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="data_dimension" value="违纪" id="dim1">
+                                    <label class="form-check-label" for="dim1">违纪</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="data_dimension" value="加分" id="dim2">
+                                    <label class="form-check-label" for="dim2">加分</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="data_dimension" value="扣分" id="dim3">
+                                    <label class="form-check-label" for="dim3">扣分</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="data_dimension" value="消息" id="dim4">
+                                    <label class="form-check-label" for="dim4">消息</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="data_dimension" value="活动" id="dim5">
+                                    <label class="form-check-label" for="dim5">活动</label>
+                                </div>
+                            </div>
+
+                            <div class="form-group mb-3">
+                                <label for="stats_dimension">统计维度</label>
+                                <select class="form-control" id="stats_dimension" name="stats_dimension">
+                                    <option value="class">按班级</option>
+                                    <option value="student">按学生</option>
+                                    <option value="teacher">按教师</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group mb-3">
+                                <label for="output_format">输出格式</label>
+                                <select class="form-control" id="output_format" name="output_format">
+                                    <option value="summary">汇总表</option>
+                                    <option value="detail">明细表</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group mb-3">
+                                <label for="grade_id">年级（留空=全校）</label>
+                                <select class="form-control" id="grade_id" name="grade_id">
+                                    <option value="">-- 全校 --</option>
+                                    {% for grade in grades %}
+                                    <option value="{{ grade.id }}">{{ grade.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <div class="form-group mb-3">
+                                <label for="class_id">班级（留空=全年级）</label>
+                                <select class="form-control" id="class_id" name="class_id">
+                                    <option value="">-- 全年级 --</option>
+                                    {% for class in classes %}
+                                    <option value="{{ class.id }}">{{ class.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <div class="form-group text-center mt-4">
+                            <button type="submit" class="btn btn-primary btn-lg">生成报表</button>
+                            <a href="{{ url_for('report_generator.index') }}" class="btn btn-secondary btn-lg">取消</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleOptions() {
+    var reportType = document.getElementById('report_type').value;
+    var customOptions = document.getElementById('custom_options');
+
+    if (reportType === 'custom') {
+        customOptions.style.display = 'block';
+    } else {
+        customOptions.style.display = 'none';
+    }
+}
+
+// 初始化
+document.addEventListener('DOMContentLoaded', function() {
+    toggleOptions();
+});
+</script>
+{% endblock %}

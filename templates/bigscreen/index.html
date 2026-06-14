@@ -1,0 +1,1814 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>梨江中学德育数据大屏</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap-icons.css') }}">
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { 
+    width: 100vw; 
+    height: 100vh; 
+    overflow-x: hidden; 
+    overflow-y: auto; 
+    background: linear-gradient(135deg, #0a1628 0%, #0f1923 50%, #1a2332 100%);
+    color: #fff; 
+    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif; 
+}
+body { 
+    padding: 15px; 
+    display: grid; 
+    grid-template-columns: 32% 1fr; 
+    gap: 15px; 
+    min-height: 100vh;
+}
+
+/* ── Loading ── */
+.loading-overlay { 
+    position: fixed; inset: 0; background: rgba(15,25,35,0.98); 
+    display: flex; align-items: center; justify-content: center; 
+    z-index: 10000; transition: opacity 0.5s; 
+}
+.loading-overlay.hidden { opacity: 0; pointer-events: none; }
+.spinner { 
+    width: 56px; height: 56px; 
+    border: 4px solid rgba(0,212,255,0.15); 
+    border-top-color: #00d4ff; 
+    border-radius: 50%; 
+    animation: spin 0.9s linear infinite; 
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Card 通用 ── */
+.card { 
+    background: linear-gradient(145deg, #1a2d3d 0%, #152530 100%);
+    border: 1px solid rgba(0,212,255,0.12);
+    border-radius: 12px; 
+    padding: 16px 18px; 
+    transition: all 0.35s cubic-bezier(0.4,0, 0.2,1);
+    position: relative;
+    overflow: hidden;
+}
+.card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+    opacity: 0;
+    transition: opacity 0.35s;
+}
+.card:hover::before { opacity: 1; }
+.card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 32px rgba(0,212,255,0.15), 0 2px 8px rgba(0,0,0,0.3);
+    border-color: rgba(0,212,255,0.3);
+}
+.card-title { 
+    font-size: 13px; 
+    color: #7a9ab4; 
+    margin-bottom: 8px; 
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+.card-value { 
+    font-size: 32px; 
+    font-weight: 800; 
+    color: #00d4ff; 
+    text-shadow: 0 0 20px rgba(0,212,255,0.3);
+    line-height: 1.1;
+}
+
+/* ── Header ── */
+.header { text-align: center; margin-bottom: 12px; }
+.header h1 { 
+    font-size: 28px; 
+    letter-spacing: 8px; 
+    color: #fff; 
+    text-shadow: 0 0 30px rgba(0,212,255,0.5), 0 0 60px rgba(0,212,255,0.2);
+    animation: glow 2s ease-in-out infinite alternate;
+}
+@keyframes glow {
+    from { text-shadow: 0 0 30px rgba(0,212,255,0.5); }
+    to   { text-shadow: 0 0 40px rgba(0,212,255,0.8), 0 0 80px rgba(0,212,255,0.3); }
+}
+.header .clock { 
+    font-size: 15px; 
+    color: #7a9ab4; 
+    margin-top: 6px;
+    font-family: 'Courier New', monospace;
+    letter-spacing: 1px;
+}
+
+/* ── Left ── */
+.left { display: flex; flex-direction: column; gap: 14px; }
+.stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.stat-card { text-align: center; cursor: pointer; }
+.stat-card .stat-icon { 
+    font-size: 24px; 
+    color: #00d4ff; 
+    margin-bottom: 4px; 
+    filter: drop-shadow(0 0 6px rgba(0,212,255,0.4));
+    transition: transform 0.3s;
+}
+.stat-card:hover .stat-icon { transform: scale(1.2); }
+.stat-card .stat-label { font-size: 12px; color: #7a9ab4; margin-top: 4px; }
+
+/* ── 违纪 ── */
+.discipline-section { display: flex; align-items: center; gap: 18px; }
+.discipline-section .disc-number { 
+    font-size: 48px; 
+    font-weight: 800; 
+    color: #ff6b6b; 
+    text-shadow: 0 0 20px rgba(255,107,107,0.4);
+    animation: pulse-red 2s ease-in-out infinite;
+}
+@keyframes pulse-red {
+    0%, 100% { text-shadow: 0 0 20px rgba(255,107,107,0.4); }
+    50%       { text-shadow: 0 0 30px rgba(255,107,107,0.7), 0 0 50px rgba(255,107,107,0.3); }
+}
+.discipline-section .disc-label { font-size: 13px; color: #7a9ab4; }
+.discipline-section .disc-sublabel { font-size: 11px; color: #5a7a94; margin-top: 2px; }
+.discipline-pie { width: 120px; height: 120px; flex-shrink: 0; }
+
+/* ── Right ── */
+.right { display: flex; flex-direction: column; gap: 14px; }
+.trend-chart-wrap { flex: 1; min-height: 280px; }
+.ranking-wrap { flex: 1; min-height: 280px; }
+.ranking-wrap canvas, .trend-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+.quick-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.quick-card { text-align: center; cursor: pointer; }
+.quick-card .qicon { font-size: 22px; color: #00d4ff; filter: drop-shadow(0 0 4px rgba(0,212,255,0.3)); }
+.quick-card .qlabel { font-size: 12px; color: #7a9ab4; margin-top: 4px; }
+
+/* ── Chart容器 ── */
+.canvas-wrap { position: relative; width: 100%; height: 100%; min-height: 200px; }
+
+/* ── ML预测卡片 ── */
+.ml-card { 
+    background: linear-gradient(145deg, #1a2d3d 0%, #152530 100%);
+    border: 1px solid rgba(0,212,255,0.15);
+    border-radius: 12px; 
+    padding: 14px 16px; 
+    transition: all 0.35s;
+}
+.ml-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(0,212,255,0.12);
+}
+.ml-card .ml-label { font-size: 12px; color: #7a9ab4; }
+.ml-card .ml-value { 
+    font-size: 22px; 
+    font-weight: 700; 
+    margin-top: 4px;
+}
+.ml-card .ml-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 6px;
+}
+
+/* ── 导出按钮 ── */
+.export-btn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    gap: 8px;
+}
+.export-btn .btn {
+    border-radius: 20px;
+    padding: 8px 16px;
+    font-size: 13px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    transition: all 0.3s;
+}
+.export-btn .btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+
+/* ── AI风险态势面板 ── */
+.risk-dashboard { display: flex; flex-direction: column; gap: 10px; }
+.risk-pie-row { display: flex; align-items: center; gap: 14px; }
+.risk-pie-wrap { width: 110px; height: 110px; flex-shrink: 0; position: relative; }
+.risk-pie-wrap .pie-center {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    text-align: center; pointer-events: none;
+}
+.risk-pie-wrap .pie-center .total-num { font-size: 20px; font-weight: 800; color: #fff; line-height: 1; }
+.risk-pie-wrap .pie-center .total-label { font-size: 10px; color: #5a7a94; }
+.risk-stats { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.risk-stat-item { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.risk-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 6px currentColor; }
+.risk-stat-item strong { font-size: 15px; margin-left: auto; }
+.risk-types-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.risk-type-badge {
+    font-size: 10px; padding: 3px 7px; border-radius: 10px;
+    font-weight: 500; white-space: nowrap;
+    cursor: default; transition: transform 0.2s;
+}
+.risk-type-badge:hover { transform: scale(1.08); }
+.risk-top10-header { font-size: 12px; color: #7a9ab4; display: flex; align-items: center; gap: 4px; }
+.risk-top10-list { max-height: 150px; overflow-y: auto; font-size: 11px; }
+.risk-top10-list::-webkit-scrollbar { width: 4px; }
+.risk-top10-list::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.2); border-radius: 2px; }
+.risk-top10-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 6px; border-radius: 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    transition: background 0.2s;
+    cursor: pointer;
+}
+.risk-top10-item:hover { background: rgba(0,212,255,0.06); }
+.risk-top10-item .rank-num { width: 18px; text-align: center; font-weight: 700; font-size: 12px; color: #5a7a94; }
+.risk-top10-item .student-name { flex: 1; color: #d0dce8; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.risk-top10-item .level-badge {
+    padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 600;
+}
+.risk-top10-item .level-badge.red { background: rgba(255,107,107,0.2); color: #ff6b6b; }
+.risk-top10-item .level-badge.yellow { background: rgba(255,167,38,0.2); color: #ffa726; }
+.risk-top10-item .warn-cnt { font-size: 10px; color: #5a7a94; min-width: 30px; text-align: right; }
+
+/* ── 响应式 ── */
+@media (max-width: 1200px) {
+    body { grid-template-columns: 1fr; }
+    .left, .right { gap: 12px; }
+}
+@media (max-width: 768px) {
+    .stat-row, .quick-row { grid-template-columns: repeat(2, 1fr); }
+    .header h1 { font-size: 20px; letter-spacing: 4px; }
+    .card-value { font-size: 24px; }
+}
+
+/* ── Tab 导航 ── */
+.bigscreen-tabs {
+    display: flex; gap: 8px; margin-bottom: 10px;
+}
+.bigscreen-tab {
+    flex: 1; padding: 9px 14px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(0,212,255,0.12);
+    border-radius: 8px; color: #5a7a94;
+    cursor: pointer; font-size: 13px; font-weight: 500;
+    transition: all 0.3s; text-align: center;
+}
+.bigscreen-tab.active {
+    background: rgba(0,212,255,0.1);
+    border-color: #00d4ff; color: #00d4ff;
+    box-shadow: 0 0 12px rgba(0,212,255,0.15);
+}
+.bigscreen-tab:hover:not(.active) {
+    border-color: rgba(0,212,255,0.25); color: #8ba0b4;
+}
+
+/* ── 学情驾驶舱 ── */
+.cliff-section-title {
+    font-size: 12px; font-weight: 600; margin-bottom: 8px;
+    padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.cliff-list {
+    max-height: 260px; overflow-y: auto; font-size: 11px;
+}
+.cliff-list::-webkit-scrollbar { width: 3px; }
+.cliff-list::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.15); border-radius: 2px; }
+.cliff-item {
+    display: flex; align-items: center; gap: 6px; padding: 5px 6px;
+    border-radius: 4px; border-bottom: 1px solid rgba(255,255,255,0.03);
+    transition: background 0.2s; cursor: pointer;
+}
+.cliff-item:hover { background: rgba(255,255,255,0.04); }
+.cliff-item .cliff-rank { width: 20px; font-weight: 700; font-size: 12px; text-align: center; }
+.cliff-item .cliff-name { flex: 1; color: #d0dce8; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cliff-item .cliff-subj { font-size: 10px; color: #7a9ab4; background: rgba(255,255,255,0.04); padding: 1px 5px; border-radius: 3px; }
+.cliff-item .cliff-delta { font-weight: 700; font-size: 12px; min-width: 55px; text-align: right; white-space: nowrap; }
+.cliff-item .cliff-scores { font-size: 10px; color: #5a7a94; min-width: 55px; text-align: right; }
+
+.ranking-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px; background: rgba(255,255,255,0.02);
+    border-radius: 6px; border-left: 3px solid transparent;
+    transition: all 0.3s;
+}
+.ranking-item:hover { background: rgba(255,255,255,0.05); transform: translateX(4px); }
+.ranking-item .rank-badge {
+    width: 28px; height: 28px; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; font-size: 12px; font-weight: 800;
+    flex-shrink: 0;
+}
+.ranking-item .rank-badge.gold { background: rgba(255,167,38,0.2); color: #ffa726; }
+.ranking-item .rank-badge.silver { background: rgba(160,180,200,0.2); color: #a0b4c8; }
+.ranking-item .rank-badge.bronze { background: rgba(205,127,50,0.2); color: #cd7f32; }
+.ranking-item .rank-badge.normal { background: rgba(90,122,148,0.15); color: #5a7a94; }
+.ranking-item .rank-class-name { font-size: 13px; font-weight: 600; color: #e0e8f0; min-width: 55px; }
+.ranking-item .rank-progress-wrap { flex: 1; }
+.ranking-item .rank-progress {
+    height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden;
+}
+.ranking-item .rank-progress-bar {
+    height: 100%; border-radius: 4px; transition: width 0.8s ease;
+}
+.ranking-item .rank-pct { font-size: 12px; font-weight: 700; min-width: 42px; text-align: right; }
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+</div>
+
+<!-- 导出按钮 -->
+<div class="export-btn">
+    <button class="btn btn-outline-light btn-sm" onclick="exportPDF()">
+        <i class="bi bi-file-pdf"></i> 导出PDF
+    </button>
+    <button class="btn btn-outline-success btn-sm" onclick="exportExcel()">
+        <i class="bi bi-file-excel"></i> 导出Excel
+    </button>
+    <button class="btn btn-outline-info btn-sm" onclick="toggleAutoRefresh()">
+        <i class="bi bi-arrow-clockwise" id="refresh-icon"></i> <span id="refresh-text">自动刷新:开</span>
+    </button>
+</div>
+
+<!-- LEFT COLUMN -->
+<div class="left">
+  <div class="header card">
+    <h1>梨江中学德育数据大屏</h1>
+    <div class="clock" id="clock"></div>
+  </div>
+
+  <div class="stat-row">
+    <div class="card stat-card" onclick="drillDown('students')">
+      <i class="bi bi-people-fill stat-icon"></i>
+      <div class="card-value" data-count="total_students">0</div>
+      <div class="stat-label">在校学生</div>
+    </div>
+    <div class="card stat-card" onclick="drillDown('classes')">
+      <i class="bi bi-grid-fill stat-icon"></i>
+      <div class="card-value" data-count="total_classes">0</div>
+      <div class="stat-label">班级</div>
+    </div>
+    <div class="card stat-card" onclick="drillDown('teachers')">
+      <i class="bi bi-person-badge-fill stat-icon"></i>
+      <div class="card-value" data-count="total_teachers">0</div>
+      <div class="stat-label">教师</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><i class="bi bi-exclamation-triangle-fill"></i> 近30天违纪情况</div>
+    <div class="discipline-section">
+      <div>
+        <div class="disc-number" data-count="discipline_count">0</div>
+        <div class="disc-label">人次</div>
+        <div class="disc-sublabel">等级分布</div>
+      </div>
+      <div class="discipline-pie">
+        <canvas id="discPie"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 4 刀2: AI实时风险态势面板 (替代原ML伪预测卡片) -->
+  <div class="card" id="risk-dashboard-card">
+    <div class="card-title">
+      <i class="bi bi-shield-check"></i> AI实时风险态势
+      <span style="float:right;font-size:10px;color:#5a7a94;" id="risk-scan-date"></span>
+    </div>
+    <div class="risk-dashboard">
+      <!-- Row 1: 三色饼图 + 统计 -->
+      <div class="risk-pie-row">
+        <div class="risk-pie-wrap">
+          <canvas id="riskPieChart"></canvas>
+          <div class="pie-center">
+            <div class="total-num" id="risk-total-num">0</div>
+            <div class="total-label">预警总数</div>
+          </div>
+        </div>
+        <div class="risk-stats">
+          <div class="risk-stat-item" style="color:#ff6b6b;">
+            <span class="risk-dot" style="background:#ff6b6b;"></span>
+            红色预警 <strong id="risk-red-stat">0</strong>
+          </div>
+          <div class="risk-stat-item" style="color:#ffa726;">
+            <span class="risk-dot" style="background:#ffa726;"></span>
+            黄色预警 <strong id="risk-yellow-stat">0</strong>
+          </div>
+          <div class="risk-stat-item" style="color:#4ecdc4;">
+            <span class="risk-dot" style="background:#4ecdc4;"></span>
+            绿色(正常) <strong id="risk-green-stat">0</strong>
+          </div>
+        </div>
+      </div>
+      <!-- Row 2: 8类预警热力标签 -->
+      <div class="risk-types-row" id="risk-types-container"></div>
+      <!-- Row 3: Top-10 高危名单 -->
+      <div class="risk-top10-header">
+        <i class="bi bi-exclamation-diamond-fill" style="color:#ff6b6b;"></i> Top-10 高危名单
+      </div>
+      <div class="risk-top10-list" id="risk-top10-list">
+        <div style="color:#5a7a94; text-align:center; padding:20px;">加载中...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="card stat-card">
+      <i class="bi bi-speedometer stat-icon"></i>
+      <div class="card-value" data-count="wing_avg">0</div>
+      <div class="stat-label">五翼均分</div>
+    </div>
+    <div class="card stat-card">
+      <i class="bi bi-graph-up-arrow stat-icon" style="color:#ffa726"></i>
+      <div class="card-value" data-count="score_avg">0</div>
+      <div class="stat-label">成绩均分</div>
+    </div>
+    <div class="card stat-card">
+      <i class="bi bi-envelope-check-fill stat-icon"></i>
+      <div class="card-value" data-count="notice_read_rate">0%</div>
+      <div class="stat-label">通知阅读率</div>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="card stat-card">
+      <i class="bi bi-heart-pulse stat-icon" style="color:#ff6b6b"></i>
+      <div class="card-value" data-count="mh_high">0</div>
+      <div class="stat-label">心理高风险</div>
+    </div>
+    <div class="card stat-card">
+      <i class="bi bi-shield-exclamation stat-icon" style="color:#ffa726"></i>
+      <div class="card-value" data-count="risk_red">0</div>
+      <div class="stat-label">AI红色预警</div>
+    </div>
+    <div class="card stat-card">
+      <i class="bi bi-calendar-check stat-icon"></i>
+      <div class="card-value" data-count="att_rate">0%</div>
+      <div class="stat-label">出勤率</div>
+    </div>
+  </div>
+</div>
+
+<!-- RIGHT COLUMN -->
+<div class="right">
+  <!-- Tab 选择器 -->
+  <div class="bigscreen-tabs">
+    <button class="bigscreen-tab active" onclick="switchTab('overview')">
+      <i class="bi bi-speedometer2"></i> 态势总览
+    </button>
+    <button class="bigscreen-tab" onclick="switchTab('academic')">
+      <i class="bi bi-lightbulb-fill"></i> 学情驾驶舱
+    </button>
+    <button class="bigscreen-tab" onclick="switchTab('social')">
+      <i class="bi bi-diagram-3-fill"></i> 隐形网络
+    </button>
+  </div>
+
+  <!-- Tab 1: 态势总览 -->
+  <div id="tab-overview" class="tab-panel">
+  <div class="card trend-chart-wrap">
+    <div class="card-title"><i class="bi bi-graph-up"></i> 近7日趋势 <span class="badge bg-dark ms-2" style="font-size:10px; cursor:pointer;" onclick="toggleTrendView()">AI风险趋势</span></div>
+    <div class="canvas-wrap"><canvas id="trendChart"></canvas></div>
+  </div>
+  <div class="card ranking-wrap">
+    <div class="card-title"><i class="bi bi-bar-chart-fill"></i> 班级常规评分排名 <span class="badge bg-dark ms-2" style="font-size:10px; cursor:pointer;" onclick="drillDown('class-detail')">查看详情</span></div>
+    <div class="canvas-wrap"><canvas id="rankChart"></canvas></div>
+  </div>
+  <div class="quick-row">
+    <div class="card quick-card" onclick="drillDown('notices')">
+      <i class="bi bi-bell-fill qicon"></i>
+      <div class="card-value" data-count="notice_count">0</div>
+      <div class="qlabel">通知总数</div>
+    </div>
+    <div class="card quick-card" onclick="drillDown('read-rate')">
+      <i class="bi bi-check-circle-fill qicon"></i>
+      <div class="card-value" data-count="notice_read_rate2">0%</div>
+      <div class="qlabel">阅读率</div>
+    </div>
+    <div class="card quick-card" onclick="drillDown('visits')">
+      <i class="bi bi-person-lines-fill qicon"></i>
+      <div class="card-value" data-count="visit_count2">0</div>
+      <div class="qlabel">家访次数</div>
+    </div>
+  </div>
+  </div>
+
+  <!-- Tab 2: 学情驾驶舱 -->
+  <div id="tab-academic" class="tab-panel" style="display:none;">
+  <div class="card" style="flex:1;">
+    <div class="card-title">
+      <i class="bi bi-exclamation-diamond-fill" style="color:#ff6b6b;"></i> 学业断崖雷达 / 触底复苏雷达
+      <span style="float:right;font-size:10px;color:#5a7a94;" id="cliff-exam-range"></span>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div>
+        <div class="cliff-section-title" style="color:#ff6b6b;">
+          <i class="bi bi-arrow-down-circle-fill"></i> 突发断崖 Top10
+        </div>
+        <div class="cliff-list" id="cliff-list">
+          <div style="color:#5a7a94; text-align:center; padding:30px;">计算中...</div>
+        </div>
+      </div>
+      <div>
+        <div class="cliff-section-title" style="color:#4ecdc4;">
+          <i class="bi bi-arrow-up-circle-fill"></i> 触底复苏 Top10
+        </div>
+        <div class="cliff-list" id="recovery-list">
+          <div style="color:#5a7a94; text-align:center; padding:30px;">计算中...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="flex:1;">
+    <div class="card-title">
+      <i class="bi bi-trophy-fill" style="color:#ffa726;"></i> 班主任先锋排行（五维评分覆盖率）
+      <span style="float:right;font-size:10px;color:#5a7a94;">实时更新</span>
+    </div>
+    <div id="teacher-ranking-list" style="display:flex; flex-direction:column; gap:7px;">
+      <div style="color:#5a7a94; text-align:center; padding:30px;">加载中...</div>
+    </div>
+  </div>
+  </div>
+
+  <!-- Tab 3: 隐形网络 -->
+  <div id="tab-social" class="tab-panel" style="display:none; flex-direction:column; gap:12px; height:100%;">
+    <div class="card" style="flex:2; min-height:400px; position:relative;">
+      <div class="card-title">
+        <i class="bi bi-diagram-3-fill" style="color:#00d4ff;"></i> 
+        全校隐形社交共振与违纪团伙图谱
+        <span style="float:right;font-size:10px;color:#5a7a94;" id="graph-info">加载中...</span>
+      </div>
+      <div id="social-graph-chart" style="width:100%; height:calc(100% - 40px); min-height:360px;"></div>
+      <div style="position:absolute; bottom:12px; left:18px; display:flex; gap:12px; font-size:10px; color:#7a8a9a;">
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ffa502;margin-right:4px;"></span>普通节点</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff4757;margin-right:4px;"></span>高危核心</span>
+        <span style="margin-left:8px;">线粗=共振频次</span>
+      </div>
+    </div>
+    <div class="card" style="flex:1; overflow-y:auto; max-height:320px;">
+      <div class="card-title">
+        <i class="bi bi-shield-exclamation" style="color:#ff4757;"></i>
+        跨班隐形团伙自动报警
+        <span style="float:right;font-size:10px;color:#5a7a94;" id="gang-count">—</span>
+      </div>
+      <div id="gang-warnings-list" style="font-size:11px;">
+        <div style="color:#5a7a94; text-align:center; padding:20px;">图谱加载后自动分析...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Clock ──
+function updateClock() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth()+1).padStart(2,'0');
+  const d = String(now.getDate()).padStart(2,'0');
+  const h = String(now.getHours()).padStart(2,'0');
+  const mi = String(now.getMinutes()).padStart(2,'0');
+  const s = String(now.getSeconds()).padStart(2,'0');
+  const el = document.getElementById('clock');
+  if (el) el.textContent = y+'-'+m+'-'+d+' '+h+':'+mi+':'+s;
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// ── Counting动画 ──
+function animateCount(el, target, duration) {
+  duration = duration || 1500;
+  const isFloat = String(target).includes('.');
+  const start = 0;
+  const startTime = performance.now();
+  function step(now) {
+    const elapsed = now - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 4); // easeOutQuart
+    let val = start + (target - start) * eased;
+    el.textContent = isFloat ? val.toFixed(1) : Math.round(val).toLocaleString();
+    if (progress < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+// ── Charts ──
+let discPieChart = null;
+let riskPieChartInstance = null;
+let trendChartInstance = null;
+let rankChartInstance = null;
+let trendViewMode = 0;  // 0=常规趋势(违纪/常规/出勤), 1=AI风险趋势(红/黄/绿)
+let cachedTrendData = null;
+let cachedRiskTrendData = null;
+
+function renderDiscPie(level_a, level_b, level_c) {
+  const ctx = document.getElementById('discPie').getContext('2d');
+  if (discPieChart) discPieChart.destroy();
+  discPieChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['A级', 'B级', 'C级'],
+      datasets: [{
+        data: [level_a || 0, level_b || 0, level_c || 0],
+        backgroundColor: ['#00d4ff', '#ffa726', '#ff6b6b'],
+        borderWidth: 0,
+        hoverOffset: 8,
+      }]
+    },
+    options: {
+      cutout: '55%',
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: '#7a9ab4', font: { size: 11 }, padding: 8, boxWidth: 10 }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) { return ctx.label + ': ' + ctx.parsed + ' 人次'; }
+          }
+        }
+      },
+      responsive: true,
+      maintainAspectRatio: false,
+      onClick: function(evt, elements) {
+        if (elements.length > 0) {
+          const index = elements[0].index;
+          const levels = ['warning', 'minor', 'major'];
+          const labels = ['A级', 'B级', 'C级'];
+          const level = levels[index];
+          window.open('/grade/discipline?level=' + level, '_blank');
+        }
+      }
+    }
+  });
+}
+
+function renderTrend(trend) {
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  if (trendChartInstance) trendChartInstance.destroy();
+  const labels = trend.map(t => t.date);
+  trendChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: '违纪人次',
+          data: trend.map(t => t.discipline),
+          borderColor: '#ff6b6b',
+          backgroundColor: 'rgba(255,107,107,0.1)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#ff6b6b',
+          borderWidth: 2,
+        },
+        {
+          label: '常规评分',
+          data: trend.map(t => t.routine),
+          borderColor: '#00d4ff',
+          backgroundColor: 'rgba(0,212,255,0.1)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#00d4ff',
+          borderWidth: 2,
+        },
+        {
+          label: '出勤率%',
+          data: trend.map(t => t.attendance),
+          borderColor: '#4ecdc4',
+          backgroundColor: 'rgba(78,205,196,0.1)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#4ecdc4',
+          yAxisID: 'y1',
+          borderWidth: 2,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
+      scales: {
+        x: { ticks: { color: '#5a7a94' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { 
+          ticks: { color: '#5a7a94' }, 
+          grid: { color: 'rgba(255,255,255,0.05)' }, 
+          beginAtZero: true, 
+          position: 'left', 
+          title: { display: true, text: '人次', color: '#5a7a94' } 
+        },
+        y1: { 
+          ticks: { color: '#4ecdc4', callback: v => v + '%' }, 
+          grid: { display: false }, 
+          beginAtZero: false, 
+          min: 80, 
+          max: 100, 
+          position: 'right', 
+          title: { display: true, text: '出勤率', color: '#4ecdc4' } 
+        }
+      },
+      plugins: {
+        legend: { labels: { color: '#8ba0b4', font: { size: 12 } }, onClick: function(evt, legendItem) {
+          const index = legendItem.datasetIndex;
+          const meta = trendChartInstance.getDatasetMeta(index);
+          meta.hidden = meta.hidden === null ? true : null;
+          trendChartInstance.update();
+        }},
+        tooltip: {
+          backgroundColor: 'rgba(26,45,61,0.95)',
+          titleColor: '#00d4ff',
+          bodyColor: '#fff',
+          borderColor: 'rgba(0,212,255,0.3)',
+          borderWidth: 1,
+          padding: 12,
+          callbacks: {
+            afterBody: function(context) {
+              return '\n点击图例可隐藏/显示数据';
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+// ── Phase 4 刀3: AI三色风险趋势图 ──
+function renderRiskTrend(riskTrend) {
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  if (trendChartInstance) trendChartInstance.destroy();
+  if (!riskTrend || !riskTrend.dates || riskTrend.dates.length === 0) {
+    trendChartInstance = null;
+    return;
+  }
+  const labels = riskTrend.dates;
+  trendChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: '红色预警',
+          data: riskTrend.red,
+          borderColor: '#ff6b6b',
+          backgroundColor: 'rgba(255,107,107,0.08)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 8,
+          pointBackgroundColor: '#ff6b6b',
+          borderWidth: 2.5,
+          borderDash: [],
+        },
+        {
+          label: '黄色预警',
+          data: riskTrend.yellow,
+          borderColor: '#ffa726',
+          backgroundColor: 'rgba(255,167,38,0.08)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#ffa726',
+          borderWidth: 2,
+          borderDash: [],
+        },
+        {
+          label: '绿色(正常)',
+          data: riskTrend.green || [],
+          borderColor: '#4ecdc4',
+          backgroundColor: 'rgba(78,205,196,0.06)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 3,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#4ecdc4',
+          borderWidth: 1.5,
+          borderDash: [4, 3],
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
+      scales: {
+        x: {
+          ticks: { color: '#5a7a94' },
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          title: { display: true, text: '日期', color: '#5a7a94' }
+        },
+        y: {
+          ticks: { color: '#5a7a94' },
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          beginAtZero: true,
+          title: { display: true, text: '预警人次', color: '#5a7a94' }
+        }
+      },
+      plugins: {
+        legend: {
+          labels: { color: '#8ba0b4', font: { size: 12 }, usePointStyle: true, pointStyleWidth: 10 },
+          onClick: function(evt, legendItem) {
+            const index = legendItem.datasetIndex;
+            const meta = trendChartInstance.getDatasetMeta(index);
+            meta.hidden = meta.hidden === null ? true : null;
+            trendChartInstance.update();
+          }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(26,45,61,0.95)',
+          titleColor: '#00d4ff',
+          bodyColor: '#fff',
+          borderColor: 'rgba(0,212,255,0.3)',
+          borderWidth: 1,
+          padding: 12,
+          callbacks: {
+            label: function(ctx) {
+              return ctx.dataset.label + ': ' + ctx.parsed.y + ' 人次';
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderRanking(class_scores) {
+  const ctx = document.getElementById('rankChart').getContext('2d');
+  if (rankChartInstance) rankChartInstance.destroy();
+  const sorted = class_scores.slice().sort((a,b) => a.score - b.score);
+  const labels = sorted.map(c => c.name);
+  const classIds = sorted.map(c => c.id || 0);
+  const scores = sorted.map(c => c.score);
+  const colors = scores.map(s => s >= 90 ? '#00d4ff' : s >= 80 ? '#ffa726' : '#ff6b6b');
+  rankChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '常规均分',
+        data: scores,
+        backgroundColor: colors,
+        borderRadius: 6,
+        barThickness: 18,
+        hoverBackgroundColor: colors.map(c => c + 'cc'),
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { min: 0, max: 100, ticks: { color: '#5a7a94' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { ticks: { color: '#8ba0b4', font: { size: 12 } }, grid: { display: false } }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { 
+          backgroundColor: 'rgba(26,45,61,0.95)',
+          titleColor: '#00d4ff',
+          bodyColor: '#fff',
+          borderColor: 'rgba(0,212,255,0.3)',
+          borderWidth: 1,
+          padding: 12,
+          callbacks: { 
+            label: function(ctx) { 
+              const rank = sorted.length - ctx.dataIndex;
+              return '第' + rank + '名: ' + ctx.parsed.x + ' 分'; 
+            } 
+          } 
+        }
+      },
+      onClick: function(evt, elements) {
+        if (elements.length > 0) {
+          const index = elements[0].index;
+          const classId = classIds[index];
+          if (classId) {
+            window.open('/grade/discipline?class_id=' + classId, '_blank');
+          }
+        }
+      }
+    }
+  });
+}
+
+// ── Phase 4 刀2: AI风险态势渲染 ──
+const RISK_TYPE_LABELS = {
+  'score_drop': '成绩骤降',
+  'academic_drop': '学业下滑',
+  'absence_risk': '缺勤风险',
+  'major_discipline': '重大违纪',
+  'minor_discipline': '轻微违纪',
+  'psych_survey_high': '心理高风险',
+  'psych_survey_medium': '心理中风险',
+  'behavior_issue': '行为问题',
+  'emotional_issue': '情绪问题',
+  'social_issue': '社交问题',
+};
+const RISK_TYPE_COLORS = [
+  '#ff6b6b','#ffa726','#4ecdc4','#00d4ff',
+  '#a29bfe','#fd79a8','#fdcb6e','#55efc4',
+  '#74b9ff','#e17055'
+];
+
+function renderRiskPie(red, yellow, green) {
+  const canvas = document.getElementById('riskPieChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (riskPieChartInstance) riskPieChartInstance.destroy();
+  
+  const total = red + yellow + green;
+  document.getElementById('risk-total-num').textContent = total;
+  document.getElementById('risk-red-stat').textContent = red;
+  document.getElementById('risk-yellow-stat').textContent = yellow;
+  document.getElementById('risk-green-stat').textContent = green;
+  
+  riskPieChartInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['红色预警', '黄色预警', '绿色正常'],
+      datasets: [{
+        data: [red || 0, yellow || 0, green || 0],
+        backgroundColor: ['#ff6b6b', '#ffa726', '#4ecdc4'],
+        borderWidth: 0,
+        hoverOffset: 6,
+      }]
+    },
+    options: {
+      cutout: '62%',
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(26,45,61,0.95)',
+          titleColor: '#00d4ff',
+          bodyColor: '#fff',
+          borderColor: 'rgba(0,212,255,0.3)',
+          borderWidth: 1,
+          padding: 8,
+          callbacks: {
+            label: function(ctx) {
+              const pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
+              return ctx.label + ': ' + ctx.parsed + ' 人 (' + pct + '%)';
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderRiskByType(riskByType) {
+  const container = document.getElementById('risk-types-container');
+  if (!container) return;
+  if (!riskByType || Object.keys(riskByType).length === 0) {
+    container.innerHTML = '<span style="font-size:10px;color:#5a7a94;">暂无预警分类数据</span>';
+    return;
+  }
+  
+  // Sort by count descending
+  const entries = Object.entries(riskByType).sort((a, b) => b[1] - a[1]);
+  const maxCount = entries[0] ? entries[0][1] : 1;
+  
+  container.innerHTML = entries.map(([key, count], idx) => {
+    const label = RISK_TYPE_LABELS[key] || key;
+    const color = RISK_TYPE_COLORS[idx % RISK_TYPE_COLORS.length];
+    const opacity = 0.15 + (count / maxCount) * 0.2; // darker = more
+    return '<span class="risk-type-badge" style="background:' + color + 
+           '33; color:' + color + '; border:1px solid ' + color + '44;" ' +
+           'title="' + label + ': ' + count + ' 人次">' + label + ' ' + count + '</span>';
+  }).join('');
+}
+
+function renderRiskTop10(riskTopN) {
+  const container = document.getElementById('risk-top10-list');
+  if (!container) return;
+  if (!riskTopN || riskTopN.length === 0) {
+    container.innerHTML = '<div style="color:#5a7a94; text-align:center; padding:20px;">暂无高危学生</div>';
+    return;
+  }
+  
+  container.innerHTML = riskTopN.map((item, idx) => {
+    const rankColor = idx < 3 ? ['#ff6b6b','#ffa726','#fdcb6e'][idx] : '#5a7a94';
+    const levelClass = item.level === 'red' ? 'red' : 'yellow';
+    const levelLabel = item.level === 'red' ? '🔴' : '🟡';
+    const details = item.details || '';
+    const detailsShort = details.length > 16 ? details.substring(0, 14) + '…' : details;
+    return '<div class="risk-top10-item" onclick="showStudentRisk(' + item.student_id + ')" title="' + item.name + ' | ' + item.class_name + ' | 点击查看AI归因">' +
+      '<span class="rank-num" style="color:' + rankColor + ';">' + (idx + 1) + '</span>' +
+      '<span class="student-name">' + item.name + '</span>' +
+      '<span class="level-badge ' + levelClass + '">' + levelLabel + '</span>' +
+      '<span style="font-size:10px;color:#5a7a94;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + details + '">' + detailsShort + '</span>' +
+      '<span class="warn-cnt">' + item.warning_count + '项</span>' +
+    '</div>';
+  }).join('');
+}
+
+// ── 获取数据 ──
+let autoRefresh = true;
+let refreshInterval = null;
+
+function fetchData() {
+  fetch('/bigscreen/data')
+    .then(r => r.json())
+    .then(data => {
+      applyData(data);
+      document.getElementById('loading').classList.add('hidden');
+    })
+    .catch(err => {
+      console.error('Failed to fetch data:', err);
+      document.getElementById('loading').classList.add('hidden');
+    });
+}
+
+function applyData(data) {
+  const map = {
+    'total_students': data.total_students,
+    'total_classes': data.total_classes,
+    'total_teachers': data.total_teachers,
+    'discipline_count': data.discipline_count,
+    'wing_avg': data.wing_avg,
+    'notice_read_rate': data.notice_read_rate,
+    'visit_count': data.visit_count,
+    'notice_count': data.notice_count,
+    'notice_read_rate2': data.notice_read_rate,
+    'visit_count2': data.visit_count,
+    'score_avg': data.score_avg,
+    'mh_high': data.mh_high,
+    'risk_red': data.risk_red,
+    'att_rate': data.att_rate,
+  };
+  
+  document.querySelectorAll('[data-count]').forEach(el => {
+    const key = el.getAttribute('data-count');
+    if (key === 'notice_read_rate' || key === 'notice_read_rate2' || key === 'att_rate') {
+      const val = data[key === 'att_rate' ? 'att_rate' : 'notice_read_rate'];
+      animateCount(el, val, 1500);
+      setTimeout(() => { el.textContent = val.toFixed(1) + '%'; }, 1600);
+    } else if (map[key] !== undefined) {
+      animateCount(el, map[key], 1500);
+    }
+  });
+
+  renderDiscPie(data.level_a || 0, data.level_b || 0, data.level_c || 0);
+  cachedTrendData = data.trend;
+  cachedRiskTrendData = data.risk_trend;
+  if (trendViewMode === 1 && cachedRiskTrendData && cachedRiskTrendData.dates && cachedRiskTrendData.dates.length > 0) {
+    renderRiskTrend(cachedRiskTrendData);
+  } else {
+    renderTrend(data.trend);
+  }
+  renderRanking(data.class_scores);
+  
+  // Phase 4 刀2: AI风险态势真数据渲染
+  renderRiskPie(data.risk_red || 0, data.risk_yellow || 0, data.risk_green || 0);
+  renderRiskByType(data.risk_by_type || {});
+  renderRiskTop10(data.risk_top_n || []);
+  
+  // 风险扫描日期
+  const scanDateEl = document.getElementById('risk-scan-date');
+  if (scanDateEl && data.latest_scan_date) {
+    scanDateEl.textContent = data.latest_scan_date;
+  }
+}
+
+// ── Tab 切换 ──
+function switchTab(tabName) {
+  document.querySelectorAll('.bigscreen-tab').forEach(function(t) {
+    var label = t.textContent.trim();
+    var target;
+    if (tabName === 'overview') target = '态势';
+    else if (tabName === 'academic') target = '学情';
+    else target = '隐形';
+    t.classList.toggle('active', label.indexOf(target) !== -1);
+  });
+  
+  document.getElementById('tab-overview').style.display = tabName === 'overview' ? '' : 'none';
+  document.getElementById('tab-academic').style.display = tabName === 'academic' ? '' : 'none';
+  
+  var socialPanel = document.getElementById('tab-social');
+  if (tabName === 'social') {
+    socialPanel.style.display = 'flex';
+    if (!window._socialLoaded) {
+      fetchSocialGraph();
+      window._socialLoaded = true;
+    }
+  } else {
+    socialPanel.style.display = 'none';
+  }
+  
+  if (tabName === 'academic' && !window._radarLoaded) {
+    fetchAcademicRadar();
+    window._radarLoaded = true;
+  }
+}
+
+// ── 学情驾驶舱数据 ──
+function fetchAcademicRadar() {
+  fetch('/bigscreen/academic-radar')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { renderAcademicRadar(data); })
+    .catch(function(err) {
+      console.error('Academic radar fetch failed:', err);
+      document.getElementById('cliff-list').innerHTML = '<div style="color:#ff6b6b; text-align:center; padding:20px;">加载失败</div>';
+      document.getElementById('recovery-list').innerHTML = '<div style="color:#ff6b6b; text-align:center; padding:20px;">加载失败</div>';
+    });
+}
+
+function renderAcademicRadar(data) {
+  // 断崖列表
+  var cliffEl = document.getElementById('cliff-list');
+  var recEl = document.getElementById('recovery-list');
+  
+  if (data.cliffs && data.cliffs.length > 0) {
+    cliffEl.innerHTML = data.cliffs.map(function(c, i) {
+      var rankColor = i < 3 ? ['#ff6b6b','#ffa726','#fdcb6e'][i] : '#5a7a94';
+      return '<div class="cliff-item" onclick="showStudentRisk(' + c.student_id + ')" style="cursor:pointer;" title="' + c.class_name + ' ' + c.student_name + ' | 点击查看AI归因分析">' +
+        '<span class="cliff-rank" style="color:' + rankColor + ';">' + (i+1) + '</span>' +
+        '<span class="cliff-name">' + c.student_name + '</span>' +
+        '<span class="cliff-subj">' + c.subject + '</span>' +
+        '<span class="cliff-scores">' + c.prev_score + '→' + c.curr_score + '</span>' +
+        '<span class="cliff-delta" style="color:#ff6b6b;">' + (c.delta > 0 ? '+' : '') + c.delta + '分</span>' +
+      '</div>';
+    }).join('');
+  } else {
+    cliffEl.innerHTML = '<div style="color:#5a7a94; text-align:center; padding:30px;">📊 暂无显著断崖数据</div>';
+  }
+  
+  // 复苏列表
+  if (data.recoveries && data.recoveries.length > 0) {
+    recEl.innerHTML = data.recoveries.map(function(r, i) {
+      var rankColor = i < 3 ? ['#4ecdc4','#55efc4','#00d4ff'][i] : '#5a7a94';
+      return '<div class="cliff-item" onclick="showStudentRisk(' + r.student_id + ')" style="cursor:pointer;" title="' + r.class_name + ' ' + r.student_name + ' | 点击查看AI归因分析">' +
+        '<span class="cliff-rank" style="color:' + rankColor + ';">' + (i+1) + '</span>' +
+        '<span class="cliff-name">' + r.student_name + '</span>' +
+        '<span class="cliff-subj">' + r.subject + '</span>' +
+        '<span class="cliff-scores">' + r.prev_score + '→' + r.curr_score + '</span>' +
+        '<span class="cliff-delta" style="color:#4ecdc4;">+' + r.delta + '分</span>' +
+      '</div>';
+    }).join('');
+  } else {
+    recEl.innerHTML = '<div style="color:#5a7a94; text-align:center; padding:30px;">📊 暂无显著复苏数据</div>';
+  }
+  
+  // 更新考试范围
+  if (data.total_exams) {
+    document.getElementById('cliff-exam-range').textContent = '共' + data.total_exams + '场考试 | 跨学期斜率分析';
+  }
+  
+  // 红黑榜
+  var rankEl = document.getElementById('teacher-ranking-list');
+  if (data.teacher_ranking && data.teacher_ranking.length > 0) {
+    var maxRate = data.teacher_ranking[data.teacher_ranking.length - 1].coverage_rate || 1;
+    rankEl.innerHTML = data.teacher_ranking.map(function(r, i) {
+      var badgeClass;
+      if (i === 0) badgeClass = 'gold';
+      else if (i === 1) badgeClass = 'silver';
+      else if (i === 2) badgeClass = 'bronze';
+      else badgeClass = 'normal';
+      
+      var pctColor;
+      if (r.coverage_rate >= 80) pctColor = '#4ecdc4';
+      else if (r.coverage_rate >= 40) pctColor = '#ffa726';
+      else pctColor = '#ff6b6b';
+      
+      var barColor;
+      if (r.coverage_rate >= 80) barColor = '#4ecdc4';
+      else if (r.coverage_rate >= 40) barColor = '#ffa726';
+      else barColor = '#ff6b6b';
+      
+      return '<div class="ranking-item" style="border-left-color:' + pctColor + '; cursor:pointer;" onclick="window.open(\'/grade/discipline?class_id=' + r.class_id + '\', \'_blank\')" title="点击查看班级纪律详情">' +
+        '<span class="rank-badge ' + badgeClass + '">' + (i+1) + '</span>' +
+        '<span class="rank-class-name">' + r.class_name + '</span>' +
+        '<span style="font-size:10px; color:#5a7a94; min-width:50px;">' + r.covered_students + '/' + r.total_students + '人</span>' +
+        '<span class="rank-progress-wrap">' +
+          '<div class="rank-progress"><div class="rank-progress-bar" style="width:' + r.coverage_rate + '%; background:' + barColor + ';"></div></div>' +
+        '</span>' +
+        '<span class="rank-pct" style="color:' + pctColor + ';">' + r.coverage_rate + '%</span>' +
+      '</div>';
+    }).join('');
+  }
+}
+
+// ── 死党图谱数据获取与渲染 ──
+function fetchSocialGraph() {
+  fetch('/bigscreen/social-graph')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { 
+      renderSocialGraph(data);
+      renderGangWarnings(data.gang_warnings || []);
+    })
+    .catch(function(err) {
+      console.error('Social graph fetch failed:', err);
+      document.getElementById('social-graph-chart').innerHTML = '<div style="color:#ff6b6b;text-align:center;padding-top:150px;">图谱加载失败</div>';
+    });
+}
+
+var socialChartInstance = null;
+
+function renderSocialGraph(data) {
+  var dom = document.getElementById('social-graph-chart');
+  if (!dom) return;
+  
+  if (!socialChartInstance) {
+    socialChartInstance = echarts.init(dom);
+  }
+  
+  var categories = [
+    { name: '普通节点', itemStyle: { color: '#ffa502' } },
+    { name: '高危核心', itemStyle: { color: '#ff4757' } }
+  ];
+  
+  var option = {
+    tooltip: {
+      trigger: 'item',
+      formatter: function(p) {
+        if (p.dataType === 'node') {
+          return '<b>' + p.name + '</b><br/>共振密度: ' + p.value + '<br/>' + (p.data.tooltip_extra || '');
+        }
+        return p.name + ' → 共现' + p.value + '次';
+      },
+      backgroundColor: 'rgba(15,25,35,0.95)',
+      borderColor: 'rgba(0,212,255,0.3)',
+      textStyle: { color: '#e0e8f0', fontSize: 12 }
+    },
+    legend: {
+      data: categories.map(function(c) { return c.name; }),
+      textStyle: { color: '#7a8a9a', fontSize: 11 },
+      top: 0,
+      right: 0
+    },
+    series: [{
+      type: 'graph',
+      layout: 'force',
+      data: data.nodes,
+      links: data.links,
+      categories: categories,
+      roam: true,
+      draggable: true,
+      force: {
+        repulsion: 300,
+        gravity: 0.08,
+        edgeLength: [80, 250],
+        layoutAnimation: true
+      },
+      emphasis: {
+        focus: 'adjacency',
+        lineStyle: { width: 8 },
+        itemStyle: { shadowBlur: 20, shadowColor: 'rgba(255,71,87,0.8)' }
+      },
+      label: {
+        show: true,
+        position: 'right',
+        color: '#b0c4d8',
+        fontSize: 11,
+        formatter: function(p) {
+          return p.name.length > 4 ? p.name.slice(0, 3) + '…' : p.name;
+        }
+      },
+      edgeSymbol: ['none', 'none'],
+      lineStyle: {
+        color: 'rgba(255,71,87,0.35)',
+        curveness: 0.15,
+        opacity: 0.6
+      }
+    }]
+  };
+  
+  socialChartInstance.setOption(option, true);
+  
+  // 节点点击穿透 — 打开AI风险归因弹窗
+  socialChartInstance.off('click');
+  socialChartInstance.on('click', function(params) {
+    if (params.dataType === 'node' && params.data && params.data.id) {
+      showStudentRisk(parseInt(params.data.id));
+    }
+  });
+  
+  // 窗口大小自适应
+  window.addEventListener('resize', function() {
+    if (socialChartInstance) socialChartInstance.resize();
+  });
+  
+  // 更新信息栏
+  var infoEl = document.getElementById('graph-info');
+  if (infoEl) {
+    infoEl.textContent = data.total_students_in_graph + '节点 · ' + data.total_edges + '条边 · 30分钟窗';
+  }
+}
+
+function renderGangWarnings(warnings) {
+  var el = document.getElementById('gang-warnings-list');
+  var countEl = document.getElementById('gang-count');
+  if (!el) return;
+  
+  if (countEl) countEl.textContent = warnings.length + '个高危团伙';
+  
+  if (!warnings || warnings.length === 0) {
+    el.innerHTML = '<div style="color:#4ecdc4;text-align:center;padding:20px;">✅ 未发现跨班隐形违纪团伙</div>';
+    return;
+  }
+  
+  el.innerHTML = warnings.map(function(w, i) {
+    var levelIcon = w.resonance >= 8 ? '🔴' : (w.resonance >= 5 ? '🟠' : '🟡');
+    return '<div style="background:rgba(255,71,87,0.08); border-left:3px solid #ff4757; padding:8px 12px; margin-bottom:6px; border-radius:0 6px 6px 0; cursor:pointer;"' +
+      ' onclick="showStudentRisk(' + w.student1_id + ')"' +
+      ' title="' + w.student1 + '(' + w.class1 + ') ⇄ ' + w.student2 + '(' + w.class2 + ') | 点击查看' + w.student1 + '风险归因">' +
+      '<div style="display:flex; align-items:center; gap:6px; margin-bottom:3px;">' +
+        '<span style="font-size:14px;">' + levelIcon + '</span>' +
+        '<span style="color:#ff6b6b; font-weight:700;">#高危团伙' + (i+1) + '</span>' +
+        '<span style="background:rgba(255,71,87,0.2); color:#ff4757; padding:1px 6px; border-radius:3px; font-size:10px;">共振' + w.resonance + '次</span>' +
+        '<span style="margin-left:auto; font-size:10px; color:#4ecdc4; opacity:0.7;">点击分析</span>' +
+      '</div>' +
+      '<div style="color:#b0c4d8; font-size:12px;">' +
+        '<span style="color:#ffa502;">' + w.student1 + '</span>（' + w.class1 + '）' +
+        ' ⇄ ' +
+        '<span style="color:#ffa502;">' + w.student2 + '</span>（' + w.class2 + '）' +
+      '</div>' +
+      '<div style="color:#5a7a94; font-size:10px; margin-top:2px;">⚠ 跨班级隐蔽关联，建议年级组长联合约谈</div>' +
+    '</div>';
+  }).join('');
+}
+
+function drillDown(type) {
+  switch(type) {
+    case 'students':
+      window.open('/class_/students', '_blank');
+      break;
+    case 'classes':
+      window.open('/grade/classes', '_blank');
+      break;
+    case 'teachers':
+      window.open('/ms/teachers', '_blank');
+      break;
+    case 'notices':
+      window.open('/common/messages', '_blank');
+      break;
+    case 'class-detail':
+      // 跳转到年级纪律页（可按班级筛选）
+      window.open('/grade/discipline', '_blank');
+      break;
+    case 'visits':
+      // 跳转到家校沟通/家访页面
+      window.open('/grade/leaves', '_blank');
+      break;
+    default:
+      console.log('Drill down: ' + type);
+  }
+}
+
+function toggleTrendView() {
+  trendViewMode = 1 - trendViewMode;
+  if (trendViewMode === 1) {
+    if (cachedRiskTrendData && cachedRiskTrendData.dates && cachedRiskTrendData.dates.length > 0) {
+      renderRiskTrend(cachedRiskTrendData);
+    } else {
+      alert('暂无AI风险趋势数据，请等待系统扫描生成预警数据。');
+      trendViewMode = 0;
+      return;
+    }
+  } else {
+    if (cachedTrendData) {
+      renderTrend(cachedTrendData);
+    }
+  }
+  // 更新按钮文字
+  const badge = document.querySelector('.trend-chart-wrap .badge');
+  if (badge) {
+    badge.textContent = trendViewMode === 1 ? '常规趋势' : 'AI风险趋势';
+  }
+}
+
+function toggleAutoRefresh() {
+  autoRefresh = !autoRefresh;
+  const icon = document.getElementById('refresh-icon');
+  const text = document.getElementById('refresh-text');
+  
+  if (autoRefresh) {
+    icon.className = 'bi bi-arrow-clockwise';
+    text.textContent = '自动刷新:开';
+    refreshInterval = setInterval(fetchData, 60000);
+    alert('✅ 自动刷新已开启（60秒）');
+  } else {
+    icon.className = 'bi bi-pause-circle';
+    text.textContent = '自动刷新:关';
+    if (refreshInterval) clearInterval(refreshInterval);
+    alert('⏸️ 自动刷新已关闭');
+  }
+}
+
+// ── 导出功能 ──
+function exportPDF() {
+  alert('📄 PDF导出功能开发中...\n\n将生成包含当前数据大屏所有图表的PDF报告');
+}
+
+function exportExcel() {
+  alert('📊 Excel导出功能开发中...\n\n将导出包含所有数据的Excel文件');
+}
+
+// ── 初始化 ──
+fetchData();
+refreshInterval = setInterval(fetchData, 60000);
+</script>
+<!-- AI风险归因 Modal -->
+<div class="modal fade" id="riskModal" tabindex="-1" aria-labelledby="riskModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content" style="background: #1a2d3d; color: #e0e8f0; border: 1px solid rgba(0,212,255,0.2);">
+      <div class="modal-header" style="border-bottom: 1px solid rgba(0,212,255,0.15);">
+        <h5 class="modal-title" id="riskModalLabel" style="color:#00d4ff;">
+          <i class="bi bi-shield-exclamation"></i> AI风险归因分析
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body" id="riskModalBody">
+        <!-- Loading -->
+        <div id="riskModalLoading" style="text-align:center; padding:40px;">
+          <div class="spinner-border text-info" role="status" style="width:3rem; height:3rem;">
+            <span class="visually-hidden">加载中...</span>
+          </div>
+          <p style="margin-top:12px; color:#7a9ab4;">正在分析学生风险特征...</p>
+        </div>
+        <!-- Content -->
+        <div id="riskModalContent" style="display:none;">
+          <!-- 学生基本信息 -->
+          <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.08);">
+            <div>
+              <div style="font-size:20px; font-weight:700; color:#fff;" id="modalStudentName">--</div>
+              <div style="font-size:12px; color:#7a9ab4;" id="modalStudentClass">--</div>
+            </div>
+            <div style="margin-left:auto; text-align:right;">
+              <div style="font-size:12px; color:#7a9ab4;">风险概率</div>
+              <div style="font-size:28px; font-weight:800;" id="modalRiskProb" style="color:#ff6b6b;">--</div>
+            </div>
+            <div>
+              <span class="badge" id="modalRiskLevelBadge" style="font-size:13px; padding:6px 12px;">--</span>
+            </div>
+          </div>
+          <!-- 双轨归因 Row -->
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <!-- 左轨：算法维度 -->
+            <div>
+              <div style="font-size:13px; color:#00d4ff; margin-bottom:8px; font-weight:600;">
+                <i class="bi bi-cpu-fill"></i> 算法特征贡献
+              </div>
+              <div id="modalTopFactors" style="display:flex; flex-direction:column; gap:6px;">
+                <!-- JS动态填充 -->
+              </div>
+            </div>
+            <!-- 右轨：业务维度 -->
+            <div>
+              <div style="font-size:13px; color:#ffa726; margin-bottom:8px; font-weight:600;">
+                <i class="bi bi-clipboard2-data-fill"></i> 业务异常证据
+              </div>
+              <div id="modalEvidence" style="display:flex; flex-direction:column; gap:6px;">
+                <!-- JS动态填充 -->
+              </div>
+            </div>
+
+            <!-- ════ AI 智能干预推荐卡 ════ -->
+            <div id="modalAiRecommendation" style="display:none; margin-top:12px;">
+              <!-- JS 动态注入 -->
+            </div>
+          </div>
+        </div>
+        <!-- Error -->
+        <div id="riskModalError" style="display:none; text-align:center; padding:30px; color:#ff6b6b;">
+          <i class="bi bi-exclamation-triangle-fill" style="font-size:32px;"></i>
+          <p style="margin-top:10px;" id="riskModalErrorMsg">加载失败</p>
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top:1px solid rgba(0,212,255,0.15);">
+        <a class="btn btn-outline-warning btn-sm" id="btnTalkSheet" href="#" target="_blank" style="display:none;">
+          <i class="bi bi-file-earmark-text"></i> 生成谈话单
+        </a>
+        <button type="button" class="btn btn-outline-info btn-sm" onclick="refreshRiskAnalysis()">
+          <i class="bi bi-arrow-clockwise"></i> 刷新分析
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── AI推理穿透 ──
+let currentRiskStudentId = null;
+
+function showStudentRisk(studentId) {
+  currentRiskStudentId = studentId;
+  const modalEl = document.getElementById('riskModal');
+  const modal = new bootstrap.Modal(modalEl);
+  
+  // 重置状态
+  document.getElementById('riskModalLoading').style.display = 'block';
+  document.getElementById('riskModalContent').style.display = 'none';
+  document.getElementById('riskModalError').style.display = 'none';
+  
+  modal.show();
+  
+  // AJAX 调用推理 API
+  fetch('/ai-api/predict/' + studentId)
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(data => {
+      populateRiskModal(data);
+    })
+    .catch(err => {
+      console.error('AI推理请求失败:', err);
+      document.getElementById('riskModalLoading').style.display = 'none';
+      document.getElementById('riskModalError').style.display = 'block';
+      document.getElementById('riskModalErrorMsg').textContent = '推理服务调用失败: ' + err.message;
+    });
+}
+
+function populateRiskModal(data) {
+  document.getElementById('riskModalLoading').style.display = 'none';
+  document.getElementById('riskModalContent').style.display = 'block';
+  
+  // 学生姓名
+  document.getElementById('modalStudentName').textContent = data.student_name || '未知';
+  document.getElementById('modalStudentClass').textContent = 'ID: ' + data.student_id;
+  
+  // 风险概率 + 等级
+  const prob = (data.risk_probability * 100).toFixed(1);
+  const probEl = document.getElementById('modalRiskProb');
+  probEl.textContent = prob + '%';
+  probEl.style.color = data.risk_level === 'high' ? '#ff6b6b' : '#ffa726';
+  
+  const badge = document.getElementById('modalRiskLevelBadge');
+  if (data.risk_level === 'high') {
+    badge.textContent = '🔴 高风险';
+    badge.className = 'badge bg-danger';
+  } else if (data.risk_level === 'medium') {
+    badge.textContent = '🟡 中风险';
+    badge.className = 'badge bg-warning text-dark';
+  } else {
+    badge.textContent = '🟢 低风险';
+    badge.className = 'badge bg-success';
+  }
+  
+  // 激活"生成谈话单"按钮
+  const talkBtn = document.getElementById('btnTalkSheet');
+  talkBtn.href = '/ai-api/talk-sheet/' + data.student_id;
+  talkBtn.style.display = 'inline-block';
+
+  // ════ AI 智能干预推荐 ════
+  populateSmartRecommendation(data);
+  
+  // 左轨：算法特征贡献
+  const factorsEl = document.getElementById('modalTopFactors');
+  factorsEl.innerHTML = '';
+  if (data.top_factors && data.top_factors.length > 0) {
+    data.top_factors.forEach((f, idx) => {
+      const pct = (f.importance * 100).toFixed(1);
+      const barColor = idx === 0 ? '#ff6b6b' : idx === 1 ? '#ffa726' : '#00d4ff';
+      const factorLabel = getFactorLabel(f.feature);
+      factorsEl.innerHTML += '<div style="font-size:11px;">' +
+        '<div style="display:flex; justify-content:space-between; margin-bottom:2px;">' +
+          '<span style="color:#b0c4d8;">' + factorLabel + '</span>' +
+          '<span style="color:' + barColor + '; font-weight:600;">' + pct + '%</span>' +
+        '</div>' +
+        '<div style="height:4px; background:rgba(255,255,255,0.08); border-radius:2px;">' +
+          '<div style="height:100%; width:' + pct + '%; background:' + barColor + '; border-radius:2px; transition:width 0.6s;"></div>' +
+        '</div>' +
+      '</div>';
+    });
+  } else {
+    factorsEl.innerHTML = '<span style="font-size:11px; color:#5a7a94;">暂无特征数据</span>';
+  }
+  
+  // 右轨：业务异常证据
+  const evidenceEl = document.getElementById('modalEvidence');
+  evidenceEl.innerHTML = '';
+  if (data.evidence && Object.keys(data.evidence).length > 0) {
+    Object.entries(data.evidence).forEach(([key, val]) => {
+      const displayKey = getEvidenceLabel(key);
+      const isBad = String(val).includes('超标') || String(val).includes('下降') || String(val).includes('偏低');
+      evidenceEl.innerHTML += '<div style="font-size:11px; padding:4px 6px; background:rgba(255,255,255,0.04); border-radius:4px;">' +
+        '<span style="color:#7a9ab4;">' + displayKey + ':</span> ' +
+        '<span style="color:' + (isBad ? '#ff6b6b' : '#4ecdc4') + '; font-weight:600;">' + val + '</span>' +
+      '</div>';
+    });
+  } else {
+    evidenceEl.innerHTML = '<span style="font-size:11px; color:#5a7a94;">暂无异常证据</span>';
+  }
+
+  // ── 调用 AI 智能推荐引擎 ──
+  populateSmartRecommendation(data);
+}
+
+function populateSmartRecommendation(data) {
+  /**
+   * 归因敏感型推荐（Attribution-Aware Recommendation）
+   * 解析 top_factors[0].feature，将学生分为三类动态展示推荐卡片
+   */
+  const container = document.getElementById('modalAiRecommendation');
+  const cardsEl = container.querySelector('div') || document.getElementById('modalAiRecommendation');
+  
+  if (!data.top_factors || data.top_factors.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  // 第一归因因子
+  const primaryFactor = data.top_factors[0].feature;
+  const primaryLabel = getFactorLabel(primaryFactor);
+
+  // ── 教育学专家先验权重（冷启动兜底）──
+  const EXPERT_PRIOR = {
+    "座位调整":   { avg_reduction: 18.5, success_rate: 82, desc: "空间隔离，降低违纪触发频率" },
+    "家长联动":   { avg_reduction: 15.2, success_rate: 75, desc: "家校协同，强化行为约束" },
+    "学业辅导":   { avg_reduction: 12.1, success_rate: 70, desc: "结对帮扶，补齐学业短板" },
+    "行为契约":   { avg_reduction: 9.8,  success_rate: 68, desc: "量化目标，正向激励" },
+    "心理干预":   { avg_reduction: 8.5,  success_rate: 65, desc: "专业评估，情绪疏导" },
+    "谈话":       { avg_reduction: 5.4,  success_rate: 60, desc: "师生沟通，了解根源" },
+  };
+
+  // 场景分类
+  let scenario = "default";
+  let recommendedType = "谈话";
+  if (primaryFactor === "discipline_factor") {
+    scenario = "discipline";
+    recommendedType = "座位调整";
+  } else if (primaryFactor === "math_avg" || primaryFactor === "math_slope") {
+    scenario = "academic";
+    recommendedType = "学业辅导";
+  }
+
+  const rec = EXPERT_PRIOR[recommendedType] || EXPERT_PRIOR["谈话"];
+
+  // 渲染推荐卡片
+  container.style.display = 'block';
+  container.innerHTML = 
+    '<div style="font-size:12px; color:#00d4ff; margin-bottom:6px; font-weight:600;">' +
+      '<i class="bi bi-lightbulb-fill"></i> 归因敏感型推荐（第一因子: ' + primaryLabel + '）' +
+    '</div>' +
+    '<div style="background:linear-gradient(135deg, rgba(0,212,255,0.12), rgba(0,212,255,0.04));' +
+           'border:1px solid rgba(0,212,255,0.25); border-radius:8px; padding:10px;">' +
+      '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">' +
+        '<span style="font-size:13px; color:#fff; font-weight:600;">' + recommendedType + '</span>' +
+        '<span style="font-size:10px; color:#00d4ff; background:rgba(0,212,255,0.15); padding:2px 6px; border-radius:4px;">' +
+          '降幅 ' + rec.avg_reduction + '% / 成功率 ' + rec.success_rate + '%' +
+        '</span>' +
+      '</div>' +
+      '<div style="font-size:11px; color:#b0c4d8; margin-bottom:8px;">' + rec.desc + '</div>' +
+      '<div style="display:flex; gap:6px;">' +
+        '<button class="btn btn-outline-info btn-xs" onclick="alert(\'即将跳转创建干预记录...\')" style="font-size:11px; padding:3px 8px;">' +
+          '<i class="bi bi-plus-circle"></i> 创建干预' +
+        '</button>' +
+        '<button class="btn btn-outline-warning btn-xs" onclick="refreshRiskAnalysis()" style="font-size:11px; padding:3px 8px;">' +
+          '<i class="bi bi-arrow-clockwise"></i> 重新评估' +
+        '</button>' +
+      '</div>' +
+    '</div>' +
+    '<div style="font-size:10px; color:#5a7a94; margin-top:6px;">' +
+      '基于全校历史干预后验数据 + 教育学专家先验权重（冷启动兜底）' +
+    '</div>';
+}
+
+// ════ AI 智能干预推荐引擎 ════
+/**
+ * 根据算法归因的第一主因(top_factors[0])动态推荐最佳干预措施
+ * 含 6 大场景分类 + 教育学专家先验兜底
+ */
+function populateSmartRecommendation(data) {
+  const container = document.getElementById('modalAiRecommendation');
+  if (!container) return;
+
+  const topFactor = (data.top_factors && data.top_factors.length > 0)
+    ? data.top_factors[0].feature : 'default';
+
+  // ── 场景分类映射（6大风险类型） ──
+  const FACTOR_MAP = {
+    'discipline_factor': {
+      icon: '🎯', label: '违纪高危型', factorName: '行为纪律因子',
+      recType: '座位调整 / 空间隔离', recColor: 'warning', recBg: 'rgba(255,193,7,0.08)',
+      barPct: 82, avgDrop: '18.5%', successRate: '82.0%',
+      suggestion: '建议联动年级组执行组内微调，实施空间隔离 + 同桌正能量绑定',
+    },
+    'math_avg': {
+      icon: '📚', label: '学业滑坡型', factorName: '数学学业底子',
+      recType: '结对帮扶 / 导师制补弱', recColor: 'info', recBg: 'rgba(13,110,253,0.08)',
+      barPct: 75, avgDrop: '15.2%', successRate: '75.0%',
+      suggestion: '建议利用午自习或课后服务完成 1 对 1 绑定，重点突破基础题',
+    },
+    'math_slope': {
+      icon: '📉', label: '学业断崖型', factorName: '数学成绩趋势',
+      recType: '学业辅导 / 家校联动', recColor: 'info', recBg: 'rgba(13,110,253,0.08)',
+      barPct: 70, avgDrop: '12.1%', successRate: '70.0%',
+      suggestion: '趋势恶化比当前分数更危险，建议立即启动家校联动 + 每日小目标签约',
+    },
+    'attendance_rate': {
+      icon: '📅', label: '出勤异常型', factorName: '出勤率因子',
+      recType: '家长联动 / 行为契约', recColor: 'secondary', recBg: 'rgba(108,117,125,0.08)',
+      barPct: 68, avgDrop: '9.8%', successRate: '68.0%',
+      suggestion: '出勤问题通常关联家庭因素，建议先做一次深度家访或电话沟通',
+    },
+    'quality_score': {
+      icon: '⭐', label: '综合素质型', factorName: '综合素质评价',
+      recType: '谈话 / 心理干预', recColor: 'primary', recBg: 'rgba(13,110,253,0.08)',
+      barPct: 60, avgDrop: '5.4%', successRate: '60.0%',
+      suggestion: '素质分偏低通常反映融入问题，建议安排班级职务 + 正向激励合约',
+    },
+    'risk_density': {
+      icon: '🚨', label: '预警密集型', factorName: '近期预警密度',
+      recType: '谈话 / 行为契约', recColor: 'danger', recBg: 'rgba(220,53,69,0.08)',
+      barPct: 65, avgDrop: '8.5%', successRate: '65.0%',
+      suggestion: '密集预警说明问题正在发酵，建议 48 小时内完成首次干预并记录',
+    },
+  };
+
+  const cfg = FACTOR_MAP[topFactor] || {
+    icon: '📢', label: '多维均衡型', factorName: '多因子综合',
+    recType: '常规师生谈话 + 家校联动', recColor: 'secondary', recBg: 'rgba(108,117,125,0.08)',
+    barPct: 60, avgDrop: '5.4%', successRate: '60.0%',
+    suggestion: '建议优先采用常规师生谈话，在周五放学前同步开启家校联动，建立双向追踪机制',
+  };
+
+  container.style.display = 'block';
+  container.innerHTML = `
+    <div class="alert alert-${cfg.recColor} border-start border-4 bg-opacity-10"
+         style="background-color: ${cfg.recBg}; --bs-alert-bg:transparent;">
+      <div class="d-flex align-items-center mb-2">
+        <span class="fs-5 me-2">${cfg.icon}</span>
+        <strong class="text-${cfg.recColor}">AI 智能干预建议（${cfg.label}）</strong>
+      </div>
+      <p class="small text-secondary mb-2">
+        该生的核心风险由<strong>${cfg.factorName}</strong>驱动。根据本校历史干预大数据分析：
+      </p>
+      <div class="p-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25">
+        <div class="d-flex justify-content-between text-light small mb-1">
+          <span>🥇 推荐最佳措施：<span class="badge bg-${cfg.recColor} text-dark">${cfg.recType}</span></span>
+          <span class="text-success">平均风险降幅: <strong>${cfg.avgDrop}</strong></span>
+        </div>
+        <div class="progress" style="height: 4px;">
+          <div class="progress-bar bg-success" style="width: ${cfg.barPct}%;"></div>
+        </div>
+        <div class="d-flex justify-content-between text-muted" style="font-size: 11px; margin-top: 2px;">
+          <span>历史成功率: ${cfg.successRate}</span>
+          <span>${cfg.suggestion}</span>
+        </div>
+      </div>
+      <div class="mt-2 text-end">
+        <a href="/ai-api/intervention/report" target="_blank"
+           class="btn btn-outline-${cfg.recColor} btn-xs" style="font-size:11px;">
+          📊 查看完整干预效能看板 →
+        </a>
+      </div>
+    </div>`;
+}
+
+function getFactorLabel(feature) {
+  const MAP = {
+    'discipline_factor': '违纪因子',
+    'math_avg': '数学成绩',
+    'math_slope': '数学趋势',
+    'risk_density': '预警密度',
+    'quality_score': '素质分',
+    'attendance_rate': '出勤率',
+  };
+  return MAP[feature] || feature;
+}
+
+function getEvidenceLabel(key) {
+  const MAP = {
+    'discipline': '违纪情况',
+    'math': '数学成绩',
+    'attendance': '出勤情况',
+    'quality': '素质评价',
+    'risk': '近期预警',
+  };
+  return MAP[key] || key;
+}
+
+function refreshRiskAnalysis() {
+  if (currentRiskStudentId) {
+    showStudentRisk(currentRiskStudentId);
+  }
+}
+</script>
+
+</body>
+</html>

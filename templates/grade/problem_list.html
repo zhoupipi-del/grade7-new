@@ -1,0 +1,94 @@
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-exclamation-triangle text-warning me-2"></i>问题学生（本年级）</h4>
+</div>
+
+{% if records %}
+<div class="row g-3 mb-3">
+  {% set red_count = records|selectattr("level","equalto","red")|list|length %}
+  {% set yellow_count = records|selectattr("level","equalto","yellow")|list|length %}
+  {% set active_count = records|selectattr("status","equalto","active")|list|length %}
+  <div class="col-md-3">
+    <div class="card border-danger">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-danger">{{ red_count }}</div>
+        <div class="text-muted small">🔴 红色预警</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-warning">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-warning">{{ yellow_count }}</div>
+        <div class="text-muted small">🟡 黄色预警</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-primary">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-primary">{{ records|length }}</div>
+        <div class="text-muted small">总数</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-info">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-info">{{ active_count }}</div>
+        <div class="text-muted small">跟踪中</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>学生</th>
+        <th>班级</th>
+        <th>类别</th>
+        <th>预警</th>
+        <th>状态</th>
+        <th>描述</th>
+        <th>更新时间</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in records %}
+      <tr>
+        <td><strong>{{ r.student.name if r.student else "?" }}</strong></td>
+        <td>{{ r.student.class_.name if r.student and r.student.class_ else "?" }}</td>
+        <td><span class="badge bg-info">{{ r.category }}</span></td>
+        <td>
+          {% if r.level == "red" %}
+          <span class="badge bg-danger">🔴 红色</span>
+          {% else %}
+          <span class="badge bg-warning text-dark">🟡 黄色</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if r.status == "active" %}
+          <span class="badge bg-warning text-dark">跟踪中</span>
+          {% elif r.status == "monitoring" %}
+          <span class="badge bg-info">观察中</span>
+          {% elif r.status == "resolved" %}
+          <span class="badge bg-success">已结案</span>
+          {% else %}
+          <span class="badge bg-secondary">{{ r.status }}</span>
+          {% endif %}
+        </td>
+        <td><small class="text-muted" title="{{ r.description }}">{{ r.description[:35] }}{% if r.description|length > 35 %}...{% endif %}</small></td>
+        <td><small class="text-muted">{{ r.updated_at.strftime("%m-%d %H:%M") if r.updated_at else "" }}</small></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-people display-1 text-muted"></i>
+  <p class="text-muted mt-3">本年级暂无问题学生档案</p>
+  <p class="text-muted small">问题学生档案由德育处统一建档管理</p>
+</div>
+{% endif %}

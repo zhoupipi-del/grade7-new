@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}消息详情 – 梨江中学德育平台{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-3">
+
+  <!-- 顶部操作栏 -->
+  <div class="d-flex align-items-center mb-3">
+    <a href="{{ url_for('common.messages') }}"
+       class="btn btn-outline-secondary btn-sm me-3">
+      <i class="bi bi-arrow-left me-1"></i> 返回列表
+    </a>
+    <h5 class="mb-0"><i class="bi bi-envelope-open me-2"></i>消息详情</h5>
+    {% if not msg.is_read %}
+      <span class="badge bg-primary ms-2">未读</span>
+    {% endif %}
+  </div>
+
+  <!-- 消息卡片 -->
+  <div class="card shadow-sm border-0">
+    <div class="card-header bg-white d-flex align-items-center">
+      <div class="flex-grow-1">
+        <h5 class="mb-1">{{ msg.title }}</h5>
+        <div class="text-muted small">
+          <i class="bi bi-person me-1"></i> 发件人：{{ sender_name }}
+          &nbsp;|&nbsp;
+          <i class="bi bi-clock me-1"></i> {{ sent_at }}
+        </div>
+      </div>
+    </div>
+    <div class="card-body" style="white-space: pre-wrap; line-height: 1.8;">
+      {{ msg.content }}
+    </div>
+  </div>
+
+</div>
+{% endblock %}

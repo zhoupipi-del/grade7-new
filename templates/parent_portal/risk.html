@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}AI风险预警 - {{ student.name }}{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h3><i class="bi bi-shield-exclamation text-warning"></i> AI风险预警</h3>
+        <p class="text-muted">{{ student.name }} — 系统自动扫描分析，帮助您及时关注孩子状态</p>
+    </div>
+</div>
+
+<!-- 当前风险状态 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0">
+            <div class="card-body text-center py-4">
+                <div class="mb-2">
+                    {% if not latest or latest.risk_level == 'green' %}
+                    <i class="bi bi-check-circle display-3 text-success"></i>
+                    <h5 class="mt-2 text-success">当前状态良好</h5>
+                    <p class="text-muted small mb-0">未触发风险预警</p>
+                    {% elif latest.risk_level == 'yellow' %}
+                    <i class="bi bi-exclamation-triangle display-3 text-warning"></i>
+                    <h5 class="mt-2 text-warning">中等风险</h5>
+                    <p class="text-muted small mb-0">{{ latest.warning_count }} 项预警触发</p>
+                    {% else %}
+                    <i class="bi bi-x-octagon display-3 text-danger"></i>
+                    <h5 class="mt-2 text-danger">高风险</h5>
+                    <p class="text-muted small mb-0">{{ latest.warning_count }} 项预警触发</p>
+                    {% endif %}
+                </div>
+                {% if latest %}
+                <div class="text-muted small">最近扫描：{{ latest.scan_date.strftime('%Y-%m-%d') }}</div>
+                {% endif %}
+            </div>
+        </div>
+        {% if feature_attr and feature_attr.summary %}
+        <div class="card shadow-sm border-0 mt-3">
+            <div class="card-header bg-light">
+                <h6 class="mb-0"><i class="bi bi-cpu"></i> AI 归因分析</h6>
+            </div>
+            <div class="card-body">
+                <p class="mb-2 small text-muted">{{ feature_attr.summary }}</p>
+                {% if feature_attr.top_triggers %}
+                <div class="d-flex gap-2 flex-wrap">
+                {% for t in feature_attr.top_triggers %}
+                <span class="badge bg-info text-dark">{{ t.label }} · {{ t.pct }}%</span>
+                {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="col-md-8">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-light">
+                <h6 class="mb-0"><i class="bi bi-list-ul"></i> 预警详情</h6>
+            </div>
+            <div class="card-body p-0">
+                {% if warnings %}
+                <div class="list-group list-group-flush">
+                {% for w in warnings %}
+                <div class="list-group-item border-start-0 border-end-0">
+                    <div class="d-flex align-items-start">
+                        {% if w.level == 'red' %}
+                        <span class="badge bg-danger me-2 mt-1">高风险</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark me-2 mt-1">中风险</span>
+                        {% endif %}
+                        <div>
+                            <strong>{{ w.text }}</strong>
+                            <p class="text-muted small mb-0 mt-1">
+                                <i class="bi bi-lightbulb"></i> {{ w.suggestion }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                </div>
+                {% elif latest and latest.risk_level == 'green' %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-emoji-smile display-4"></i>
+                    <p class="mt-2">孩子近期表现稳定，无需担心</p>
+                    <p class="small">系统将持续关注，如有异常会及时提醒</p>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-hourglass-split display-4"></i>
+                    <p class="mt-2">暂无扫描数据</p>
+                    <p class="small">系统每日凌晨自动分析，明天将生成首次报告</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 近30天趋势 -->
+{% if history|length > 1 %}
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-light">
+        <h6 class="mb-0"><i class="bi bi-graph-up"></i> 近30天风险趋势</h6>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>日期</th>
+                        <th>风险等级</th>
+                        <th>预警项数</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for h in history %}
+                <tr>
+                    <td>{{ h.scan_date.strftime('%m-%d') }}</td>
+                    <td>
+                        {% if h.risk_level == 'green' %}
+                        <span class="badge bg-success">正常</span>
+                        {% elif h.risk_level == 'yellow' %}
+                        <span class="badge bg-warning text-dark">中等</span>
+                        {% else %}
+                        <span class="badge bg-danger">高风险</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ h.warning_count }}</td>
+                    <td>
+                        {% if h.notification_sent %}
+                        <span class="badge bg-info">已通知老师</span>
+                        {% else %}
+                        <span class="badge bg-secondary">未通知</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- 说明 -->
+<div class="alert alert-light border mt-3">
+    <h6><i class="bi bi-info-circle"></i> 预警说明</h6>
+    <p class="small mb-1">系统每天凌晨自动扫描全校学生，从以下维度进行综合评估：</p>
+    <ul class="small mb-0">
+        <li><strong>考勤</strong>：连续缺勤、频繁迟到等异常情况</li>
+        <li><strong>违纪</strong>：重大违纪、严重违纪次数统计</li>
+        <li><strong>成绩</strong>：成绩大幅下滑（降幅≥10分）</li>
+        <li><strong>请假</strong>：月度请假频率异常</li>
+    </ul>
+    <p class="small text-muted mt-2 mb-0">绿色 = 正常 | 黄色 = 需关注 | 红色 = 需立即干预。如有疑问请及时联系班主任。</p>
+</div>
+{% endblock %}

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}发布通知{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col">
+        <h4><i class="bi bi-pencil-square text-primary"></i> 发布通知</h4>
+        <p class="text-muted">填写通知内容并选择发送范围</p>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="post" action="{{ url_for('notices.create_notice') }}">
+                    <!-- 标题 -->
+                    <div class="mb-3">
+                        <label for="title" class="form-label fw-semibold">通知标题 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="title" name="title" required maxlength="200" placeholder="请输入通知标题">
+                    </div>
+
+                    <!-- 内容 -->
+                    <div class="mb-3">
+                        <label for="content" class="form-label fw-semibold">通知内容</label>
+                        <textarea class="form-control" id="content" name="content" rows="8" placeholder="请输入通知正文内容..."></textarea>
+                    </div>
+
+                    <!-- 发送范围 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">发送范围</label>
+                        {% if role == 'ms_admin' %}
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="grade_id" class="form-label">年级</label>
+                                <select class="form-select" id="grade_id" name="grade_id">
+                                    <option value="">全部年级</option>
+                                    {% for g in grades %}
+                                    <option value="{{ g.id }}">{{ g.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="class_id" class="form-label">班级</label>
+                                <select class="form-select" id="class_id" name="class_id">
+                                    <option value="">全部班级</option>
+                                    {% for c in classes %}
+                                    <option value="{{ c.id }}">{{ c.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        {% elif role == 'grade_leader' %}
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="class_id" class="form-label">班级</label>
+                                <select class="form-select" id="class_id" name="class_id">
+                                    <option value="">全年级</option>
+                                    {% for c in classes %}
+                                    <option value="{{ c.id }}">{{ c.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        {% else %}
+                        <input type="hidden" name="class_id" value="{{ classes[0].id if classes else '' }}">
+                        <p class="form-control-static text-muted">本班 ({{ classes[0].name if classes else '' }})</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- 回执要求 -->
+                    <div class="mb-4">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="require_receipt" name="require_receipt" value="1">
+                            <label class="form-check-label fw-semibold" for="require_receipt">
+                                <i class="bi bi-check2-circle"></i> 需要家长回执确认
+                            </label>
+                        </div>
+                        <div class="form-text">开启后，将自动为相关学生创建回执记录，家长可在小程序中确认阅读和签收。</div>
+                    </div>
+
+                    <!-- 提交 -->
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-send"></i> 发布通知
+                        </button>
+                        <a href="{{ url_for('notices.notice_list') }}" class="btn btn-outline-secondary">取消</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

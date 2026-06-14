@@ -1,0 +1,208 @@
+<div class="d-flex align-items-center mb-3">
+  <a href="{{ url_for('ai_analysis.dashboard') }}" class="btn btn-outline-secondary btn-sm me-3">
+    <i class="bi bi-arrow-left me-1"></i> 返回仪表盘
+  </a>
+  <h4 class="mb-0"><i class="bi bi-person-badge me-2"></i>{{ student.name }} 综合档案</h4>
+  <span class="text-muted ms-2">{{ student.class_.name if student.class_ else '' }}</span>
+</div>
+
+<div class="row g-3">
+  <!-- 左侧：问卷 + 评估 -->
+  <div class="col-md-6">
+    <!-- 心理问卷卡片 -->
+    <div class="card mb-3 {% if psych and psych.total_score and psych.total_score >= 160 %}border-danger{% elif psych and psych.total_score and psych.total_score >= 120 %}border-warning{% else %}border-primary{% endif %}">
+      <div class="card-header d-flex align-items-center">
+        <strong><i class="bi bi-file-text me-2"></i>MSSMHS-55 心理筛查问卷</strong>
+        {% if psych %}
+          {% if psych.total_score >= 160 %}
+          <span class="badge bg-danger ms-auto">高风险（{{ psych.total_score|int }}分）</span>
+          {% elif psych.total_score >= 120 %}
+          <span class="badge bg-warning text-dark ms-auto">中风险（{{ psych.total_score|int }}分）</span>
+          {% else %}
+          <span class="badge bg-success ms-auto">低风险（{{ psych.total_score|int }}分）</span>
+          {% endif %}
+        {% endif %}
+      </div>
+      <div class="card-body">
+        {% if psych %}
+        <div class="row mb-2">
+          <div class="col-6"><small class="text-muted">总分</small><br><strong class="fs-5">{{ psych.total_score|int }}</strong></div>
+          <div class="col-6"><small class="text-muted">完成时间</small><br><small>{{ psych.completed_at.strftime('%Y-%m-%d %H:%M') if psych.completed_at else '未知' }}</small></div>
+        </div>
+        <div class="row mb-2">
+          <div class="col-6"><small class="text-muted">问卷类型</small><br><span class="badge bg-secondary">{{ psych.survey_type }}</span></div>
+          <div class="col-6"><small class="text-muted">测谎校验</small><br>{% if psych.is_valid %}<span class="text-success">✅ 有效</span>{% else %}<span class="text-danger">❌ 无效</span>{% endif %}</div>
+        </div>
+        {% if psych and psych_dimensions %}
+        <div class="mt-3">
+          <small class="text-muted">各维度得分</small>
+          <div class="mt-2">
+          {% for dim_name, dim_score in psych_dimensions.items() %}
+          <span class="badge bg-light text-dark me-1 mb-1">{{ dim_name }}: {{ dim_score }}</span>
+          {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="text-center py-3 text-muted">
+          <i class="bi bi-file-text display-6"></i>
+          <p class="mt-2 mb-0">暂无心理问卷数据</p>
+          <small>可通过问卷模块导入 MSSMHS-55 数据</small>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 心理健康评估列表 -->
+    <div class="card border-info">
+      <div class="card-header d-flex align-items-center">
+        <strong><i class="bi bi-clipboard2-pulse me-2"></i>心理健康评估记录</strong>
+        <span class="badge bg-info ms-auto">{{ assessments|length }}条</span>
+      </div>
+      <div class="card-body p-0">
+        {% if assessments %}
+        <div class="list-group list-group-flush">
+        {% for a in assessments %}
+        <div class="list-group-item {% if a.risk_level == 'high' %}list-group-item-danger{% elif a.risk_level == 'medium' %}list-group-item-warning{% endif %}">
+          <div class="d-flex align-items-center">
+            <div class="flex-grow-1">
+              <div class="fw-bold">{{ a.scale_name or '未指定量表' }}</div>
+              <small class="text-muted">{{ dict(questionnaire='问卷测评', interview='访谈评估', observation='观察记录', parent_feedback='家长反馈', teacher_feedback='教师反馈').get(a.assessment_type, a.assessment_type) }}</small>
+            </div>
+            <div class="text-end">
+              {% if a.risk_level == 'high' %}
+              <span class="badge bg-danger">高风险</span>
+              {% elif a.risk_level == 'medium' %}
+              <span class="badge bg-warning text-dark">中风险</span>
+              {% else %}
+              <span class="badge bg-success">低风险</span>
+              {% endif %}
+              <div><small class="text-muted">{{ a.assessment_date.strftime('%m-%d') if a.assessment_date else '' }}</small></div>
+            </div>
+          </div>
+          {% if a.conclusion %}
+          <div class="mt-2 small text-muted">{{ a.conclusion[:120] }}{% if a.conclusion|length > 120 %}...{% endif %}</div>
+          {% endif %}
+          {% if a.need_intervention %}
+          <div class="mt-1"><span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>需要干预</span></div>
+          {% endif %}
+          {% if a.intervention_plan %}
+          <div class="mt-1 small"><strong>干预方案：</strong>{{ a.intervention_plan[:100] }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted">
+          <i class="bi bi-clipboard2-pulse display-6"></i>
+          <p class="mt-2 mb-0">暂无心理健康评估记录</p>
+          <small>可在心理健康评估模块手动创建，或通过问卷模块自动同步</small>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧：AI行为预警 -->
+  <div class="col-md-6">
+    <div class="card {% if risk and risk.risk_level == 'red' %}border-danger{% elif risk and risk.risk_level == 'yellow' %}border-warning{% else %}border-success{% endif %}">
+      <div class="card-header d-flex align-items-center">
+        <strong><i class="bi bi-cpu me-2"></i>AI 行为预警分析</strong>
+        {% if risk %}
+          {% if risk.risk_level == 'red' %}
+          <span class="badge bg-danger ms-auto">🔴 高风险</span>
+          {% elif risk.risk_level == 'yellow' %}
+          <span class="badge bg-warning text-dark ms-auto">🟡 中风险</span>
+          {% else %}
+          <span class="badge bg-success ms-auto">🟢 正常</span>
+          {% endif %}
+        {% endif %}
+      </div>
+      <div class="card-body">
+        {% if risk and risk.scan_date %}
+        <div class="mb-2"><small class="text-muted">最近扫描: {{ risk.scan_date.strftime('%Y-%m-%d') }}</small></div>
+        {% endif %}
+
+        {% if warnings %}
+        <div class="list-group list-group-flush mb-3">
+        {% for w in warnings %}
+        <div class="list-group-item list-group-item-{{ 'danger' if w.level == 'red' else 'warning' if w.level == 'yellow' else 'success' }}">
+          <div class="d-flex">
+            <span class="me-2">{{ '🔴' if w.level == 'red' else '🟡' if w.level == 'yellow' else '🟢' }}</span>
+            <div>
+              <strong>{{ w.text }}</strong>
+              <div class="small text-muted">{{ w.suggestion }}</div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted">
+          <i class="bi bi-cpu display-6"></i>
+          <p class="mt-2 mb-0">暂无行为预警</p>
+          <small>AI分析基于考勤、违纪、成绩、请假等行为数据</small>
+        </div>
+        {% endif %}
+
+        <!-- XGBoost 特征归因 -->
+        {% if feature_attr and feature_attr.summary %}
+        <div class="alert alert-info mb-3 py-2">
+          <strong><i class="bi bi-graph-up-arrow me-1"></i>{{ feature_attr.summary }}</strong>
+          {% if feature_attr.top_triggers %}
+          <div class="mt-1">
+            {% for t in feature_attr.top_triggers %}
+            <span class="badge bg-secondary me-1">{{ t.label }} · {{ t.pct }}%</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- 综合研判 -->
+        <div class="alert alert-{{ 'danger' if risk and risk.risk_level == 'red' else 'warning' if risk and risk.risk_level == 'yellow' else 'success' }} mb-0">
+          <strong>📋 综合研判：</strong>
+          {% set risk_level = risk.risk_level if risk else 'green' %}
+          {% set psych_high = psych and psych.total_score and psych.total_score >= 160 %}
+          {% set psych_medium = psych and psych.total_score and psych.total_score >= 120 %}
+          {% set has_assess_high = false %}
+          {% for a in assessments %}
+            {% if a.risk_level == 'high' %}{% set has_assess_high = true %}{% endif %}
+          {% endfor %}
+
+          {% if psych_high or risk_level == 'red' or has_assess_high %}
+            <strong>该学生存在高风险信号，建议：</strong>
+            <ul class="mb-0 mt-1 small">
+              {% if psych_high %}<li>心理问卷筛查高风险，建议安排心理老师个别访谈</li>{% endif %}
+              {% if has_assess_high %}<li>已有高风险评估记录，请跟进干预方案</li>{% endif %}
+              {% if risk_level == 'red' %}<li>行为异常预警，建议德育处与班主任联合关注</li>{% endif %}
+            </ul>
+          {% elif psych_medium or risk_level == 'yellow' %}
+            <strong>需要持续关注，建议：</strong>
+            <ul class="mb-0 mt-1 small">
+              {% if psych_medium %}<li>心理问卷中风险，建议班主任日常关注</li>{% endif %}
+              {% if risk_level == 'yellow' %}<li>行为数据有预警，加强观察</li>{% endif %}
+            </ul>
+          {% else %}
+            当前未发现明显风险信号，建议保持常规关注。
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- 快速操作 -->
+    <div class="card mt-3">
+      <div class="card-header"><strong><i class="bi bi-lightning-charge me-2"></i>快速操作</strong></div>
+      <div class="card-body">
+        <div class="d-grid gap-2">
+          <a href="{{ url_for('mental_health.create') }}?student_id={{ student.id }}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-plus-circle me-1"></i>创建心理健康评估
+          </a>
+          <a href="{{ url_for('ai_analysis.index') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-repeat me-1"></i>刷新AI分析
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

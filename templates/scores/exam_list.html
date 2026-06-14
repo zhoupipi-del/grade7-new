@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}考试管理{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>考试管理</h3>
+    {% if session['role'] in ['ms_admin','grade_leader'] %}
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createExamModal">
+      <i class="bi bi-plus-lg"></i> 创建考试
+    </button>
+    {% endif %}
+  </div>
+
+  <!-- 筛选 -->
+  <form class="row g-2 mb-3">
+    <div class="col-auto">
+      <select name="grade_id" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">全部年级</option>
+        {% for g in grades %}
+        <option value="{{ g.id }}" {% if grade_id==g.id %}selected{% endif %}>{{ g.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <select name="exam_type" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">全部类型</option>
+        {% for t in exam_types %}
+        <option value="{{ t }}" {% if exam_type==t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
+  <table class="table table-hover table-sm">
+    <thead><tr><th>考试名称</th><th>日期</th><th>类型</th><th>年级</th><th>操作</th></tr></thead>
+    <tbody>
+    {% for e in exams %}
+      <tr>
+        <td>{{ e.name }}</td>
+        <td>{{ e.exam_date }}</td>
+        <td><span class="badge bg-secondary">{{ e.exam_type }}</span></td>
+        <td>{{ e.grade.name if e.grade else '' }}</td>
+        <td>
+          <a href="{{ url_for('scores.exam_detail', eid=e.id) }}" class="btn btn-sm btn-outline-primary">详情</a>
+          <a href="{{ url_for('scores.score_input', eid=e.id) }}" class="btn btn-sm btn-outline-success">录入</a>
+          <a href="{{ url_for('scores.exam_ranking', eid=e.id) }}" class="btn btn-sm btn-outline-warning">排名</a>
+          <a href="{{ url_for('scores.exam_analysis', eid=e.id) }}" class="btn btn-sm btn-outline-info">分析</a>
+          {% if session['role'] in ['ms_admin','grade_leader'] %}
+          <form method="POST" action="{{ url_for('scores.delete_exam', eid=e.id) }}" class="d-inline" onsubmit="return confirm('确认删除？')">
+            <button class="btn btn-sm btn-outline-danger">删除</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="text-center text-muted">暂无考试，请点击「创建考试」</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 创建考试弹窗 -->
+<div class="modal fade" id="createExamModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST" action="{{ url_for('scores.create_exam') }}">
+        <div class="modal-header"><h5 class="modal-title">创建考试</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label">考试名称</label>
+            <input name="name" class="form-control" placeholder="例：2025-2026-1 第一次月考" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">考试日期</label>
+            <input name="exam_date" type="date" class="form-control" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">考试类型</label>
+            <select name="exam_type" class="form-select">
+              <option value="月考">月考</option>
+              <option value="期中">期中</option>
+              <option value="期末">期末</option>
+              <option value="模拟">模拟</option>
+              <option value="其他">其他</option>
+            </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">所属年级</label>
+            <select name="grade_id" class="form-select" required>
+              <option value="">请选择</option>
+              {% for g in grades %}
+              <option value="{{ g.id }}">{{ g.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary">创建</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

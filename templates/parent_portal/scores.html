@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}成绩查询 - {{ student.name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h5 class="mb-3"><i class="bi bi-graph-up"></i> 成绩查询 — {{ student.name }}</h5>
+
+    <!-- 考试选择 -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <form method="get" class="row g-2 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label form-label-sm mb-0">选择考试</label>
+                    <select name="exam_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="">-- 请选择 --</option>
+                        {% for e in exams %}
+                        <option value="{{ e.id }}" {% if e.id==exam_id %}selected{% endif %}>
+                            {{ e.name }}（{{ e.exam_date.strftime('%Y-%m-%d') }}）
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 成绩趋势图 -->
+    {% if exams|length > 0 %}
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-graph-up-arrow text-primary"></i> 成绩趋势（跨考试）</span>
+            <small class="text-muted">共 {{ exams|length }} 场考试</small>
+        </div>
+        <div class="card-body">
+            <canvas id="trendChart" height="260"></canvas>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if scores %}
+    <!-- 总分卡片 -->
+    <div class="row g-2 mb-3">
+        <div class="col-md-4">
+            <div class="card bg-primary text-white text-center py-3">
+                <div class="fs-3 fw-bold">{{ avg_score }}</div>
+                <small>总分（满分 {{ avg_full }}）</small>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-success text-white text-center py-3">
+                <div class="fs-3 fw-bold">
+                    {% if total_full > 0 %}{{ ((total_score/total_full)*100)|round(1) }}%{% else %}—{% endif %}
+                </div>
+                <small>得分率</small>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-info text-white text-center py-3">
+                <div class="fs-4 fw-bold">
+                    {% set ranks = scores|map(attribute='rank_class')|list %}
+                    {{ ranks[0] if ranks else '—' }}
+                </div>
+                <small>班级排名</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- 成绩明细 -->
+    <div class="card">
+        <div class="card-header">成绩明细</div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr><th>科目</th><th>分数</th><th>满分</th><th>得分率</th><th>班排</th><th>年排</th></tr>
+                </thead>
+                <tbody>
+                {% for s in scores %}
+                    {% set sub = subjects.get(s.subject_id) %}
+                    <tr>
+                        <td><strong>{{ sub.name if sub else '?' }}</strong></td>
+                        <td class="{% if s.score/sub.full_score|float >= 0.9 %}text-success fw-bold{% elif s.score/sub.full_score|float < 0.6 %}text-danger{% endif %}">{{ s.score }}</td>
+                        <td class="text-muted">{{ sub.full_score if sub else '?' }}</td>
+                        <td>
+                            {% if sub and sub.full_score > 0 %}
+                            {% set rate = (s.score / sub.full_score * 100)|round(1) %}
+                            <span class="{% if rate >= 90 %}text-success{% elif rate < 60 %}text-danger{% endif %}">{{ rate }}%</span>
+                            {% else %}—{% endif %}
+                        </td>
+                        <td>{{ s.rank_class or '—' }}</td>
+                        <td>{{ s.rank_grade or '—' }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% elif exam_id %}
+    <div class="text-center text-muted py-5">该考试暂无成绩数据</div>
+    {% else %}
+    <div class="text-center text-muted py-5"><i class="bi bi-clipboard-data display-4"></i><p class="mt-2">请选择考试查看成绩</p></div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if exams|length > 0 %}
+<script>
+(function() {
+    const ctx = document.getElementById('trendChart');
+    if (!ctx) return;
+
+    const colors = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7'];
+
+    fetch('{{ url_for("parent_portal.scores_trend") }}')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            const labels = data.labels || [];
+            const totals = data.totals || [];
+            const subjects = data.subjects || {};
+
+            if (labels.length === 0) return;
+
+            // Build datasets: total + each subject
+            const datasets = [{
+                label: '总分',
+                data: totals,
+                borderColor: '#4e79a7',
+                backgroundColor: '#4e79a733',
+                borderWidth: 3,
+                tension: 0.3,
+                fill: false,
+                yAxisID: 'y'
+            }];
+
+            let ci = 0;
+            for (var sub in subjects) {
+                if (!subjects.hasOwnProperty(sub)) continue;
+                ci++;
+                datasets.push({
+                    label: sub,
+                    data: subjects[sub],
+                    borderColor: colors[ci % colors.length],
+                    backgroundColor: colors[ci % colors.length] + '33',
+                    borderWidth: 1.5,
+                    tension: 0.3,
+                    fill: false,
+                    yAxisID: 'y1',
+                    borderDash: [4, 2]
+                });
+            }
+
+            new Chart(ctx, {
+                type: 'line',
+                data: { labels: labels, datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { usePointStyle: true, padding: 14 } },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            title: { display: true, text: '总分' },
+                            beginAtZero: false
+                        },
+                        y1: {
+                            type: 'linear',
+                            position: 'right',
+                            title: { display: true, text: '单科分' },
+                            beginAtZero: false,
+                            grid: { drawOnChartArea: false }
+                        }
+                    },
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                }
+            });
+        })
+        .catch(function(err) { console.error('Trend chart load error:', err); });
+})();
+</script>
+{% endif %}
+{% endblock %}

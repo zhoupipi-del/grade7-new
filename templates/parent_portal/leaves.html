@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}请假记录 - {{ student.name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5><i class="bi bi-calendar-minus"></i> 请假记录 — {{ student.name }}</h5>
+        <a href="{{ url_for('parent_portal.leave_apply') }}" class="btn btn-sm btn-primary">
+            <i class="bi bi-plus-lg"></i> 提交请假
+        </a>
+    </div>
+
+    <!-- 统计卡片 -->
+    {% set pending_cnt = leaves|selectattr('status','equalto','pending')|list|length %}
+    {% set approved_cnt = leaves|selectattr('status','equalto','grade_approved')|list|length %}
+    {% set class_approved_cnt = leaves|selectattr('status','equalto','class_approved')|list|length %}
+    {% set rejected_cnt = leaves|selectattr('status','equalto','rejected')|list|length %}
+    <div class="row g-2 mb-3">
+        <div class="col"><div class="card bg-warning bg-opacity-10 text-center py-2"><div class="card-body p-1"><div class="fs-5 fw-bold">{{ pending_cnt }}</div><small>待审批</small></div></div></div>
+        <div class="col"><div class="card bg-info bg-opacity-10 text-center py-2"><div class="card-body p-1"><div class="fs-5 fw-bold">{{ class_approved_cnt }}</div><small>班主任已批</small></div></div></div>
+        <div class="col"><div class="card bg-success bg-opacity-10 text-center py-2"><div class="card-body p-1"><div class="fs-5 fw-bold">{{ approved_cnt }}</div><small>已通过</small></div></div></div>
+        <div class="col"><div class="card bg-danger bg-opacity-10 text-center py-2"><div class="card-body p-1"><div class="fs-5 fw-bold">{{ rejected_cnt }}</div><small>已驳回</small></div></div></div>
+    </div>
+
+    <!-- 请假列表 -->
+    <div class="card">
+        <div class="card-body p-0">
+            {% if leaves %}
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>申请日期</th>
+                        <th>起止日期</th>
+                        <th>天数</th>
+                        <th>原因</th>
+                        <th>状态</th>
+                        <th>审批进度</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for l in leaves %}
+                    <tr>
+                        <td class="small">{{ l.created_at.strftime('%m月%d日 %H:%M') if l.created_at else '-' }}</td>
+                        <td class="small">{{ l.start_date.strftime('%m/%d') }} ~ {{ l.end_date.strftime('%m/%d') }}</td>
+                        <td class="small">{{ ((l.end_date - l.start_date).days + 1) }}天</td>
+                        <td class="small">{{ l.reason[:30] }}{% if l.reason|length > 30 %}...{% endif %}</td>
+                        <td>
+                            {% if l.status=='pending' %}
+                            <span class="badge bg-warning">待班主任审批</span>
+                            {% elif l.status=='class_approved' %}
+                            <span class="badge bg-info">待年级审批</span>
+                            {% elif l.status=='grade_approved' %}
+                            <span class="badge bg-success">已通过</span>
+                            {% else %}
+                            <span class="badge bg-danger">已驳回</span>
+                            {% endif %}
+                            <!-- 可视化进度条 -->
+                            <div class="progress mt-1" style="height:4px;">
+                                {% if l.status=='pending' %}
+                                <div class="progress-bar bg-warning" style="width:33%"></div>
+                                {% elif l.status=='class_approved' %}
+                                <div class="progress-bar bg-info" style="width:66%"></div>
+                                {% elif l.status=='grade_approved' %}
+                                <div class="progress-bar bg-success" style="width:100%"></div>
+                                {% else %}
+                                <div class="progress-bar bg-danger" style="width:100%"></div>
+                                {% endif %}
+                            </div>
+                            <small class="text-muted">
+                                {% if l.status=='pending' %}① 已提交 → ② 班主任审批 → ③ 年级终审
+                                {% elif l.status=='class_approved' %}① ✓已提交 → ② ✓班主任已批 → ③ 年级终审
+                                {% elif l.status=='grade_approved' %}① ✓已提交 → ② ✓班主任已批 → ③ ✓年级已批
+                                {% else %}已驳回
+                                {% endif %}
+                            </small>
+                        </td>
+                        <td class="small text-muted">
+                            {% if l.class_approved_at %}班主任: {{ l.class_approved_at.strftime('%m/%d %H:%M') }}<br>{% endif %}
+                            {% if l.grade_approved_at %}年级: {{ l.grade_approved_at.strftime('%m/%d %H:%M') }}{% endif %}
+                            {% if not l.class_approved_at and not l.grade_approved_at %}等待处理{% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="text-center py-5 text-muted">
+                <i class="bi bi-inbox display-4 d-block mb-2"></i>
+                暂无请假记录
+                <br>
+                <a href="{{ url_for('parent_portal.leave_apply') }}" class="btn btn-primary btn-sm mt-2">提交请假申请</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

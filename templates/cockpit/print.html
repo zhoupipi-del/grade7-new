@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>梨江中学数据驾驶舱报告</title>
+<style>
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Microsoft YaHei','PingFang SC',sans-serif; color: #333; font-size: 12px; }
+.header { text-align: center; padding: 16px 0; border-bottom: 2px solid #4472C4; margin-bottom: 16px; }
+.header h1 { font-size: 20px; color: #4472C4; }
+.header p { color: #888; font-size: 12px; margin-top: 4px; }
+.row { display: flex; gap: 12px; margin-bottom: 12px; }
+.col-3 { flex: 1; }
+.col-2 { flex: 1; }
+.card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; }
+.card h3 { font-size: 13px; color: #4472C4; margin-bottom: 8px; }
+.kpi { font-size: 24px; font-weight: 700; color: #2c3e50; }
+.kpi-label { font-size: 11px; color: #888; }
+table { width: 100%; border-collapse: collapse; font-size: 11px; }
+th, td { border: 1px solid #e0e0e0; padding: 4px 8px; text-align: center; }
+th { background: #4472C4; color: #fff; }
+.footer { text-align: center; color: #aaa; font-size: 10px; margin-top: 20px; padding-top: 10px; border-top: 1px solid #eee; }
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>梨江中学 · 数据驾驶舱报告</h1>
+    <p>生成时间: {{ now.strftime('%Y-%m-%d %H:%M') }} | 时间范围: 近{{ days }}天</p>
+</div>
+
+<div class="row">
+    <div class="col-3">
+        <div class="card">
+            <div class="kpi" id="kpi1">--</div>
+            <div class="kpi-label">在校学生</div>
+        </div>
+    </div>
+    <div class="col-3">
+        <div class="card">
+            <div class="kpi" id="kpi2">--</div>
+            <div class="kpi-label">考试均分</div>
+        </div>
+    </div>
+    <div class="col-3">
+        <div class="card">
+            <div class="kpi" id="kpi3">--</div>
+            <div class="kpi-label">违纪人次</div>
+        </div>
+    </div>
+    <div class="col-3">
+        <div class="card">
+            <div class="kpi" id="kpi4">--</div>
+            <div class="kpi-label">出勤率</div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-2">
+        <div class="card">
+            <h3>各班成绩</h3>
+            <table id="scoreTable"><thead><tr><th>班级</th><th>均分</th><th>人数</th></tr></thead><tbody></tbody></table>
+        </div>
+    </div>
+    <div class="col-2">
+        <div class="card">
+            <h3>违纪分布</h3>
+            <table id="discTable"><thead><tr><th>类别</th><th>人次</th></tr></thead><tbody></tbody></table>
+        </div>
+    </div>
+</div>
+
+<div class="footer">梨江中学德育管理平台 · 数据驾驶舱自动生成报告</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+fetch('/cockpit/data?' + params.toString())
+    .then(r => r.json())
+    .then(resp => {
+        if (resp.code !== 0) return;
+        const d = resp.data;
+        document.getElementById('kpi1').textContent = d.total_students;
+        document.getElementById('kpi2').textContent = d.score_stats.avg_score || '--';
+        document.getElementById('kpi3').textContent = d.discipline_count;
+        document.getElementById('kpi4').textContent = (d.attendance_rate || '--') + '%';
+
+        const st = document.getElementById('scoreTable').querySelector('tbody');
+        d.class_scores.forEach(c => {
+            st.innerHTML += '<tr><td>' + c.name + '</td><td>' + c.score + '</td><td>' + c.count + '</td></tr>';
+        });
+
+        const dt = document.getElementById('discTable').querySelector('tbody');
+        d.discipline_categories.forEach(c => {
+            dt.innerHTML += '<tr><td>' + c.name + '</td><td>' + c.count + '</td></tr>';
+        });
+
+        setTimeout(() => window.print(), 500);
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}德育处工作台{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h3><i class="bi bi-shield-check text-primary"></i> 德育处工作台</h3>
+        <p class="text-muted">全校德育管理总览</p>
+    </div>
+</div>
+
+<!-- 统计卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-1 text-primary">{{ stats.student_count }}</div>
+            <div class="text-muted">在校学生</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-1 text-success">{{ stats.class_count }}</div>
+            <div class="text-muted">班级数</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-1 text-warning">{{ stats.discipline_count }}</div>
+            <div class="text-muted">活跃违纪</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-1 text-danger">{{ stats.problem_count }}</div>
+            <div class="text-muted">问题学生</div>
+        </div>
+    </div>
+</div>
+
+<!-- 快捷入口 -->
+<div class="row g-3 mb-4">
+    <div class="col-12"><h5>快捷操作</h5></div>
+    <div class="col-md-3">
+        <a href="{{ url_for('ms.task_list') }}" class="text-decoration-none">
+            <div class="card border-0 shadow-sm p-3 text-center hover-shadow">
+                <i class="bi bi-send fs-2 text-primary"></i>
+                <div class="mt-2">下发任务</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-3">
+        <a href="{{ url_for('ms.create_problem') }}" class="text-decoration-none">
+            <div class="card border-0 shadow-sm p-3 text-center hover-shadow">
+                <i class="bi bi-person-plus fs-2 text-danger"></i>
+                <div class="mt-2">问题学生建档</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-3">
+        <a href="{{ url_for('ms.discipline_list') }}" class="text-decoration-none">
+            <div class="card border-0 shadow-sm p-3 text-center hover-shadow">
+                <i class="bi bi-journal-x fs-2 text-warning"></i>
+                <div class="mt-2">违纪记录</div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-3">
+        <a href="{{ url_for('ms.problem_list') }}" class="text-decoration-none">
+            <div class="card border-0 shadow-sm p-3 text-center hover-shadow">
+                <i class="bi bi-people fs-2 text-info"></i>
+                <div class="mt-2">问题学生档案</div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<!-- 年级概况 -->
+<div class="row">
+    <div class="col">
+        <div class="card shadow-sm">
+            <div class="card-header"><i class="bi bi-diagram-3"></i> 年级概况</div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead><tr><th>年级</th><th>班级数</th><th>学生数</th><th>操作</th></tr></thead>
+                        <tbody>
+                        {% for g in grades %}
+                        <tr>
+                            <td>{{ g.name }}</td>
+                            <td>{{ g.classes.count() }}</td>
+                            <td>-</td>
+                            <td><a href="{{ url_for('ms.discipline_list', grade_id=g.id) }}" class="btn btn-sm btn-outline-primary">查看详情</a></td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

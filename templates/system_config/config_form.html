@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑配置' if config else '创建配置' }}{% endblock %}
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">{{ '编辑配置' if config else '创建配置' }}</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        <div class="mb-3">
+                            <label for="key" class="form-label">配置键 *</label>
+                            <input type="text" class="form-control" id="key" name="key" 
+                                   value="{{ config.key if config else '' }}" 
+                                   {{ 'readonly' if config else '' }} required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="value" class="form-label">配置值</label>
+                            <input type="text" class="form-control" id="value" name="value" 
+                                   value="{{ config.value if config else '' }}">
+                        </div>
+                        <div class="mb-3">
+                            <label for="category" class="form-label">分类</label>
+                            <select class="form-control" id="category" name="category">
+                                <option value="general" {{ 'selected' if config and config.category == 'general' else '' }}>general</option>
+                                <option value="score" {{ 'selected' if config and config.category == 'score' else '' }}>score</option>
+                                <option value="attendance" {{ 'selected' if config and config.category == 'attendance' else '' }}>attendance</option>
+                                <option value="notification" {{ 'selected' if config and config.category == 'notification' else '' }}>notification</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="description" class="form-label">说明</label>
+                            <input type="text" class="form-control" id="description" name="description" 
+                                   value="{{ config.description if config else '' }}">
+                        </div>
+                        <button type="submit" class="btn btn-primary">保存</button>
+                        <a href="{{ url_for('system_config.config_list') }}" class="btn btn-secondary">取消</a>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

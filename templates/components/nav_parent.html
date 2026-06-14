@@ -1,0 +1,68 @@
+<!-- 家长端导航 -->
+<ul class="navbar-nav me-auto">
+    <li class="nav-item">
+        <a class="nav-link {% if request.path == url_for('parent_portal.dashboard') %}active{% endif %}" href="{{ url_for('parent_portal.dashboard') }}">
+            <i class="bi bi-house-door"></i> 首页
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/risk' in request.path %}active{% endif %}" href="{{ url_for('parent_portal.risk') }}">
+            <i class="bi bi-shield-exclamation"></i> 风险预警
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/attendance' in request.path %}active{% endif %}" href="{{ url_for('parent_portal.attendance') }}">
+            <i class="bi bi-calendar-check"></i> 考勤记录
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/discipline' in request.path %}active{% endif %}" href="{{ url_for('parent_portal.discipline') }}">
+            <i class="bi bi-journal-x"></i> 违纪记录
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/scores' in request.path %}active{% endif %}" href="{{ url_for('parent_portal.scores') }}">
+            <i class="bi bi-graph-up"></i> 成绩查询
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/notices' in request.path %}active{% endif %}" href="{{ url_for('parent_portal.notices') }}">
+            <i class="bi bi-megaphone"></i> 通知公告
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/comments' in request.path %}active{% endif %}" href="{{ url_for('parent_portal.comments') }}">
+            <i class="bi bi-journal-text"></i> 期末评语
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/leaves' in request.path %}active{% endif %}" href="{{ url_for('parent_portal.leave_list') }}">
+            <i class="bi bi-calendar-minus"></i> 请假
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/appeals' in request.path or '/appeal/' in request.path %}active{% endif %}" href="{{ url_for('parent_portal.appeals') }}">
+            <i class="bi bi-shield-exclamation"></i> 申诉
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/meeting' in request.path %}active{% endif %}" href="{{ url_for('parent_portal.meeting') }}">
+            <i class="bi bi-people"></i> 家长会
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/activity' in request.path %}active{% endif %}" href="{{ url_for('activity.student_list') }}">
+            <i class="bi bi-calendar-event"></i> 活动参与
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/quality' in request.path %}active{% endif %}" href="{{ url_for('quality.dashboard') }}">
+            <i class="bi bi-award"></i> 综合评价
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if '/mental-health' in request.path %}active{% endif %}" href="{{ url_for('mental_health.index') }}">
+            <i class="bi bi-heart-pulse"></i> 心理测评
+        </a>
+    </li>
+</ul>

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}学期管理{% endblock %}
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">学期管理</h5>
+                    <a href="{{ url_for('system_config.create_semester') }}" class="btn btn-primary btn-sm">
+                        <i class="fas fa-plus"></i> 创建学期
+                    </a>
+                </div>
+                <div class="card-body">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category }} alert-dismissible fade show">
+                                    {{ message }}
+                                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>学期名称</th>
+                                <th>显示名称</th>
+                                <th>开始日期</th>
+                                <th>结束日期</th>
+                                <th>当前学期</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for semester in semesters %}
+                            <tr>
+                                <td>{{ semester.name }}</td>
+                                <td>{{ semester.display_name }}</td>
+                                <td>{{ semester.start_date }}</td>
+                                <td>{{ semester.end_date }}</td>
+                                <td>
+                                    {% if semester.is_current %}
+                                        <span class="badge bg-success">是</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">否</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a href="{{ url_for('system_config.edit_semester', sid=semester.id) }}" class="btn btn-sm btn-warning">编辑</a>
+                                    {% if not semester.is_current %}
+                                        <form action="{{ url_for('system_config.activate_semester', sid=semester.id) }}" method="post" class="d-inline">
+                                            <button type="submit" class="btn btn-sm btn-success">设为当前</button>
+                                        </form>
+                                        <form action="{{ url_for('system_config.delete_semester', sid=semester.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除？')">
+                                            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                                        </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center">暂无学期数据</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

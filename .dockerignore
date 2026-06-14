@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.env
+*.db
+uploads/*
+!uploads/.gitkeep
+venv
+.venv
+*.egg-info
+overview.md
+gen_placeholders.py

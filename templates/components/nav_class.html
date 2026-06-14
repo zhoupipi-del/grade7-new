@@ -1,0 +1,89 @@
+<!-- 班主任导航 -->
+<ul class="navbar-nav me-auto">
+    <li class="nav-item">
+        <a class="nav-link {% if request.path == url_for('class.dashboard') %}active{% endif %}" href="{{ url_for('class.dashboard') }}">
+            <i class="bi bi-speedometer2"></i> 工作台
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if request.path.startswith('/class/students') %}active{% endif %}" href="{{ url_for('class.student_list') }}">
+            <i class="bi bi-people"></i> 学生名册
+        </a>
+    </li>
+    <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle {% if request.path.startswith('/class/discipline') or request.path.startswith('/class/attendance') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
+            <i class="bi bi-journal-check"></i> 班级管理
+        </a>
+        <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for('class.discipline_list') }}">违纪记录</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('class.attendance_page') }}">考勤打卡</a></li>
+        </ul>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if request.path.startswith('/class/leaves') %}active{% endif %}" href="{{ url_for('class.leave_list') }}">
+            <i class="bi bi-calendar-check"></i> 请假审批
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if request.path.startswith('/class/tasks') %}active{% endif %}" href="{{ url_for('class.task_list') }}">
+            <i class="bi bi-list-check"></i> 任务反馈
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if request.path.startswith('/class/notify') %}active{% endif %}" href="{{ url_for('class.notify_parent_page') }}">
+            <i class="bi bi-bell"></i> 通知家长
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if request.path.startswith('/wings') %}active{% endif %}" href="{{ url_for('wings.dashboard') }}">
+            <i class="bi bi-star"></i> 五翼评价
+        </a>
+    </li>
+    <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle {% if request.path.startswith('/scores') or request.path.startswith('/endterm') or request.path.startswith('/quality') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
+            <i class="bi bi-graph-up"></i> 学业管理
+        </a>
+        <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for('scores.index') }}">成绩管理</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('scores.comparison') }}">多学期对比</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('scores.trend') }}">成绩趋势线</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('endterm_comment.index') }}">期末评语</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="{{ url_for('quality.dashboard') }}">综合素质评价</a></li>
+        </ul>
+    </li>
+    <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle {% if request.path.startswith('/notices') or request.path.startswith('/parent-meeting') or request.path.startswith('/home-visit') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
+            <i class="bi bi-megaphone"></i> 家校沟通
+        </a>
+        <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for('notices.notice_list') }}">通知公告</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('parent_meeting.index') }}">家长会</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('home_visit.index') }}">家访记录</a></li>
+        </ul>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if request.path.startswith('/tags') %}active{% endif %}" href="{{ url_for('tags.index') }}">
+            <i class="bi bi-tags"></i> 学生标签
+        </a>
+    </li>
+    <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle {% if request.path.startswith('/ai-analysis') or request.path.startswith('/mental-health') or request.path.startswith('/communication') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
+            <i class="bi bi-cpu"></i> 智能分析
+        </a>
+        <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for('ai_analysis.dashboard') }}"><i class="bi bi-grid-3x3-gap-fill"></i> 统一仪表盘</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="{{ url_for('mental_health.index') }}"><i class="bi bi-heart-pulse"></i> 心理健康评估</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('communication.index') }}"><i class="bi bi-chat-dots"></i> 家校沟通追踪</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="{{ url_for('markov.dashboard') }}"><i class="bi bi-radioactive"></i> 学力事件视界</a></li>
+            <li><a class="dropdown-item" href="/api/fission/dashboard"><i class="bi bi-lightning"></i> 链式核裂变溯源</a></li>
+        </ul>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if request.path.startswith('/common/messages') %}active{% endif %}" href="{{ url_for('common.messages') }}">
+            <i class="bi bi-envelope"></i> 消息
+        </a>
+    </li>
+</ul>

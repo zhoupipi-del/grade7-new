@@ -1,0 +1,45 @@
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-megaphone me-2"></i>系统公告</h4>
+  {% if session.role == 'ms_admin' %}
+  <a href="{{ url_for('common.manage_announcements') }}" class="btn btn-outline-primary btn-sm">
+    <i class="bi bi-gear me-1"></i> 管理公告
+  </a>
+  {% endif %}
+</div>
+
+{% if announcements %}
+{% for a in announcements %}
+<div class="card mb-3 {% if a.is_pinned %}border-warning{% endif %}">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h5 class="mb-0">
+      {% if a.is_pinned %}
+      <span class="text-warning me-1" title="置顶"><i class="bi bi-pin-angle-fill"></i></span>
+      {% endif %}
+      {{ a.title }}
+    </h5>
+    <div class="d-flex gap-2 align-items-center">
+      {% if a.target_roles %}
+      {% for role in a.target_roles.split(',') %}
+      <span class="badge bg-info">{{ role }}</span>
+      {% endfor %}
+      {% endif %}
+      <small class="text-muted">{{ a.created_at.strftime("%Y-%m-%d") if a.created_at else "" }}</small>
+    </div>
+  </div>
+  <div class="card-body">
+    <div style="white-space:pre-wrap;">{{ a.content }}</div>
+    <div class="d-flex justify-content-between mt-3 pt-2 border-top">
+      <small class="text-muted">
+        发布者：{{ a.author }}
+        {% if a.expire_date %} | 有效期至：{{ a.expire_date }}{% endif %}
+      </small>
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-megaphone display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无公告</p>
+</div>
+{% endif %}

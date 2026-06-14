@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}家长端 - 未绑定学生{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6 text-center">
+            <i class="bi bi-person-x display-1 text-warning"></i>
+            <h3 class="mt-3">尚未绑定学生</h3>
+            <p class="text-muted mt-2">您的账号尚未与您的孩子绑定，请联系班主任为您绑定孩子信息。</p>
+            <hr class="my-4">
+            <p class="small text-muted">绑定后，您可以在此查看孩子的考勤、违纪记录、成绩、通知公告和期末评语等信息。</p>
+            <a href="{{ url_for('auth.logout') }}" class="btn btn-outline-secondary mt-2">退出登录</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

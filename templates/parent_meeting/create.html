@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}创建家长会{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4" style="max-width: 800px;">
+  <a href="{{ url_for('parent_meeting.index') }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回列表</a>
+  <h3>创建家长会</h3>
+
+  <form method="POST">
+    <div class="mb-3">
+      <label class="form-label">家长会标题 <span class="text-danger">*</span></label>
+      <input name="title" class="form-control" placeholder="例：初一期中考试家长会" required>
+    </div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-4">
+        <label class="form-label">会议日期 <span class="text-danger">*</span></label>
+        <input name="meeting_date" type="date" class="form-control" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">开始时间</label>
+        <input name="start_time" type="time" class="form-control">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">结束时间</label>
+        <input name="end_time" type="time" class="form-control">
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">地点</label>
+      <input name="location" class="form-control" placeholder="例：一楼阶梯教室">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">所属年级 <span class="text-danger">*</span></label>
+      <select name="grade_id" class="form-select" required onchange="updateClasses()">
+        <option value="">请选择年级</option>
+        {% for g in grades %}
+        <option value="{{ g.id }}">{{ g.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">目标班级</label>
+      <div class="border p-2 rounded" style="max-height: 200px; overflow-y: auto;">
+        {% for c in classes %}
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="target_classes" value="{{ c.id }}" id="cls_{{ c.id }}"
+                 data-grade="{{ c.grade_id }}">
+          <label class="form-check-label" for="cls_{{ c.id }}">{{ c.name }}</label>
+        </div>
+        {% endfor %}
+      </div>
+      <small class="text-muted">选择年级后自动筛选，也可手动勾选</small>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">说明</label>
+      <textarea name="description" class="form-control" rows="3" placeholder="家长会主要内容、注意事项等"></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">创建</button>
+    <a href="{{ url_for('parent_meeting.index') }}" class="btn btn-secondary">取消</a>
+  </form>
+</div>
+
+<script>
+function updateClasses() {
+    const gid = document.querySelector('[name="grade_id"]').value;
+    document.querySelectorAll('[data-grade]').forEach(cb => {
+        cb.checked = (gid === '' || cb.dataset.grade === gid);
+    });
+}
+</script>
+{% endblock %}

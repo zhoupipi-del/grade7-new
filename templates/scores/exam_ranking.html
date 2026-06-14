@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}成绩排名{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <a href="{{ url_for('scores.exam_list') }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回列表</a>
+  <h3>{{ exam.name }} — 班级排名</h3>
+  <div class="text-muted mb-3">{{ exam.exam_date }} | {{ exam.grade.name if exam.grade else '' }}</div>
+
+  <!-- 班级筛选 -->
+  <form class="row g-2 mb-3" method="GET">
+    <div class="col-auto">
+      <select name="class_id" class="form-select" onchange="this.form.submit()">
+        <option value="">全部班级</option>
+        {% for c in classes %}
+        <option value="{{ c.id }}" {% if class_id==c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+
+  {% for cid, slist in ranking_data.items() %}
+  <h5>{{ slist[0].student.class_.name if slist and slist[0].student and slist[0].student.class_ else '班级'~cid }}</h5>
+  <table class="table table-sm table-bordered">
+    <thead>
+      <tr>
+        <th>排名</th><th>学号</th><th>姓名</th>
+        {% for s in subjects %}<th>{{ s.name }}</th>{% endfor %}
+        <th>班级排名</th><th>年级排名</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for sc in slist %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ sc.student.student_no if sc.student else '' }}</td>
+        <td>{{ sc.student.name if sc.student else '' }}</td>
+        {% for s in subjects %}
+          <td>{{ sc.score if sc.subject_id==s.id else '' }}</td>
+        {% endfor %}
+        <td>{{ sc.rank_class or '' }}</td>
+        <td>{{ sc.rank_grade or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="alert alert-info">暂无排名数据，请先录入成绩并点击「计算排名」</div>
+  {% endfor %}
+</div>
+{% endblock %}

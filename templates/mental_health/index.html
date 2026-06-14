@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}心理健康评估 - 梨江中学{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="mb-1"><i class="bi bi-emoji-smile me-2"></i>心理健康评估</h4>
+        <p class="text-muted mb-0">评估记录 · 风险分析 · 干预跟踪</p>
+    </div>
+    <div>
+        {% if session.role in ['ms_admin', 'grade_leader', 'class_teacher'] %}
+        <a href="{{ url_for('mental_health.create') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle me-1"></i>新增评估
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 统计卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card border-info shadow-sm">
+            <div class="card-body text-center py-3">
+                <h2 class="text-info mb-0">{{ stats.total }}</h2>
+                <small class="text-muted">评估总数</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-danger shadow-sm">
+            <div class="card-body text-center py-3">
+                <h2 class="text-danger mb-0">{{ stats.high }}</h2>
+                <small class="text-muted">高风险</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-warning shadow-sm">
+            <div class="card-body text-center py-3">
+                <h2 class="text-warning mb-0">{{ stats.medium }}</h2>
+                <small class="text-muted">中风险</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-success shadow-sm">
+            <div class="card-body text-center py-3">
+                <h2 class="text-success mb-0">{{ stats.low }}</h2>
+                <small class="text-muted">低风险</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 筛选栏 -->
+<div class="card shadow-sm mb-4">
+    <div class="card-body py-2">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-auto">
+                <label class="col-form-label">风险等级：</label>
+            </div>
+            <div class="col-auto">
+                <select name="risk_level" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for key, label in risk_levels %}
+                    <option value="{{ key }}" {% if request.args.get('risk_level') == key %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="col-form-label">评估类型：</label>
+            </div>
+            <div class="col-auto">
+                <select name="assessment_type" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">全部</option>
+                    {% for key, label in assessment_types %}
+                    <option value="{{ key }}" {% if request.args.get('assessment_type') == key %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto ms-auto">
+                <a href="{{ url_for('mental_health.questions') }}" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-gear"></i> 问题库管理
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 评估列表 -->
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0"><i class="bi bi-list-ul"></i> 评估记录列表</h6>
+        <span class="badge bg-primary">{{ assessments|length }} 条记录</span>
+    </div>
+    <div class="card-body p-0">
+        {% if assessments %}
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>#</th>
+                        <th>学生姓名</th>
+                        <th>班级</th>
+                        <th>评估类型</th>
+                        <th>量表名称</th>
+                        <th>风险等级</th>
+                        <th>是否需要干预</th>
+                        <th>评估日期</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for assessment in assessments %}
+                    <tr class="
+                        {% if assessment.risk_level == 'high' %}table-danger
+                        {% elif assessment.risk_level == 'medium' %}table-warning
+                        {% endif %}
+                    ">
+                        <td>{{ loop.index }}</td>
+                        <td>
+                            <strong>{{ assessment.student.name if assessment.student else '未知' }}</strong>
+                        </td>
+                        <td>
+                            {{ assessment.student.class_.name if assessment.student and assessment.student.class_ else '—' }}
+                        </td>
+                        <td>
+                            {% set type_label = assessment_types | selectattr('0', 'equalto', assessment.assessment_type) | map(attribute='1') | first %}
+                            {{ type_label or assessment.assessment_type }}
+                        </td>
+                        <td>{{ assessment.scale_name or '—' }}</td>
+                        <td>
+                            {% if assessment.risk_level == 'high' %}
+                            <span class="badge bg-danger">高风险</span>
+                            {% elif assessment.risk_level == 'medium' %}
+                            <span class="badge bg-warning">中风险</span>
+                            {% else %}
+                            <span class="badge bg-success">低风险</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if assessment.need_intervention %}
+                            <span class="badge bg-warning">是</span>
+                            {% else %}
+                            <span class="badge bg-secondary">否</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ assessment.assessment_date.strftime('%Y-%m-%d') if assessment.assessment_date else '—' }}</td>
+                        <td>
+                            <a href="{{ url_for('mental_health.detail', aid=assessment.id) }}"
+                               class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-eye"></i> 查看
+                            </a>
+                            {% if session.role in ['ms_admin', 'grade_leader', 'class_teacher'] %}
+                            <a href="{{ url_for('mental_health.edit', aid=assessment.id) }}"
+                               class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                            <button onclick="confirmDelete({{ assessment.id }}, '{{ assessment.student.name if assessment.student else '未知' }}')"
+                                    class="btn btn-sm btn-outline-danger">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-5">
+            <i class="bi bi-inbox fs-1"></i>
+            <p class="mt-2">暂无评估记录</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 删除确认模态框 -->
+{% if session.role in ['ms_admin', 'grade_leader'] %}
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">确认删除</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>确定要删除 <strong id="deleteStudentName"></strong> 的评估记录吗？</p>
+                <p class="text-danger">此操作不可恢复！</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <form id="deleteForm" method="post" style="display: inline;">
+                    <button type="submit" class="btn btn-danger">确认删除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function confirmDelete(assessmentId, studentName) {
+    document.getElementById('deleteStudentName').textContent = studentName;
+    document.getElementById('deleteForm').action = '/mental-health/' + assessmentId + '/delete';
+    new bootstrap.Modal(document.getElementById('deleteModal')).show();
+}
+</script>
+{% endblock %}

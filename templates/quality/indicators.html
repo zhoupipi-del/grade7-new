@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}指标管理 - 梨江中学综合素质评价{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-list-check me-2"></i>评价指标管理</h4>
+  <a href="{{ url_for('quality.indicator_create') }}" class="btn btn-primary btn-sm">
+    <i class="bi bi-plus-lg me-1"></i>新建指标
+  </a>
+</div>
+
+{% for d_key, inds in grouped.items() %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <strong>
+      <i class="bi {{ DIMENSION_NAMES.get(d_key, '').__class__.__name__ == 'str' and 'bi-tag' or 'bi-tag' }}"></i>
+      {{ DIMENSION_NAMES.get(d_key, d_key) }}
+    </strong>
+    <span class="badge bg-secondary">{{ inds|length }} 项</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th width="40">#</th>
+          <th>名称</th>
+          <th width="80">层级</th>
+          <th width="80">权重</th>
+          <th width="80">满分</th>
+          <th width="80">状态</th>
+          <th width="140">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for ind in inds %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>
+          {% if ind.parent_id == 0 %}
+            <strong>{{ ind.name }}</strong>
+          {% else %}
+            <span class="ms-4 text-muted">&#x21b3; {{ ind.name }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if ind.parent_id == 0 %}
+            <span class="badge bg-dark">一级</span>
+          {% else %}
+            <span class="badge bg-light text-dark">二级</span>
+          {% endif %}
+        </td>
+        <td>{% if ind.weight > 0 %}{{ "%.0f"|format(ind.weight * 100) }}%{% else %}-{% endif %}</td>
+        <td>{{ ind.max_score|int }}</td>
+        <td>
+          {% if ind.is_active %}
+            <span class="badge bg-success">启用</span>
+          {% else %}
+            <span class="badge bg-secondary">禁用</span>
+          {% endif %}
+        </td>
+        <td>
+          <a href="{{ url_for('quality.indicator_edit', iid=ind.id) }}" class="btn btn-outline-primary btn-sm me-1">
+            <i class="bi bi-pencil"></i>
+          </a>
+          <form method="POST" action="{{ url_for('quality.indicator_toggle', iid=ind.id) }}"
+                class="d-inline" data-toggle-action
+                onsubmit="return toggleIndicator(this, {{ ind.id }}, '{{ ind.name }}');">
+            <button type="submit" class="btn btn-outline-{% if ind.is_active %}warning{% else %}success{% endif%} btn-sm">
+              {% if ind.is_active %}禁用{% else %}启用{% endif %}
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+
+<script>
+function toggleIndicator(form, id, name) {
+  fetch(form.action, { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.code === 0) {
+        location.reload();
+      }
+    });
+  return false;
+}
+</script>
+{% endblock %}

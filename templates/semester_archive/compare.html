@@ -1,0 +1,357 @@
+{% extends "base.html" %}
+{% block title %}学期对比分析{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h3><i class="bi bi-bar-chart text-primary"></i> 学期对比分析</h3>
+        <p class="text-muted">选择两个学期进行数据对比，查看变化趋势</p>
+    </div>
+    <div class="col-auto">
+        <a href="{{ url_for('semester_archive.list_archives') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> 返回列表
+        </a>
+    </div>
+</div>
+
+<!-- 选择学期 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-5">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-calendar"></i> 选择第一学期
+            </div>
+            <div class="card-body">
+                <select class="form-select" id="semester1" onchange="loadComparison()">
+                    <option value="">-- 请选择 --</option>
+                    {% for archive in archives %}
+                    <option value="{{ archive.semester_name }}">{{ archive.display_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2 d-flex align-items-center justify-content-center">
+        <div class="text-center">
+            <i class="bi bi-arrow-left-right" style="font-size: 2rem; color: #0d6efd;"></i>
+            <div class="text-muted mt-1">对比</div>
+        </div>
+    </div>
+    <div class="col-md-5">
+        <div class="card shadow-sm">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-calendar"></i> 选择第二学期
+            </div>
+            <div class="card-body">
+                <select class="form-select" id="semester2" onchange="loadComparison()">
+                    <option value="">-- 请选择 --</option>
+                    {% for archive in archives %}
+                    <option value="{{ archive.semester_name }}">{{ archive.display_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 对比结果 -->
+<div id="comparisonResult" style="display: none;">
+    <!-- 概览卡片 -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fs-2" id="studentChange">-</div>
+                <div class="text-muted">学生人数变化</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fs-2" id="disciplineChange">-</div>
+                <div class="text-muted">违纪总数变化</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fs-2" id="scoreChange">-</div>
+                <div class="text-muted">平均成绩变化</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fs-2" id="activityChange">-</div>
+                <div class="text-muted">活动参与变化</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 详细对比表 -->
+    <div class="row">
+        <div class="col">
+            <div class="card shadow-sm">
+                <div class="card-header bg-light">
+                    <i class="bi bi-table"></i> 详细对比数据
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-bordered mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>指标</th>
+                                <th id="semester1Header">第一学期</th>
+                                <th id="semester2Header">第二学期</th>
+                                <th>变化量</th>
+                                <th>变化率</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>学生人数</strong></td>
+                                <td id="s1_student">-</td>
+                                <td id="s2_student">-</td>
+                                <td id="diff_student">-</td>
+                                <td id="pct_student">-</td>
+                            </tr>
+                            <tr>
+                                <td><strong>班级数量</strong></td>
+                                <td id="s1_class">-</td>
+                                <td id="s2_class">-</td>
+                                <td id="diff_class">-</td>
+                                <td id="pct_class">-</td>
+                            </tr>
+                            <tr>
+                                <td><strong>教师人数</strong></td>
+                                <td id="s1_teacher">-</td>
+                                <td id="s2_teacher">-</td>
+                                <td id="diff_teacher">-</td>
+                                <td id="pct_teacher">-</td>
+                            </tr>
+                            <tr>
+                                <td><strong>违纪总数</strong></td>
+                                <td id="s1_discipline">-</td>
+                                <td id="s2_discipline">-</td>
+                                <td id="diff_discipline">-</td>
+                                <td id="pct_discipline">-</td>
+                            </tr>
+                            <tr>
+                                <td><strong>平均成绩</strong></td>
+                                <td id="s1_score">-</td>
+                                <td id="s2_score">-</td>
+                                <td id="diff_score">-</td>
+                                <td id="pct_score">-</td>
+                            </tr>
+                            <tr>
+                                <td><strong>活动总数</strong></td>
+                                <td id="s1_activity">-</td>
+                                <td id="s2_activity">-</td>
+                                <td id="diff_activity">-</td>
+                                <td id="pct_activity">-</td>
+                            </tr>
+                            <tr>
+                                <td><strong>消息总数</strong></td>
+                                <td id="s1_message">-</td>
+                                <td id="s2_message">-</td>
+                                <td id="diff_message">-</td>
+                                <td id="pct_message">-</td>
+                            </tr>
+                            <tr>
+                                <td><strong>平均出勤率</strong></td>
+                                <td id="s1_attendance">-</td>
+                                <td id="s2_attendance">-</td>
+                                <td id="diff_attendance">-</td>
+                                <td id="pct_attendance">-</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 加载提示 -->
+<div id="loadingIndicator" class="text-center py-5" style="display: none;">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">加载中...</span>
+    </div>
+    <p class="mt-3 text-muted">正在加载对比数据...</p>
+</div>
+
+<!-- 错误提示 -->
+<div id="errorAlert" class="alert alert-danger" style="display: none;" role="alert">
+    <i class="bi bi-exclamation-triangle"></i>
+    <span id="errorText"></span>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function loadComparison() {
+    const semester1 = document.getElementById('semester1').value;
+    const semester2 = document.getElementById('semester2').value;
+    
+    // 清除之前的错误提示
+    document.getElementById('errorAlert').style.display = 'none';
+    
+    // 如果两个学期都选择了，加载对比数据
+    if (semester1 && semester2) {
+        if (semester1 === semester2) {
+            showError('请选择两个不同的学期进行对比');
+            return;
+        }
+        
+        // 显示加载提示
+        document.getElementById('loadingIndicator').style.display = 'block';
+        document.getElementById('comparisonResult').style.display = 'none';
+        
+        // 调用API
+        fetch(`{{ url_for('semester_archive.api_compare', semester1='') }}${semester1}/${semester2}`)
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('loadingIndicator').style.display = 'none';
+                
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+                
+                // 更新对比结果
+                updateComparison(data);
+            })
+            .catch(error => {
+                document.getElementById('loadingIndicator').style.display = 'none';
+                showError('加载数据失败：' + error.message);
+            });
+    } else {
+        // 隐藏结果
+        document.getElementById('comparisonResult').style.display = 'none';
+    }
+}
+
+function updateComparison(data) {
+    // 更新表头
+    document.getElementById('semester1Header').textContent = data.semester1.display_name;
+    document.getElementById('semester2Header').textContent = data.semester2.display_name;
+    
+    // 更新概览卡片
+    updateChangeCard('studentChange', data.changes.student_count);
+    updateChangeCard('disciplineChange', data.changes.discipline_total);
+    updateChangeCard('scoreChange', data.changes.score_average);
+    updateChangeCard('activityChange', data.changes.activity_participation);
+    
+    // 更新详细表格
+    const s1 = data.semester1.summary;
+    const s2 = data.semester2.summary;
+    const changes = data.changes;
+    
+    // 学生人数
+    updateTableRow('student', 
+        s1.student_count || 0, 
+        s2.student_count || 0,
+        changes.student_count.value,
+        changes.student_count.percent);
+    
+    // 班级数量
+    updateTableRow('class',
+        s1.class_count || 0,
+        s2.class_count || 0,
+        (s2.class_count || 0) - (s1.class_count || 0),
+        calcPercent(s1.class_count || 0, s2.class_count || 0));
+    
+    // 教师人数
+    updateTableRow('teacher',
+        s1.teacher_count || 0,
+        s2.teacher_count || 0,
+        (s2.teacher_count || 0) - (s1.teacher_count || 0),
+        calcPercent(s1.teacher_count || 0, s2.teacher_count || 0));
+    
+    // 违纪总数
+    updateTableRow('discipline',
+        s1.discipline_stats?.total || 0,
+        s2.discipline_stats?.total || 0,
+        changes.discipline_total.value,
+        changes.discipline_total.percent);
+    
+    // 平均成绩
+    updateTableRow('score',
+        s1.score_stats?.average || 0,
+        s2.score_stats?.average || 0,
+        changes.score_average.value,
+        changes.score_average.percent);
+    
+    // 活动总数
+    updateTableRow('activity',
+        s1.activity_stats?.total_activities || 0,
+        s2.activity_stats?.total_activities || 0,
+        (s2.activity_stats?.total_activities || 0) - (s1.activity_stats?.total_activities || 0),
+        calcPercent(s1.activity_stats?.total_activities || 0, s2.activity_stats?.total_activities || 0));
+    
+    // 消息总数
+    updateTableRow('message',
+        s1.message_stats?.total_messages || 0,
+        s2.message_stats?.total_messages || 0,
+        (s2.message_stats?.total_messages || 0) - (s1.message_stats?.total_messages || 0),
+        calcPercent(s1.message_stats?.total_messages || 0, s2.message_stats?.total_messages || 0));
+    
+    // 平均出勤率
+    const att1 = (s1.attendance_stats?.average_rate || 0) * 100;
+    const att2 = (s2.attendance_stats?.average_rate || 0) * 100;
+    updateTableRow('attendance',
+        att1.toFixed(1) + '%',
+        att2.toFixed(1) + '%',
+        (att2 - att1).toFixed(1) + '%',
+        calcPercent(att1, att2));
+    
+    // 显示结果
+    document.getElementById('comparisonResult').style.display = 'block';
+}
+
+function updateChangeCard(elementId, changeData) {
+    const element = document.getElementById(elementId);
+    const value = changeData.value;
+    const percent = changeData.percent;
+    
+    let colorClass = 'text-muted';
+    let icon = '';
+    
+    if (value > 0) {
+        colorClass = 'text-success';
+        icon = '↑';
+    } else if (value < 0) {
+        colorClass = 'text-danger';
+        icon = '↓';
+    }
+    
+    element.className = `fs-2 ${colorClass}`;
+    element.innerHTML = `${icon} ${value} <small class="fs-6">(${percent}%)</small>`;
+}
+
+function updateTableRow(prefix, val1, val2, diff, pct) {
+    document.getElementById(`s1_${prefix}`).textContent = val1;
+    document.getElementById(`s2_${prefix}`).textContent = val2;
+    document.getElementById(`diff_${prefix}`).textContent = diff;
+    
+    const pctElement = document.getElementById(`pct_${prefix}`);
+    pctElement.textContent = pct + '%';
+    
+    if (diff > 0) {
+        pctElement.className = 'text-success';
+    } else if (diff < 0) {
+        pctElement.className = 'text-danger';
+    } else {
+        pctElement.className = 'text-muted';
+    }
+}
+
+function calcPercent(oldVal, newVal) {
+    if (oldVal == 0) {
+        return newVal > 0 ? 100 : 0;
+    }
+    return ((newVal - oldVal) / oldVal * 100).toFixed(2);
+}
+
+function showError(message) {
+    document.getElementById('errorText').textContent = message;
+    document.getElementById('errorAlert').style.display = 'block';
+}
+</script>
+{% endblock %}

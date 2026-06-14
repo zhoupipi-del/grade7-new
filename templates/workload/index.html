@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% block title %}教师工作量统计 - 梨江中学德育管理平台{% endblock %}
+
+{% block extra_css %}
+<style>
+    .stat-card {
+        border-radius: 12px;
+        padding: 1.25rem;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+    }
+    .stat-card .stat-icon {
+        font-size: 2rem;
+        opacity: 0.85;
+    }
+    .stat-card .stat-value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    .stat-card .stat-label {
+        font-size: 0.875rem;
+        opacity: 0.85;
+    }
+    .chart-container {
+        position: relative;
+        width: 100%;
+        min-height: 420px;
+    }
+    .medal-gold { color: #f0ad4e; }
+    .medal-silver { color: #adb5bd; }
+    .medal-bronze { color: #cd7f32; }
+    .table-workload th {
+        white-space: nowrap;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .table-workload td {
+        vertical-align: middle;
+    }
+    .btn-day {
+        border-radius: 20px;
+        padding: 0.35rem 1.25rem;
+        font-weight: 500;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <h4 class="mb-1"><i class="bi bi-bar-chart-fill me-2"></i>教师工作量统计</h4>
+        <p class="text-muted mb-0 small">统计周期内教师综合工作量一览</p>
+    </div>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        <div class="btn-group btn-group-sm" role="group">
+            <a href="{{ url_for('workload.index', days=7) }}"
+               class="btn btn-day {% if days == 7 %}btn-primary{% else %}btn-outline-primary{% endif %}">近7天</a>
+            <a href="{{ url_for('workload.index', days=30) }}"
+               class="btn btn-day {% if days == 30 %}btn-primary{% else %}btn-outline-primary{% endif %}">近30天</a>
+            <a href="{{ url_for('workload.index', days=90) }}"
+               class="btn btn-day {% if days == 90 %}btn-primary{% else %}btn-outline-primary{% endif %}">近90天</a>
+        </div>
+        <a href="{{ url_for('workload.export', days=days) }}" class="btn btn-sm btn-outline-success">
+            <i class="bi bi-download me-1"></i>导出
+        </a>
+    </div>
+</div>
+
+<!-- 统计卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-12 col-sm-6 col-md-4 col-lg">
+        <div class="stat-card bg-primary text-white h-100">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ summary.teacher_count }}</div>
+                    <div class="stat-label">教师数</div>
+                </div>
+                <i class="bi bi-people-fill stat-icon"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-sm-6 col-md-4 col-lg">
+        <div class="stat-card bg-danger text-white h-100">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ summary.total_discipline }}</div>
+                    <div class="stat-label">违纪录入</div>
+                </div>
+                <i class="bi bi-exclamation-triangle-fill stat-icon"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-sm-6 col-md-4 col-lg">
+        <div class="stat-card bg-success text-white h-100">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ summary.total_routine }}</div>
+                    <div class="stat-label">评分录入</div>
+                </div>
+                <i class="bi bi-check-circle-fill stat-icon"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-sm-6 col-md-4 col-lg">
+        <div class="stat-card bg-warning text-dark h-100">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ summary.total_tasks }}</div>
+                    <div class="stat-label">任务分配</div>
+                </div>
+                <i class="bi bi-list-check stat-icon"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-sm-6 col-md-4 col-lg">
+        <div class="stat-card bg-info text-white h-100">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value">{{ summary.total_home_visits }}</div>
+                    <div class="stat-label">家访记录</div>
+                </div>
+                <i class="bi bi-house-heart-fill stat-icon"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 柱状图 -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-white">
+        <h6 class="mb-0"><i class="bi bi-bar-chart me-2"></i>教师工作量分解 (近{{ days }}天)</h6>
+    </div>
+    <div class="card-body">
+        <div class="chart-container">
+            <canvas id="workloadChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- 数据表格 -->
+<div class="card shadow-sm">
+    <div class="card-header bg-white">
+        <h6 class="mb-0"><i class="bi bi-table me-2"></i>工作量明细</h6>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-workload mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-3">#</th>
+                        <th>教师</th>
+                        <th>角色</th>
+                        <th>违纪</th>
+                        <th>评分</th>
+                        <th>任务</th>
+                        <th>家访</th>
+                        <th>合计</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in stats %}
+                    <tr>
+                        <td class="ps-3">
+                            {% if loop.index == 1 %}
+                                <i class="bi bi-trophy-fill medal-gold fs-5" title="第1名"></i>
+                            {% elif loop.index == 2 %}
+                                <i class="bi bi-trophy-fill medal-silver fs-5" title="第2名"></i>
+                            {% elif loop.index == 3 %}
+                                <i class="bi bi-trophy-fill medal-bronze fs-5" title="第3名"></i>
+                            {% else %}
+                                <span class="text-muted small">{{ loop.index }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ url_for('workload.detail', username=s.username) }}" class="fw-semibold text-decoration-none">
+                                {{ s.name }}
+                            </a>
+                        </td>
+                        <td><span class="badge bg-secondary">{{ s.role }}</span></td>
+                        <td>{{ s.discipline }}</td>
+                        <td>{{ s.routine }}</td>
+                        <td>{{ s.tasks }}</td>
+                        <td>{{ s.home_visits }}</td>
+                        <td><span class="fw-bold">{{ s.total }}</span></td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center text-muted py-4">
+                            <i class="bi bi-inbox fs-4 d-block mb-2"></i>暂无数据
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const ctx = document.getElementById('workloadChart');
+    if (!ctx) return;
+
+    const stats = {{ stats | tojson | safe }};
+    const labels = stats.map(s => s.name);
+    const disciplineData = stats.map(s => s.discipline || 0);
+    const routineData = stats.map(s => s.routine || 0);
+    const tasksData = stats.map(s => s.tasks || 0);
+    const visitsData = stats.map(s => s.home_visits || 0);
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: '违纪',
+                    data: disciplineData,
+                    backgroundColor: '#dc3545',
+                    borderRadius: 4,
+                },
+                {
+                    label: '评分',
+                    data: routineData,
+                    backgroundColor: '#198754',
+                    borderRadius: 4,
+                },
+                {
+                    label: '任务',
+                    data: tasksData,
+                    backgroundColor: '#ffc107',
+                    borderRadius: 4,
+                },
+                {
+                    label: '家访',
+                    data: visitsData,
+                    backgroundColor: '#0dcaf0',
+                    borderRadius: 4,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 0,
+                    }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: '数量'
+                    },
+                    ticks: {
+                        stepSize: 1,
+                    }
+                }
+            }
+        }
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}全校评价总览 - 梨江中学综合素质评价{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-bar-chart-line me-2"></i>全校评价总览</h4>
+  <span class="text-muted small">学期: {{ semester }}</span>
+</div>
+
+<!-- 雷达图 -->
+<div class="card mb-3">
+  <div class="card-header"><strong>各年级五维对比</strong></div>
+  <div class="card-body">
+    <div style="max-width:600px; margin:0 auto;">
+      <canvas id="radarChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- 数据表格 -->
+<div class="card">
+  <div class="card-header"><strong>各年级各维度平均分</strong></div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>年级</th>
+          {% for dim in DIMENSIONS %}
+          <th class="text-center">{{ dim.name }}</th>
+          {% endfor %}
+          <th class="text-center fw-bold">综合均分</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for g in grades %}
+      <tr>
+        <td><strong>{{ g.name }}</strong></td>
+        {% set gid = g.id %}
+        {% for d in DIMENSION_KEYS %}
+        <td class="text-center">{{ grade_dim_data.get(gid, {}).get(d, '-') }}</td>
+        {% endfor %}
+        <td class="text-center">
+          <strong>{{ grade_dim_data.get(gid, {}).get("total", "-") }}</strong>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="{{ DIMENSIONS|length + 2 }}" class="text-center text-muted py-3">暂无数据</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function(){
+  var labels = [{% for d in DIMENSIONS %}"{{ d.name }}"{% if not loop.last %},{% endif %}{% endfor %}];
+  var colors = [
+    'rgba(220,53,69,0.2)', 'rgba(13,110,253,0.2)', 'rgba(25,135,84,0.2)',
+    'rgba(255,193,7,0.2)', 'rgba(13,202,240,0.2)',
+  ];
+  var borders = [
+    'rgba(220,53,69,1)', 'rgba(13,110,253,1)', 'rgba(25,135,84,1)',
+    'rgba(255,193,7,1)', 'rgba(13,202,240,1)',
+  ];
+  var datasets = [];
+  {% for g in grades %}
+  {% set gid = g.id %}
+  datasets.push({
+    label: '{{ g.name }}',
+    data: [{% for d in DIMENSION_KEYS %}{{ grade_dim_data.get(gid,{}).get(d,0) }}{{ "," if not loop.last }}{% endfor %}],
+    backgroundColor: colors[{{ loop.index - 1 }} % colors.length],
+    borderColor: borders[{{ loop.index - 1 }} % borders.length],
+    borderWidth: 2,
+    pointBackgroundColor: borders[{{ loop.index - 1 }} % borders.length],
+  });
+  {% endfor %}
+
+  new Chart(document.getElementById('radarChart'), {
+    type: 'radar',
+    data: { labels: labels, datasets: datasets },
+    options: {
+      responsive: true,
+      scales: { r: { min: 0, max: 100, ticks: { stepSize: 20 } } },
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+})();
+</script>
+{% endblock %}

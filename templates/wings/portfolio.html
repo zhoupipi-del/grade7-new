@@ -1,0 +1,82 @@
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-journal-bookmark me-2"></i>成长档案</h4>
+  <form method="GET" class="d-flex gap-2">
+    <select name="grade_id" class="form-select form-select-sm" style="width:140px;" onchange="this.form.submit()">
+      <option value="">全部年级</option>
+      {% for g in grades %}
+      <option value="{{ g.id }}" {% if grade_filter == g.id %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
+    {% if grade_filter %}
+    <select name="class_id" class="form-select form-select-sm" style="width:140px;" onchange="this.form.submit()">
+      <option value="">全部班级</option>
+      {% for c in classes %}
+      <option value="{{ c.id }}" {% if class_filter == c.id %}selected{% endif %}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+  </form>
+</div>
+
+{% if student_summaries %}
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>姓名</th>
+        <th>班级</th>
+        <th>评分次数</th>
+        <th>均分</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in student_summaries %}
+    <tr>
+      <td><strong>{{ item.student.name }}</strong></td>
+      <td>{{ item.student.class_.name if item.student.class_ else '?' }}</td>
+      <td><span class="badge bg-secondary">{{ item.count }}</span></td>
+      <td>
+        <div class="d-flex align-items-center gap-2">
+          <div class="progress flex-grow-1" style="height:16px;max-width:100px;">
+            <div class="progress-bar {% if item.avg >= 8 %}bg-success{% elif item.avg >= 6 %}bg-info{% elif item.avg >= 4 %}bg-warning{% else %}bg-danger{% endif %}"
+                 style="width:{{ (item.avg * 10)|int if item.avg > 0 else 0 }}%"></div>
+          </div>
+          <strong>{{ item.avg }}</strong>
+        </div>
+      </td>
+      <td>
+        <a href="{{ url_for('wings.portfolio_detail', sid=item.student.id) }}" class="btn btn-sm btn-outline-primary">
+          <i class="bi bi-eye me-1"></i> 详情
+        </a>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if students_page.pages > 1 %}
+<nav><ul class="pagination pagination-sm justify-content-center">
+  <li class="page-item {% if not students_page.has_prev %}disabled{% endif %}">
+    <a class="page-link" href="?page={{ students_page.prev_num }}&grade_id={{ grade_filter or '' }}&class_id={{ class_filter or '' }}">&laquo;</a>
+  </li>
+  {% for p in students_page.iter_pages() %}
+    {% if p %}
+    <li class="page-item {% if p == students_page.page %}active{% endif %}">
+      <a class="page-link" href="?page={{ p }}&grade_id={{ grade_filter or '' }}&class_id={{ class_filter or '' }}">{{ p }}</a>
+    </li>
+    {% else %}<li class="page-item disabled"><span class="page-link">...</span></li>{% endif %}
+  {% endfor %}
+  <li class="page-item {% if not students_page.has_next %}disabled{% endif %}">
+    <a class="page-link" href="?page={{ students_page.next_num }}&grade_id={{ grade_filter or '' }}&class_id={{ class_filter or '' }}">&raquo;</a>
+  </li>
+</ul></nav>
+{% endif %}
+
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-journal-x display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无评分记录</p>
+</div>
+{% endif %}

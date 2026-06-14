@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}批量违纪添加 - 梨江中学{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-list-check"></i> 批量添加违纪记录</h4>
+    <a href="{{ url_for('class.discipline_list') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回纪律列表
+    </a>
+</div>
+
+<form method="post">
+    <!-- 学生选择 -->
+    <div class="card shadow-sm mb-3">
+        <div class="card-header bg-danger text-white">
+            <i class="bi bi-people"></i> 选择学生
+        </div>
+        <div class="card-body">
+            <p class="small text-muted mb-2">勾选需要添加违纪记录的学生：</p>
+            <div class="form-check form-check-inline">
+                <input type="checkbox" id="selectAllStu"
+                       onclick="document.querySelectorAll('.stu-cb').forEach(function(c){c.checked=this.checked})">
+                <label for="selectAllStu" class="fw-bold small">全选/取消</label>
+            </div>
+            <hr>
+            <div class="row g-1">
+                {% for s in students %}
+                <div class="col-md-3 col-sm-4 col-6">
+                    <div class="form-check">
+                        <input class="form-check-input stu-cb" type="checkbox"
+                               name="student_ids" value="{{ s.id }}"
+                               id="bs_{{ s.id }}">
+                        <label class="form-check-label small" for="bs_{{ s.id }}">
+                            {{ s.student_no }} {{ s.name }}
+                        </label>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 违纪信息 -->
+    <div class="card shadow-sm mb-3">
+        <div class="card-header bg-warning text-dark">
+            <i class="bi bi-pencil-square"></i> 违纪信息（所有选中学生共用）
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">违纪等级</label>
+                    <select name="type" class="form-select">
+                        <option value="warning">警告</option>
+                        <option value="minor" selected>轻微</option>
+                        <option value="major">严重</option>
+                        <option value="serious">重大</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">类别</label>
+                    <select name="category" class="form-select">
+                        <option value="">— 选择 —</option>
+                        {% for c in ['迟到','仪容','课堂','作业','打架','吸烟','其他'] %}
+                        <option value="{{ c }}">{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">扣分</label>
+                    <input type="number" name="points" class="form-control" value="0" min="0">
+                </div>
+                <div class="col-md-12">
+                    <label class="form-label fw-bold">详细描述</label>
+                    <textarea name="description" class="form-control" rows="2"
+                              placeholder="请描述违纪情况..."></textarea>
+                </div>
+                <div class="col-md-12">
+                    <label class="form-label fw-bold">处理措施</label>
+                    <textarea name="action_taken" class="form-control" rows="2"
+                              placeholder="拟采取的处理措施..."></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="text-end">
+        <a href="{{ url_for('class.discipline_list') }}" class="btn btn-secondary me-2">取消</a>
+        <button type="submit" class="btn btn-danger"
+                onclick="return confirm('确认为选中学生批量创建违纪记录？');">
+            <i class="bi bi-plus-circle"></i> 批量添加违纪记录
+        </button>
+    </div>
+</form>
+{% endblock %}

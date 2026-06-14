@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}批量签到{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4" style="max-width: 900px;">
+  <a href="{{ url_for('parent_meeting.detail', mid=meeting.id) }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回详情</a>
+  <h3>批量签到 — {{ meeting.title }}</h3>
+  <div class="text-muted mb-3">勾选学生，点击「确认签到」一键完成</div>
+
+  <form method="POST">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="checkAll(true)">全选</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="checkAll(false)">取消</button>
+      </div>
+      <button type="submit" class="btn btn-success">确认签到</button>
+    </div>
+
+    <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+      <table class="table table-sm table-hover">
+        <thead class="sticky-top bg-white">
+          <tr>
+            <th style="width:40px;"><input type="checkbox" id="checkAllBox" onclick="toggleAll(this)"></th>
+            <th>学号</th><th>姓名</th><th>班级</th><th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in students %}
+          <tr {% if s.id in signed_student_ids %}class="table-success"{% endif %}>
+            <td>
+              {% if s.id not in signed_student_ids %}
+              <input type="checkbox" name="student_ids" value="{{ s.id }}">
+              {% else %}
+              <span class="badge bg-success">已签</span>
+              {% endif %}
+            </td>
+            <td>{{ s.student_no }}</td>
+            <td>{{ s.name }}</td>
+            <td>{{ s.class_.name if s.class_ else '—' }}</td>
+            <td>
+              {% if s.id in signed_student_ids %}
+              <span class="badge bg-success">已签到</span>
+              {% else %}
+              <span class="badge bg-secondary">未签到</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted">暂无学生（请检查家长会目标班级设置）</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-2">
+      <label class="form-label">签到家长姓名（可选，未签到学生统一使用此名）</label>
+      <input name="parent_name" class="form-control" placeholder="留空则使用「家长」">
+    </div>
+    <div class="form-check mt-2">
+      <input class="form-check-input" type="checkbox" name="is_late" id="isLateCb">
+      <label class="form-check-label" for="isLateCb">标记为迟到</label>
+    </div>
+    <div class="mt-2">
+      <label class="form-label">备注（可选）</label>
+      <input name="notes" class="form-control" placeholder="备注信息">
+    </div>
+  </form>
+</div>
+
+<script>
+function toggleAll(master) {
+    document.querySelectorAll('input[name="student_ids"]').forEach(cb => cb.checked = master.checked);
+}
+function checkAll(state) {
+    document.querySelectorAll('input[name="student_ids"]').forEach(cb => cb.checked = state);
+    document.getElementById('checkAllBox').checked = state;
+}
+</script>
+{% endblock %}

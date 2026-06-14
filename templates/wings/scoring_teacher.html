@@ -1,0 +1,145 @@
+<div class="d-flex align-items-center mb-3">
+  <a href="{{ url_for('wings.score_page') }}" class="btn btn-outline-secondary btn-sm me-3">
+    <i class="bi bi-arrow-left me-1"></i> 返回
+  </a>
+  <h4 class="mb-0"><i class="bi bi-person-badge me-2"></i>教师评分</h4>
+</div>
+
+{% if students %}
+<div class="card">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>学号</th>
+            <th>姓名</th>
+            {% for d in dimensions %}
+            <th class="text-center" style="min-width:70px;">{{ d }}</th>
+            {% endfor %}
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for s in students %}
+        <tr id="row-{{ s.id }}">
+          <td><small>{{ s.student_no or '' }}</small></td>
+          <td><strong>{{ s.name }}</strong></td>
+          {% for d in dimensions %}
+          <td>
+            <input type="number" class="form-control form-control-sm text-center score-input"
+                   data-sid="{{ s.id }}" data-dim="{{ d }}"
+                   min="0" max="10" step="0.5" value=""
+                   style="width:60px;display:inline;">
+          </td>
+          {% endfor %}
+          <td>
+            <button class="btn btn-sm btn-success save-row" data-sid="{{ s.id }}">
+              <i class="bi bi-check-lg"></i>
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="text-end mt-2">
+      <button class="btn btn-primary" onclick="saveAll()">
+        <i class="bi bi-save me-1"></i> 全部保存
+      </button>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-people display-1 text-muted"></i>
+  <p class="text-muted mt-3">未找到学生数据</p>
+  <p class="small text-muted">请确认您已绑定班级</p>
+</div>
+{% endif %}
+
+{% if students %}
+<div id="wings-toast" class="position-fixed top-0 start-50 translate-middle-x mt-3" style="z-index:9999;display:none;">
+  <div class="toast align-items-center text-white border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex"><div class="toast-body" id="wings-toast-body"></div>
+    <button type="button" class="btn-close btn-close-white me-2 m-auto" onclick="document.getElementById('wings-toast').style.display='none'"></button></div>
+  </div>
+</div>
+
+<script>
+function showToast(msg, type) {
+  var el = document.getElementById('wings-toast');
+  var body = document.getElementById('wings-toast-body');
+  var toastDiv = el.querySelector('.toast');
+  toastDiv.className = 'toast align-items-center text-white border-0 ' + (type === 'success' ? 'bg-success' : 'bg-danger');
+  body.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(function() { el.style.display = 'none'; }, 4000);
+}
+
+function saveScore(sid, dim, val) {
+  if (val === undefined || val === null || val.toString().trim() === '') {
+    return Promise.resolve({ skipped: true, dim: dim });
+  }
+  return fetch('/wings/api/score/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      student_id: sid,
+      dimension: dim,
+      score: parseFloat(val),
+      scorer_type: 'teacher',
+      class_id: {{ students[0].class_id if students else 0 }},
+      grade_id: {{ students[0].grade_id if students else 0 }}
+    })
+  }).then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  });
+}
+
+document.querySelectorAll('.save-row').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var sid = this.dataset.sid;
+    var self = this;
+    var promises = [];
+    var row = document.getElementById('row-' + sid);
+    row.querySelectorAll('.score-input').forEach(function(input) {
+      promises.push(saveScore(sid, input.dataset.dim, input.value));
+    });
+    Promise.all(promises).then(function(results) {
+      var actual = results.filter(function(r) { return r && !r.skipped; });
+      if (actual.length === 0) { showToast('请至少填写一项评分', 'danger'); return; }
+      btn.classList.remove('btn-success');
+      btn.classList.add('btn-outline-success');
+      btn.innerHTML = '<i class="bi bi-check2-all"></i>';
+      showToast('数据已保存', 'success');
+      setTimeout(function() {
+        btn.classList.remove('btn-outline-success');
+        btn.classList.add('btn-success');
+        btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+      }, 1500);
+    }).catch(function(err) {
+      console.error('Score save failed:', err);
+      showToast('保存失败！服务器异常，请联系德育处排查', 'danger');
+    });
+  });
+});
+
+function saveAll() {
+  var promises = [];
+  document.querySelectorAll('.score-input').forEach(function(input) {
+    promises.push(saveScore(input.dataset.sid, input.dataset.dim, input.value));
+  });
+  var actualPromises = promises.filter(function(p) { return p && typeof p.then === 'function'; });
+  if (actualPromises.length === 0) { showToast('请先填写评分', 'danger'); return; }
+  Promise.all(promises).then(function(results) {
+    var saved = results.filter(function(r) { return r && !r.skipped; });
+    showToast('全部保存成功！共 ' + saved.length + ' 条数据已同步到学校数智中心', 'success');
+  }).catch(function(err) {
+    console.error('Batch score save failed:', err);
+    showToast('批量保存失败！服务器异常，请联系德育处排查', 'danger');
+  });
+}
+</script>
+{% endif %}

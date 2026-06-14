@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}数据备份与恢复{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h3><i class="bi bi-database text-primary"></i> 数据备份与恢复</h3>
+        <p class="text-muted">管理系统数据库备份，支持导出、下载、上传恢复</p>
+    </div>
+</div>
+
+<!-- 数据库信息 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-2">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-2 text-primary">{{ db_info.engine }}</div>
+            <div class="text-muted">数据库引擎</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-2 text-success">{{ db_info.database }}</div>
+            <div class="text-muted">数据库名称</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-2 text-info">{{ db_info.table_count }}</div>
+            <div class="text-muted">数据表数</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-2 text-warning">{{ db_info.total_records }}</div>
+            <div class="text-muted">总记录数</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-2 text-danger">{{ db_info.db_size_mb }} MB</div>
+            <div class="text-muted">数据库大小</div>
+        </div>
+    </div>
+</div>
+
+<!-- 操作区 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-download"></i> 创建新备份
+            </div>
+            <div class="card-body">
+                <p>使用 mysqldump 导出完整数据库备份文件。</p>
+                <form method="POST" action="{{ url_for('backup.create_backup') }}" id="createBackupForm">
+                    <button type="submit" class="btn btn-primary w-100" id="createBtn">
+                        <i class="bi bi-plus-circle"></i> 立即创建备份
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-upload"></i> 恢复备份
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('backup.restore_backup') }}" enctype="multipart/form-data" id="restoreForm">
+                    <div class="mb-3">
+                        <label for="sql_file" class="form-label">选择 .sql 备份文件</label>
+                        <input type="file" class="form-control" id="sql_file" name="sql_file" accept=".sql" required>
+                    </div>
+                    <div class="alert alert-warning py-2 small">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <strong>警告:</strong> 恢复操作将覆盖当前数据库数据，请谨慎操作！建议先创建备份再恢复。
+                    </div>
+                    <button type="button" class="btn btn-danger w-100" data-bs-toggle="modal" data-bs-target="#restoreConfirmModal">
+                        <i class="bi bi-arrow-repeat"></i> 恢复数据
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 备份文件列表 -->
+<div class="row">
+    <div class="col">
+        <div class="card shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-archive"></i> 备份文件列表（{{ backups|length }} 个）</span>
+                <span class="badge bg-secondary">按时间倒序</span>
+            </div>
+            <div class="card-body p-0">
+                {% if backups %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>文件名</th>
+                                <th class="text-center">大小</th>
+                                <th class="text-center">创建时间</th>
+                                <th class="text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for b in backups %}
+                        <tr>
+                            <td>
+                                <i class="bi bi-file-earmark-code text-primary"></i>
+                                <code>{{ b.filename }}</code>
+                            </td>
+                            <td class="text-center">
+                                {% if b.size_mb >= 1 %}
+                                    {{ b.size_mb }} MB
+                                {% else %}
+                                    {{ b.size_kb }} KB
+                                {% endif %}
+                            </td>
+                            <td class="text-center text-muted">{{ b.created_at }}</td>
+                            <td class="text-center">
+                                <a href="{{ url_for('backup.download_backup', filename=b.filename) }}"
+                                   class="btn btn-sm btn-outline-primary" title="下载">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                   data-bs-toggle="modal" data-bs-target="#deleteConfirmModal"
+                                   data-filename="{{ b.filename }}" title="删除">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                    暂无备份文件，点击上方按钮创建第一个备份
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 恢复确认弹窗 -->
+<div class="modal fade" id="restoreConfirmModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-danger">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle"></i> 确认恢复</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0">确定要恢复备份文件吗？此操作将<strong class="text-danger">覆盖当前数据库中的所有数据</strong>，且不可撤销。</p>
+                <p class="text-muted small mt-2">建议：恢复前先创建一份当前数据库的备份。</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger" id="confirmRestoreBtn">
+                    <i class="bi bi-check-lg"></i> 确认恢复
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 删除确认弹窗 -->
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title"><i class="bi bi-trash"></i> 确认删除</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>确定要删除备份文件 <strong id="deleteFilename"></strong> 吗？</p>
+                <p class="text-muted small mb-0">删除后无法恢复，请确认不再需要此备份。</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <form method="POST" id="deleteForm" style="display:inline;">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-trash"></i> 确认删除
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 恢复确认
+document.getElementById('confirmRestoreBtn').addEventListener('click', function() {
+    const form = document.getElementById('restoreForm');
+    const fileInput = document.getElementById('sql_file');
+    if (!fileInput.files.length) {
+        alert('请先选择备份文件');
+        return;
+    }
+    form.submit();
+});
+
+// 删除确认 — 动态设置文件名和表单 action
+document.getElementById('deleteConfirmModal').addEventListener('show.bs.modal', function(e) {
+    const btn = e.relatedTarget;
+    if (!btn) return;
+    const filename = btn.getAttribute('data-filename');
+    document.getElementById('deleteFilename').textContent = filename;
+    document.getElementById('deleteForm').action = '/backup/' + encodeURIComponent(filename) + '/delete';
+});
+
+// 创建备份时禁用按钮防止重复点击
+document.getElementById('createBackupForm').addEventListener('submit', function() {
+    const btn = document.getElementById('createBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 备份中，请稍候...';
+});
+</script>
+{% endblock %}

@@ -1,0 +1,77 @@
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-bar-chart-steps me-2"></i>班级排名</h4>
+  <form method="GET" class="d-flex gap-2">
+    <select name="grade_id" class="form-select form-select-sm" style="width:140px;" onchange="this.form.submit()">
+      <option value="">选择年级</option>
+      {% for g in grades %}
+      <option value="{{ g.id }}" {% if grade_filter == g.id %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
+    {% if grade_filter %}
+    <select name="dimension" class="form-select form-select-sm" style="width:100px;" onchange="this.form.submit()">
+      <option value="">全部</option>
+      {% for d in dimensions %}
+      <option value="{{ d }}" {% if dim_filter == d %}selected{% endif %}>{{ d }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+  </form>
+</div>
+
+{% if overall %}
+<!-- 总均分排行 -->
+<div class="card mb-3">
+  <div class="card-header"><strong><i class="bi bi-trophy me-2"></i>总均分排名</strong></div>
+  <div class="card-body">
+    {% set max_v = overall[0].avg if overall else 1 %}
+    {% for item in overall %}
+    <div class="mb-2">
+      <div class="d-flex justify-content-between mb-1">
+        <small><strong>#{{ loop.index }}</strong> {{ item.name }} ({{ item.count }}次)</small>
+        <small class="fw-bold">{{ item.avg }}分</small>
+      </div>
+      <div class="progress" style="height:22px;">
+        <div class="progress-bar {% if loop.index <= 3 %}bg-{{ ['danger','warning','info'][loop.index-1] }}{% else %}bg-primary{% endif %}"
+             style="width:{{ (item.avg / max_v * 100)|int if max_v > 0 else 0 }}%">
+          {{ item.avg }}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- 各维度排行表 -->
+<div class="card">
+  <div class="card-header"><strong><i class="bi bi-table me-2"></i>各维度班级均分</strong></div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>班级</th>
+          {% for d in dimensions %}
+          <th class="text-center">{{ d }}</th>
+          {% endfor %}
+          <th class="text-center">总均分</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for item in overall %}
+      <tr>
+        <td><strong>{{ item.name }}</strong></td>
+        {% for d in dimensions %}
+        <td class="text-center">{{ rankings.get(item.name, {}).get(d, 0) }}</td>
+        {% endfor %}
+        <td class="text-center fw-bold">{{ item.avg }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-bar-chart display-1 text-muted"></i>
+  <p class="text-muted mt-3">请先选择年级查看排名</p>
+</div>
+{% endif %}

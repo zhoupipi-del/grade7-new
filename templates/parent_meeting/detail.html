@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}家长会详情{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4" style="max-width: 900px;">
+  <a href="{{ url_for('parent_meeting.index') }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回列表</a>
+  <h3>{{ meeting.title }}</h3>
+  <div class="text-muted mb-3">
+    {{ meeting.meeting_date }}
+    {% if meeting.start_time %} | {{ meeting.start_time }}{% if meeting.end_time %} ~ {{ meeting.end_time }}{% endif %}{% endif %}
+    {% if meeting.location %} | {{ meeting.location }}{% endif %}
+  </div>
+
+  {% if meeting.description %}
+  <div class="alert alert-secondary">{{ meeting.description }}</div>
+  {% endif %}
+
+  <!-- 统计卡片 -->
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="card text-bg-primary">
+        <div class="card-body">
+          <h5 class="card-title">应到</h5>
+          <p class="card-text display-6">{{ total_students }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card text-bg-success">
+        <div class="card-body">
+          <h5 class="card-title">已签到</h5>
+          <p class="card-text display-6">{{ signed_count }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card text-bg-warning">
+        <div class="card-body">
+          <h5 class="card-title">迟到</h5>
+          <p class="card-text display-6">{{ late_count }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h5>签到记录（{{ signed_count }} 人）</h5>
+  <table class="table table-sm table-hover">
+    <thead><tr><th>#</th><th>学生</th><th>家长姓名</th><th>电话</th><th>是否迟到</th><th>签到时间</th><th>备注</th></tr></thead>
+    <tbody>
+      {% for si in signins %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ si.student.name if si.student else '—' }}</td>
+        <td>{{ si.parent_name }}</td>
+        <td>{{ si.phone or '—' }}</td>
+        <td>{% if si.is_late %}<span class="badge bg-warning">迟到</span>{% else %}<span class="badge bg-success">准时</span>{% endif %}</td>
+        <td>{{ si.signin_time.strftime('%H:%M') if si.signin_time else '—' }}</td>
+        <td>{{ si.notes or '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-center text-muted">暂无签到记录</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <hr>
+  <h5>手动签到</h5>
+  <form method="POST" action="{{ url_for('parent_meeting.signin', mid=meeting.id) }}" class="row g-2">
+    <div class="col-md-5">
+      <select name="student_id" class="form-select" required>
+        <option value="">选择学生...</option>
+        {% for s in students_for_signin %}
+        <option value="{{ s.id }}">{{ s.student_no }} {{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <input name="parent_name" class="form-control" placeholder="家长姓名" required>
+    </div>
+    <div class="col-md-2">
+      <div class="form-check mt-2">
+        <input class="form-check-input" type="checkbox" name="is_late" id="is_late_cb">
+        <label class="form-check-label" for="is_late_cb">迟到</label>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <button class="btn btn-primary w-100">签到</button>
+    </div>
+    <div class="col-md-5">
+      <input name="phone" class="form-control" placeholder="联系电话（可选）">
+    </div>
+    <div class="col-md-7">
+      <input name="notes" class="form-control" placeholder="备注（可选）">
+    </div>
+  </form>
+  <div class="mt-2">
+    <a href="{{ url_for('parent_meeting.batch_signin', mid=meeting.id) }}" class="btn btn-sm btn-outline-success">批量签到</a>
+  </div>
+</div>
+{% endblock %}

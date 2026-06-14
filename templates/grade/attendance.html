@@ -1,0 +1,67 @@
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-calendar-check me-2"></i>本年级考勤总览</h4>
+  <small class="text-muted">{{ now.strftime('%Y-%m-%d') if now else '' }}</small>
+</div>
+
+{% if classes %}
+<div class="row g-3">
+  {% for c in classes %}
+  {% set class_records = records|selectattr("class_id","equalto",c.id)|list %}
+  <div class="col-md-3">
+    <div class="card h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <strong>{{ c.name }}</strong>
+        <span class="badge bg-primary">{{ class_records|length }}条</span>
+      </div>
+      <div class="card-body p-2">
+        {% if class_records %}
+        {% set present = class_records|selectattr("status","equalto","present")|list|length %}
+        {% set late = class_records|selectattr("status","equalto","late")|list|length %}
+        {% set absent = class_records|selectattr("status","equalto","absent")|list|length %}
+        {% set leave = class_records|selectattr("status","equalto","leave")|list|length %}
+        <div class="d-flex gap-1 flex-wrap">
+          <span class="badge bg-success">出勤 {{ present }}</span>
+          <span class="badge bg-warning text-dark">迟到 {{ late }}</span>
+          <span class="badge bg-danger">缺勤 {{ absent }}</span>
+          <span class="badge bg-info">请假 {{ leave }}</span>
+        </div>
+        {% else %}
+        <small class="text-muted">今日暂无记录</small>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-calendar-x display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无班级数据</p>
+</div>
+{% endif %}
+
+{% if records %}
+<div class="card mt-3">
+  <div class="card-header"><strong>今日出勤明细</strong></div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead class="table-light">
+        <tr><th>学生</th><th>班级</th><th>状态</th><th>备注</th></tr>
+      </thead>
+      <tbody>
+      {% for r in records %}
+      <tr>
+        <td>{{ r.student.name if r.student else '?' }}</td>
+        <td>{{ r.student.class_.name if r.student and r.student.class_ else '?' }}</td>
+        <td>
+          {% set badges = {'present':'success','late':'warning','absent':'danger','early':'info','leave':'secondary'} %}
+          <span class="badge bg-{{ badges.get(r.status,'secondary') }}">{{ r.status }}</span>
+        </td>
+        <td><small>{{ r.note or '' }}</small></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}

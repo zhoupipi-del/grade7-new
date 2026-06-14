@@ -1,0 +1,471 @@
+{% extends "base.html" %}
+{% block title %}成绩趋势线{% endblock %}
+
+{% block head_extra %}
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h3><i class="bi bi-graph-up-arrow"></i> 成绩趋势线</h3>
+    <p class="text-muted">个体成绩追踪 · 多生对比 · 成绩预测</p>
+
+    <!-- ====== 学生选择器 ====== -->
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label small mb-1">班级</label>
+                    <select id="classSelect" class="form-select form-select-sm" style="width:140px">
+                        <option value="">全部班级</option>
+                        {% for cls in classes %}
+                        <option value="{{ cls.id }}">{{ cls.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <label class="form-label small mb-1">学生</label>
+                    <select id="studentSelect" class="form-select form-select-sm" style="width:180px">
+                        <option value="">请先选班级</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-primary btn-sm" onclick="loadStudentTrend()" id="btnLoad">
+                        <i class="bi bi-search"></i> 查看趋势
+                    </button>
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-outline-secondary btn-sm" onclick="addCompare()" id="btnCompare" disabled>
+                        <i class="bi bi-plus-circle"></i> 加入对比
+                    </button>
+                </div>
+                <div class="col-auto ms-auto">
+                    <span class="badge bg-light text-dark" id="compareBadge" style="display:none">
+                        对比 <span id="compareCount">0</span>/3
+                    </span>
+                    <button class="btn btn-outline-danger btn-sm" onclick="clearComparison()" id="btnClear" style="display:none">
+                        <i class="bi bi-x-circle"></i> 清除对比
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== 主内容区 ====== -->
+    <div id="mainContent">
+        <!-- 空状态 -->
+        <div id="emptyState" class="text-center py-5 text-muted">
+            <i class="bi bi-person-bounding-box" style="font-size:64px;opacity:.3"></i>
+            <p class="mt-3 fs-5">选择一名学生，查看其成绩趋势</p>
+            <p class="small">支持总分趋势、各科对比、多生对比和成绩预测</p>
+        </div>
+
+        <!-- 数据面板（初始隐藏） -->
+        <div id="dataPanel" style="display:none">
+            <!-- 学生信息 + 预测卡片 -->
+            <div class="row g-3 mb-3" id="infoRow"></div>
+
+            <!-- 总分趋势图 -->
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0"><i class="bi bi-graph-up text-primary"></i> 总分趋势</h6>
+                    <small class="text-muted" id="trendSubtitle"></small>
+                </div>
+                <div class="card-body">
+                    <canvas id="totalTrendChart" height="260"></canvas>
+                </div>
+            </div>
+
+            <!-- 各科趋势 + 排名趋势 -->
+            <div class="row g-3 mb-3">
+                <div class="col-lg-8">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-header bg-transparent">
+                            <h6 class="mb-0"><i class="bi bi-bar-chart-steps text-success"></i> 各科趋势</h6>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="subjectTrendChart" height="280"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-header bg-transparent">
+                            <h6 class="mb-0"><i class="bi bi-list-ol text-warning"></i> 排名变化</h6>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="rankTrendChart" height="280"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 多生对比 -->
+            <div class="card border-0 shadow-sm mb-3" id="compareCard" style="display:none">
+                <div class="card-header bg-transparent">
+                    <h6 class="mb-0"><i class="bi bi-people-fill text-info"></i> 多生对比 — 总分走势</h6>
+                </div>
+                <div class="card-body">
+                    <canvas id="compareChart" height="240"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── 全局状态 ──
+let currentStudentId = null;
+let compareIds = [];
+const MAX_COMPARE = 3;
+
+let totalChart = null, subjectChart = null, rankChart = null, compareChart = null;
+
+// ── 初始化：按班级加载学生列表 ──
+const allStudents = {{ students_json | tojson }};
+
+document.getElementById('classSelect').addEventListener('change', function() {
+    const cid = parseInt(this.value);
+    const sel = document.getElementById('studentSelect');
+    sel.innerHTML = '<option value="">选择学生</option>';
+    allStudents.filter(s => !cid || s.class_id === cid).forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name + ' (' + s.student_no + ')';
+        sel.appendChild(opt);
+    });
+    document.getElementById('btnCompare').disabled = true;
+});
+
+// 首次触发加载全部学生
+document.getElementById('classSelect').dispatchEvent(new Event('change'));
+
+document.getElementById('studentSelect').addEventListener('change', function() {
+    document.getElementById('btnCompare').disabled = !this.value;
+});
+
+// ── 加载单个学生趋势 ──
+function loadStudentTrend() {
+    const sid = document.getElementById('studentSelect').value;
+    if (!sid) return;
+    currentStudentId = parseInt(sid);
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('dataPanel').style.display = 'block';
+    document.getElementById('btnLoad').disabled = true;
+    document.getElementById('btnLoad').innerHTML = '<span class="spinner-border spinner-border-sm"></span> 加载中...';
+
+    fetch('/scores/trend/api/student/' + sid)
+        .then(r => r.json())
+        .then(resp => {
+            if (resp.code !== 0) { alert(resp.msg); return; }
+            renderStudentData(resp.data);
+            loadPrediction(sid);
+            if (compareIds.length > 0) loadComparison();
+        })
+        .catch(err => { console.error(err); alert('加载失败'); })
+        .finally(() => {
+            document.getElementById('btnLoad').disabled = false;
+            document.getElementById('btnLoad').innerHTML = '<i class="bi bi-search"></i> 查看趋势';
+        });
+}
+
+// ── 渲染学生数据 ──
+function renderStudentData(data) {
+    const st = data.student;
+
+    // 信息行 + 预测占位
+    document.getElementById('infoRow').innerHTML = `
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm bg-light h-100">
+                <div class="card-body">
+                    <h5 class="mb-1">${st.name}</h5>
+                    <p class="text-muted small mb-2">${st.student_no} · ${st.class_name}</p>
+                    <hr class="my-2">
+                    <div class="d-flex gap-3 small text-muted">
+                        <span>共 ${data.total_trend.length} 场考试</span>
+                        <span>${data.subject_trends ? Object.keys(data.subject_trends).length : 0} 个科目</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4" id="predictionCard">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body text-center text-muted py-3">
+                    <small>正在计算预测...</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4" id="trendLabelCard">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body text-center text-muted py-3">
+                    <small>趋势分析加载中...</small>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // 总分趋势图
+    const totalLabels = data.total_trend.map(t => t.exam_name);
+    const totalData = data.total_trend.map(t => t.total);
+    const totalCtx = document.getElementById('totalTrendChart').getContext('2d');
+    if (totalChart) totalChart.destroy();
+
+    totalChart = new Chart(totalCtx, {
+        type: 'line',
+        data: {
+            labels: totalLabels,
+            datasets: [{
+                label: '总分',
+                data: totalData,
+                borderColor: '#4e79a7',
+                backgroundColor: 'rgba(78,121,167,0.1)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 5,
+                pointBackgroundColor: '#4e79a7',
+                pointHoverRadius: 7,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { mode: 'index', intersect: false }
+            },
+            scales: {
+                y: { beginAtZero: false, title: { display: true, text: '总分' } }
+            },
+            interaction: { mode: 'nearest', axis: 'x', intersect: false }
+        }
+    });
+
+    document.getElementById('trendSubtitle').textContent =
+        totalData.filter(t => t !== null).length + ' 场有效考试';
+
+    // 各科趋势图
+    if (data.subject_trends && Object.keys(data.subject_trends).length > 0) {
+        const subCtx = document.getElementById('subjectTrendChart').getContext('2d');
+        if (subjectChart) subjectChart.destroy();
+        const subColors = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#86bcb6','#b6992d'];
+        const datasets = [];
+        let idx = 0;
+        for (const [subName, points] of Object.entries(data.subject_trends)) {
+            datasets.push({
+                label: subName,
+                data: points.map(p => p.score),
+                borderColor: subColors[idx % subColors.length],
+                backgroundColor: 'transparent',
+                tension: 0.25,
+                pointRadius: 3,
+                borderWidth: 2,
+            });
+            idx++;
+        }
+        subjectChart = new Chart(subCtx, {
+            type: 'line',
+            data: { labels: totalLabels, datasets: datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { usePointStyle: true, padding: 14 } },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: { y: { beginAtZero: false, title: { display: true, text: '分数' } } },
+                interaction: { mode: 'nearest', axis: 'x', intersect: false }
+            }
+        });
+    }
+
+    // 排名趋势图（反转Y轴：排名越小越好，所以在图上越高越好）
+    if (data.rank_trend && data.rank_trend.length > 0) {
+        const rankCtx = document.getElementById('rankTrendChart').getContext('2d');
+        if (rankChart) rankChart.destroy();
+        const rankLabels = data.rank_trend.map(r => r.exam_name);
+        const classRanks = data.rank_trend.map(r => r.rank_class);
+        const gradeRanks = data.rank_trend.map(r => r.rank_grade);
+        rankChart = new Chart(rankCtx, {
+            type: 'line',
+            data: {
+                labels: rankLabels,
+                datasets: [
+                    {
+                        label: '班级排名',
+                        data: classRanks,
+                        borderColor: '#4e79a7',
+                        backgroundColor: 'rgba(78,121,167,0.1)',
+                        fill: true, tension: 0.3, pointRadius: 4,
+                    },
+                    {
+                        label: '年级排名',
+                        data: gradeRanks,
+                        borderColor: '#e15759',
+                        backgroundColor: 'rgba(225,87,89,0.1)',
+                        fill: true, tension: 0.3, pointRadius: 4,
+                    }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { usePointStyle: true, padding: 10 } }
+                },
+                scales: {
+                    y: {
+                        reverse: true,
+                        beginAtZero: false,
+                        title: { display: true, text: '排名（越小越好）' }
+                    }
+                },
+                interaction: { mode: 'nearest', axis: 'x', intersect: false }
+            }
+        });
+    }
+}
+
+// ── 加载预测 ──
+function loadPrediction(sid) {
+    fetch('/scores/trend/api/prediction/' + sid)
+        .then(r => r.json())
+        .then(resp => {
+            const card = document.getElementById('predictionCard');
+            const labelCard = document.getElementById('trendLabelCard');
+
+            if (resp.code !== 0) {
+                card.innerHTML = `<div class="card border-0 shadow-sm h-100"><div class="card-body text-center text-muted py-3"><small>${resp.msg}</small></div></div>`;
+                labelCard.innerHTML = '';
+                return;
+            }
+
+            const d = resp.data;
+            card.innerHTML = `
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body text-center">
+                        <small class="text-muted">预测下一场考试总分</small>
+                        <h3 class="mb-1 text-${d.trend_color}">${d.predicted_score}</h3>
+                        <small class="text-muted">置信度 R² = ${d.r2}</small>
+                    </div>
+                </div>
+            `;
+
+            labelCard.innerHTML = `
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body text-center">
+                        <small class="text-muted">趋势方向</small>
+                        <h5 class="mb-1 text-${d.trend_color}">
+                            <i class="bi bi-${d.trend_icon}"></i> ${d.trend_label}
+                        </h5>
+                        <small class="text-muted">斜率 ${d.slope > 0 ? '+' : ''}${d.slope}/场</small>
+                    </div>
+                </div>
+            `;
+
+            // 在总分图上追加预测虚线
+            if (totalChart && d.regression_points) {
+                const predLabels = [];
+                for (let i = 0; i < d.regression_points.length; i++) {
+                    predLabels.push(i < d.exam_count ? '' : '预测');
+                }
+                const predData = d.regression_points.map(p => p.y);
+
+                // 移除旧的预测数据集
+                totalChart.data.datasets = totalChart.data.datasets.filter(ds => ds.label !== '趋势线');
+                totalChart.data.datasets.push({
+                    label: '趋势线',
+                    data: predData,
+                    borderColor: '#e15759',
+                    backgroundColor: 'transparent',
+                    borderDash: [6, 3],
+                    borderWidth: 1.5,
+                    tension: 0,
+                    pointRadius: 0,
+                    fill: false,
+                });
+                totalChart.update();
+            }
+        })
+        .catch(err => console.error('预测加载失败:', err));
+}
+
+// ── 加入对比 ──
+function addCompare() {
+    if (!currentStudentId) return;
+    if (compareIds.includes(currentStudentId)) {
+        alert('该学生已在对比列表中');
+        return;
+    }
+    if (compareIds.length >= MAX_COMPARE) {
+        alert('最多对比 ' + MAX_COMPARE + ' 名学生');
+        return;
+    }
+    compareIds.push(currentStudentId);
+    updateCompareUI();
+    loadComparison();
+}
+
+// ── 清除对比 ──
+function clearComparison() {
+    compareIds = [];
+    document.getElementById('compareCard').style.display = 'none';
+    updateCompareUI();
+    if (compareChart) { compareChart.destroy(); compareChart = null; }
+}
+
+// ── 更新对比UI ──
+function updateCompareUI() {
+    document.getElementById('compareCount').textContent = compareIds.length;
+    document.getElementById('compareBadge').style.display = compareIds.length > 0 ? '' : 'none';
+    document.getElementById('btnClear').style.display = compareIds.length > 0 ? '' : 'none';
+}
+
+// ── 加载对比数据 ──
+function loadComparison() {
+    if (compareIds.length < 2) return;
+
+    fetch('/scores/trend/api/compare', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({student_ids: compareIds})
+    })
+    .then(r => r.json())
+    .then(resp => {
+        if (resp.code !== 0) { console.error(resp.msg); return; }
+        renderComparison(resp.data);
+    })
+    .catch(err => console.error('对比加载失败:', err));
+}
+
+function renderComparison(data) {
+    const card = document.getElementById('compareCard');
+    card.style.display = 'block';
+    const ctx = document.getElementById('compareChart').getContext('2d');
+    if (compareChart) compareChart.destroy();
+
+    const datasets = data.students.map(st => ({
+        label: st.name + ' (' + st.class_name + ')',
+        data: st.totals,
+        borderColor: st.color,
+        backgroundColor: 'transparent',
+        tension: 0.3,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        borderWidth: 2.5,
+    }));
+
+    compareChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: data.exam_labels, datasets: datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { usePointStyle: true, padding: 16 } },
+                tooltip: { mode: 'index', intersect: false }
+            },
+            scales: { y: { beginAtZero: false, title: { display: true, text: '总分' } } },
+            interaction: { mode: 'nearest', axis: 'x', intersect: false }
+        }
+    });
+}
+</script>
+{% endblock %}

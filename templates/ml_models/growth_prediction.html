@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>成长预测 - 梨江中学</title>
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Microsoft YaHei', sans-serif; background:#f5f7fa; color:#333; padding:20px; }
+.container { max-width:1200px; margin:0 auto; }
+h1 { color:#2c3e50; margin-bottom:20px; }
+.card { background:#fff; border-radius:12px; padding:24px; margin-bottom:20px; box-shadow:0 2px 12px rgba(0,0,0,0.08); }
+.card-title { font-size:16px; font-weight:600; color:#2c3e50; margin-bottom:16px; }
+.student-selector { display:flex; gap:12px; margin-bottom:20px; }
+.student-selector select { flex:1; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; }
+.btn { padding:10px 24px; border:none; border-radius:8px; cursor:pointer; font-size:14px; transition:all 0.3s; }
+.btn-primary { background:linear-gradient(135deg, #667eea, #764ba2); color:#fff; }
+.btn-primary:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(102,126,234,0.4); }
+.prediction-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px; margin-bottom:24px; }
+.pred-card { background:linear-gradient(145deg, #f8f9fa, #fff); border:1px solid #e9ecef; border-radius:10px; padding:18px; transition:all 0.3s; }
+.pred-card:hover { transform:translateY(-3px); box-shadow:0 6px 20px rgba(0,0,0,0.1); }
+.pred-label { font-size:13px; color:#7f8c8d; margin-bottom:8px; }
+.pred-value { font-size:28px; font-weight:700; margin-bottom:6px; }
+.pred-trend { font-size:12px; padding:3px 8px; border-radius:4px; display:inline-block; }
+.trend-up { background:#d4edda; color:#155724; }
+.trend-down { background:#f8d7da; color:#721c24; }
+.trend-stable { background:#d1ecf1; color:#0c5460; }
+.suggestions { background:#fff3cd; border:1px solid #ffeaa7; border-radius:8px; padding:16px; margin-top:20px; }
+.suggestions h4 { color:#856404; margin-bottom:10px; }
+.suggestions ul { margin:0; padding-left:20px; }
+.suggestions li { color:#856404; margin-bottom:6px; }
+.chart-wrap { position:relative; height:300px; }
+.loading { text-align:center; padding:40px; color:#7f8c8d; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>📈 学生成长预测</h1>
+  
+  <div class="card">
+    <div class="card-title">选择学生</div>
+    <div class="student-selector">
+      <select id="class-select" onchange="loadStudents()">
+        <option value="">-- 选择班级 --</option>
+      </select>
+      <select id="student-select" onchange="loadPrediction()">
+        <option value="">-- 选择学生 --</option>
+      </select>
+      <button class="btn btn-primary" onclick="loadPrediction()">预测</button>
+    </div>
+  </div>
+
+  <div id="result" class="loading">请选择学生查看成长预测...</div>
+</div>
+
+<script>
+// 加载班级
+fetch('/ml/api/classes')
+  .then(r => r.json())
+  .then(data => {
+    const sel = document.getElementById('class-select');
+    (data.classes || []).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      sel.appendChild(opt);
+    });
+  });
+
+function loadStudents() {
+  const classId = document.getElementById('class-select').value;
+  if (!classId) return;
+  fetch('/ml/api/students?class_id=' + classId)
+    .then(r => r.json())
+    .then(data => {
+      const sel = document.getElementById('student-select');
+      sel.innerHTML = '<option value="">-- 选择学生 --</option>';
+      (data.students || []).forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name + ' (' + (s.student_no || s.id) + ')';
+        sel.appendChild(opt);
+      });
+    });
+}
+
+function loadPrediction() {
+  const sid = document.getElementById('student-select').value;
+  if (!sid) return;
+  const resultDiv = document.getElementById('result');
+  resultDiv.className = 'loading';
+  resultDiv.innerHTML = '⏳ 正在分析历史数据，生成预测...';
+  fetch('/ml/api/growth-prediction/' + sid)
+    .then(r => r.json())
+    .then(data => {
+      renderResult(data);
+    })
+    .catch(err => {
+      resultDiv.innerHTML = '❌ 预测失败：' + err.message;
+    });
+}
+
+function renderResult(data) {
+  const resultDiv = document.getElementById('result');
+  resultDiv.className = '';
+  resultDiv.innerHTML = '';
+  // 预测卡片
+  let html = '<div class="prediction-grid">';
+  // 成绩预测
+  const scoreTrendClass = data.score_trend === '上升' ? 'trend-up' : 
+                        data.score_trend === '下降' ? 'trend-down' : 'trend-stable';
+  html += '<div class="pred-card">' +
+    '<div class="pred-label">下次考试成绩预测</div>' +
+    '<div class="pred-value" style="color:#667eea;">' + data.next_score_prediction + '</div>' +
+    '<div class="pred-trend ' + scoreTrendClass + '">趋势：' + data.score_trend + '</div>' +
+  '</div>';
+  // 违纪预测
+  const discTrendClass = data.discipline_trend === '上升' ? 'trend-down' : 
+                        data.discipline_trend === '下降' ? 'trend-up' : 'trend-stable';
+  html += '<div class="pred-card">' +
+    '<div class="pred-label">下次违纪频率预测</div>' +
+    '<div class="pred-value" style="color:#e74c3c;">' + data.next_discipline_prediction + ' 次</div>' +
+    '<div class="pred-trend ' + discTrendClass + '">趋势：' + data.discipline_trend + '</div>' +
+  '</div>';
+  // 心理风险
+  const mentalColor = data.mental_risk_prediction === 'high' ? '#e74c3c' : 
+                      data.mental_risk_prediction === 'medium' ? '#f39c12' : '#27ae60';
+  html += '<div class="pred-card">' +
+    '<div class="pred-label">心理风险预测</div>' +
+    '<div class="pred-value" style="color:' + mentalColor + ';">' + 
+      (data.mental_risk_prediction === 'high' ? '高风险' : data.mental_risk_prediction === 'medium' ? '中风险' : '低风险') + 
+    '</div>' +
+    '<div class="pred-trend trend-stable">心理评估</div>' +
+  '</div>';
+  // 出勤率
+  const attColor = data.attendance_rate >= 95 ? '#27ae60' : data.attendance_rate >= 85 ? '#f39c12' : '#e74c3c';
+  html += '<div class="pred-card">' +
+    '<div class="pred-label">出勤率</div>' +
+    '<div class="pred-value" style="color:' + attColor + ';">' + data.attendance_rate + '%</div>' +
+    '<div class="pred-trend ' + (data.attendance_trend === '优秀' ? 'trend-up' : data.attendance_trend === '良好' ? 'trend-stable' : 'trend-down') + '">评价：' + data.attendance_trend + '</div>' +
+  '</div>';
+  // 综合素质
+  const qualityTrendClass = data.quality_trend === '上升' ? 'trend-up' : 
+                           data.quality_trend === '下降' ? 'trend-down' : 'trend-stable';
+  html += '<div class="pred-card">' +
+    '<div class="pred-label">综合素质评分预测</div>' +
+    '<div class="pred-value" style="color:#9b59b6;">' + data.next_quality_prediction + '</div>' +
+    '<div class="pred-trend ' + qualityTrendClass + '">趋势：' + data.quality_trend + '</div>' +
+  '</div>';
+  html += '</div>';
+  // 历史成绩趋势图
+  if (data.historical_scores && data.historical_scores.length > 0) {
+    html += '<div class="card"><div class="card-title">历史成绩趋势</div><div class="chart-wrap"><canvas id="scoreChart"></canvas></div></div>';
+  }
+  // 建议
+  html += '<div class="suggestions">' +
+    '<h4>📋 成长建议</h4>' +
+    '<ul>';
+  (data.suggestions || []).forEach(s => {
+    html += '<li>' + s + '</li>';
+  });
+  html += '</ul></div>';
+  resultDiv.innerHTML = html;
+  // 渲染图表
+  if (data.historical_scores && data.historical_scores.length > 0) {
+    renderScoreChart(data.historical_scores, data.next_score_prediction);
+  }
+}
+
+function renderScoreChart(historical, prediction) {
+  const ctx = document.getElementById('scoreChart').getContext('2d');
+  const labels = historical.map((_, i) => '考试' + (i + 1));
+  labels.push('预测');
+  const data = historical.concat([prediction]);
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '成绩',
+        data: data,
+        borderColor: '#667eea',
+        backgroundColor: 'rgba(102,126,234,0.1)',
+        fill: true,
+        tension: 0.4,
+        pointRadius: 5,
+        pointBackgroundColor: '#667eea',
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { min: 0, max: 100, ticks: { color: '#7f8c8d' }, grid: { color: '#f0f0f0' } },
+        x: { ticks: { color: '#7f8c8d' }, grid: { display: false } }
+      },
+      plugins: {
+        legend: { labels: { color: '#2c3e50' } }
+      }
+    }
+  });
+}
+</script>
+</body>
+</html>

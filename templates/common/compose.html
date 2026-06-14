@@ -1,0 +1,123 @@
+<div class="d-flex align-items-center mb-3">
+  <a href="{{ url_for('common.messages') }}" class="btn btn-outline-secondary btn-sm me-3">
+    <i class="bi bi-arrow-left me-1"></i> 返回
+  </a>
+  <h4 class="mb-0"><i class="bi bi-pencil-square me-2"></i>写消息</h4>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <form method="POST" id="compose-form">
+      <div class="row g-3">
+        <!-- 关联学生快捷入口 -->
+        {% if students %}
+        <div class="col-12">
+          <label class="form-label"><i class="bi bi-link-45deg me-1"></i>关联学生（选填，自动查找家长）</label>
+          <div class="row g-2">
+            {% if classes|length > 1 %}
+            <div class="col-md-4">
+              <select class="form-select" id="class-filter">
+                <option value="">全部班级</option>
+                {% for c in classes %}
+                <option value="{{ c.id }}">{{ c.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            {% endif %}
+            <div class="{% if classes|length > 1 %}col-md-8{% else %}col-md-12{% endif %}">
+              <select name="student_id" class="form-select" id="student-select">
+                <option value="">直接选择收件人（跳过学生关联）</option>
+                {% for s in students %}
+                <option value="{{ s.id }}" data-class="{{ s.class_id }}">
+                  {{ s.name }} — {{ s.class_name if s.class_name else '' }}
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <small class="text-muted">选择学生后，系统将自动发送给该生绑定的家长（无家长则发给班主任）</small>
+        </div>
+        {% endif %}
+
+        <div class="col-md-6">
+          <label class="form-label">收件人 <span class="text-danger">*</span></label>
+          <select name="to_user_id" class="form-select" id="recipient-select" {% if students %}required{% endif %}>
+            <option value="">请选择收件人</option>
+            {% for u in users %}
+            <option value="{{ u.id }}" {% if reply_to and reply_to.from_user_id == u.id %}selected{% endif %}>
+              {{ u.display_name or u.username }} — {{ u.role }}
+            </option>
+            {% endfor %}
+          </select>
+          <small class="text-muted">
+            {% if students %}
+            选择学生后，收件人将自动匹配，无需手动选择
+            {% else %}
+            选择消息的目标接收者
+            {% endif %}
+          </small>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">标题 <span class="text-danger">*</span></label>
+          <input type="text" name="title" class="form-control" required
+                 value="{% if reply_to %}Re: {{ reply_to.title }}{% endif %}"
+                 placeholder="请输入消息标题">
+        </div>
+        <div class="col-12">
+          <label class="form-label">内容 <span class="text-danger">*</span></label>
+          <textarea name="content" class="form-control" rows="6" required
+                    placeholder="请输入消息内容...">{% if reply_to %}
+
+---
+原消息（{{ reply_to.created_at.strftime('%Y-%m-%d %H:%M') if reply_to.created_at }}）：
+{{ reply_to.content[:200] }}{% endif %}</textarea>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-send me-1"></i> 发送消息
+          </button>
+          <a href="{{ url_for('common.messages') }}" class="btn btn-secondary ms-2">取消</a>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if students and classes|length > 1 %}
+<script>
+// 班级筛选联动学生列表
+document.getElementById('class-filter').addEventListener('change', function() {
+  var classId = this.value;
+  var studentSelect = document.getElementById('student-select');
+  var options = studentSelect.options;
+  for (var i = 0; i < options.length; i++) {
+    var opt = options[i];
+    var optClass = opt.getAttribute('data-class');
+    if (!optClass || classId === '' || optClass === classId) {
+      opt.style.display = '';
+    } else {
+      opt.style.display = 'none';
+    }
+  }
+  // 重置选择
+  studentSelect.value = '';
+  document.getElementById('recipient-select').value = '';
+});
+
+// 选择学生时自动禁用收件人手选
+var studentSelect = document.getElementById('student-select');
+var recipientSelect = document.getElementById('recipient-select');
+if (studentSelect && recipientSelect) {
+  studentSelect.addEventListener('change', function() {
+    if (this.value) {
+      recipientSelect.value = '';
+      recipientSelect.required = false;
+      recipientSelect.disabled = true;
+    } else {
+      recipientSelect.required = true;
+      recipientSelect.disabled = false;
+    }
+  });
+}
+</script>
+{% endif %}

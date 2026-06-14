@@ -1,0 +1,106 @@
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-envelope me-2"></i>消息中心</h4>
+  <div class="d-flex gap-2">
+    {% if active_tab == 'inbox' %}
+    <a href="#" class="btn btn-outline-secondary btn-sm" onclick="markAllRead();return false;">
+      <i class="bi bi-check-all me-1"></i> 全部标为已读
+    </a>
+    {% endif %}
+    <a href="{{ url_for('common.compose_message') }}" class="btn btn-primary btn-sm">
+      <i class="bi bi-pencil-square me-1"></i> 写消息
+    </a>
+  </div>
+</div>
+
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab == 'inbox' %}active{% endif %}" href="?tab=inbox">
+      <i class="bi bi-inbox me-1"></i> 收件箱
+      {% if unread_count > 0 %}
+      <span class="badge bg-danger ms-1">{{ unread_count }}</span>
+      {% endif %}
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab == 'sent' %}active{% endif %}" href="?tab=sent">
+      <i class="bi bi-send me-1"></i> 已发送
+    </a>
+  </li>
+</ul>
+
+{% if messages.items %}
+<div class="list-group">
+  {% for m in messages.items %}
+  <a href="{{ url_for('common.message_detail', mid=m.id) }}"
+     class="list-group-item list-group-item-action {% if not m.is_read and active_tab == 'inbox' %}list-group-item-warning{% endif %}">
+    <div class="d-flex justify-content-between align-items-center">
+      <div class="d-flex align-items-center gap-2">
+        {% if not m.is_read and active_tab == 'inbox' %}
+        <span class="badge bg-danger rounded-pill" style="width:8px;height:8px;padding:0;"></span>
+        {% endif %}
+        <strong>{{ m.title }}</strong>
+      </div>
+      {% if active_tab == 'sent' %}
+      <small class="text-muted">发给 #{{ m.to_user_id }}</small>
+      {% elif m.from_user_id %}
+      <small class="text-muted">来自 #{{ m.from_user_id }}</small>
+      {% else %}
+      <small class="text-primary"><i class="bi bi-bell me-1"></i>系统消息</small>
+      {% endif %}
+    </div>
+    <small class="text-muted">{{ m.content[:80] }}{% if m.content|length > 80 %}...{% endif %}</small>
+    <div class="d-flex justify-content-between mt-1">
+      <small class="text-muted">{{ m.created_at.strftime("%m-%d %H:%M") if m.created_at else "" }}</small>
+      <button class="btn btn-xs btn-outline-danger" onclick="event.preventDefault();event.stopPropagation();deleteMsg({{ m.id }});">
+        <i class="bi bi-trash"></i>
+      </button>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+{% if messages.pages > 1 %}
+<nav class="mt-3">
+  <ul class="pagination pagination-sm justify-content-center">
+    <li class="page-item {% if not messages.has_prev %}disabled{% endif %}">
+      <a class="page-link" href="?tab={{ active_tab }}&page={{ messages.prev_num }}">&laquo;</a>
+    </li>
+    {% for p in messages.iter_pages() %}
+      {% if p %}
+      <li class="page-item {% if p == messages.page %}active{% endif %}">
+        <a class="page-link" href="?tab={{ active_tab }}&page={{ p }}">{{ p }}</a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">...</span></li>
+      {% endif %}
+    {% endfor %}
+    <li class="page-item {% if not messages.has_next %}disabled{% endif %}">
+      <a class="page-link" href="?tab={{ active_tab }}&page={{ messages.next_num }}">&raquo;</a>
+    </li>
+  </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-envelope-open display-1 text-muted"></i>
+  <p class="text-muted mt-3">
+    {% if active_tab == 'sent' %}暂无已发送消息{% else %}收件箱为空{% endif %}
+  </p>
+</div>
+{% endif %}
+
+<script>
+function deleteMsg(mid) {
+  if (!confirm('确定删除此消息？')) return;
+  fetch('/messages/' + mid, { method: 'DELETE' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) { if (d.ok) location.reload(); else alert('删除失败'); });
+}
+function markAllRead() {
+  fetch('/messages/read_all', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) { if (d.ok) location.reload(); });
+}
+</script>

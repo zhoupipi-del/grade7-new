@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}{% if assessment %}编辑评估{% else %}新增评估{% endif %} - 梨江中学{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-{{ 'pencil' if assessment else 'plus-circle' }} me-2"></i>
+                    {% if assessment %}编辑心理健康评估{% else %}新增心理健康评估{% endif %}
+                </h5>
+            </div>
+            <div class="card-body">
+                <form method="post" action="
+                    {% if assessment %}
+                        {{ url_for('mental_health.edit', aid=assessment.id) }}
+                    {% else %}
+                        {{ url_for('mental_health.create') }}
+                    {% endif %}
+                ">
+                    <!-- 选择学生 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">学生姓名 <span class="text-danger">*</span></label>
+                        <select name="student_id" class="form-select" required>
+                            <option value="">-- 请选择学生 --</option>
+                            {% for stu in students %}
+                            <option value="{{ stu.id }}" 
+                                    {% if assessment and assessment.student_id == stu.id %}selected{% endif %}>
+                                {{ stu.name }}（{{ stu.class_.name if stu.class_ else '—' }}）
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- 评估类型 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">评估类型 <span class="text-danger">*</span></label>
+                        <select name="assessment_type" class="form-select" required>
+                            <option value="">-- 请选择评估类型 --</option>
+                            {% for key, label in assessment_types %}
+                            <option value="{{ key }}" 
+                                    {% if assessment and assessment.assessment_type == key %}selected{% endif %}>
+                                {{ label }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- 量表名称 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">量表名称</label>
+                        <select name="scale_name" class="form-select">
+                            <option value="">-- 请选择量表（可选） --</option>
+                            {% for scale in scale_names %}
+                            <option value="{{ scale }}" 
+                                    {% if assessment and assessment.scale_name == scale %}selected{% endif %}>
+                                {{ scale }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">如果选择已有量表，系统将自动加载对应问题</div>
+                    </div>
+
+                    <!-- 评估日期 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">评估日期</label>
+                        <input type="date" name="assessment_date" class="form-control" 
+                               value="{{ assessment.assessment_date.strftime('%Y-%m-%d') if assessment and assessment.assessment_date else '' }}">
+                    </div>
+
+                    <!-- 总分 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">总分</label>
+                        <input type="number" name="total_score" class="form-control" 
+                               value="{{ assessment.total_score or '' }}" placeholder="请输入总分">
+                    </div>
+
+                    <!-- 风险等级 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">风险等级 <span class="text-danger">*</span></label>
+                        <div class="d-flex gap-3">
+                            {% for key, label in risk_levels %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="risk_level" 
+                                       value="{{ key }}" id="risk_{{ key }}"
+                                       {% if assessment and assessment.risk_level == key %}checked{% elif not assessment and key == 'low' %}checked{% endif %}>
+                                <label class="form-check-label" for="risk_{{ key }}">
+                                    {% if key == 'high' %}
+                                    <span class="badge bg-danger">{{ label }}</span>
+                                    {% elif key == 'medium' %}
+                                    <span class="badge bg-warning">{{ label }}</span>
+                                    {% else %}
+                                    <span class="badge bg-success">{{ label }}</span>
+                                    {% endif %}
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <!-- 评估结论 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">评估结论</label>
+                        <textarea name="conclusion" class="form-control" rows="3" 
+                                  placeholder="请输入评估结论">{{ assessment.conclusion or '' }}</textarea>
+                    </div>
+
+                    <!-- 建议措施 -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">建议措施</label>
+                        <textarea name="recommendations" class="form-control" rows="3" 
+                                  placeholder="请输入建议措施">{{ assessment.recommendations or '' }}</textarea>
+                    </div>
+
+                    <!-- 是否需要干预 -->
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="need_intervention" 
+                                   id="needIntervention"
+                                   {% if assessment and assessment.need_intervention %}checked{% endif %}>
+                            <label class="form-check-label fw-bold" for="needIntervention">是否需要干预</label>
+                        </div>
+                    </div>
+
+                    <!-- 干预措施 -->
+                    <div class="mb-3" id="interventionPlanDiv" style="display: {% if assessment and assessment.need_intervention %}block{% else %}none{% endif %};">
+                        <label class="form-label fw-bold">干预措施</label>
+                        <textarea name="intervention_plan" class="form-control" rows="3" 
+                                  placeholder="请输入干预措施">{{ assessment.intervention_plan or '' }}</textarea>
+                    </div>
+
+                    <!-- 按钮 -->
+                    <div class="d-flex justify-content-end gap-2 mt-4">
+                        <a href="{{ url_for('mental_health.index') }}" class="btn btn-secondary">取消</a>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-circle me-1"></i>保存
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 控制干预措施显示/隐藏
+document.getElementById('needIntervention').addEventListener('change', function() {
+    const interventionDiv = document.getElementById('interventionPlanDiv');
+    if (this.checked) {
+        interventionDiv.style.display = 'block';
+    } else {
+        interventionDiv.style.display = 'none';
+    }
+});
+
+// 量选变化时，加载问题
+document.querySelector('select[name="scale_name"]').addEventListener('change', function() {
+    const scaleName = this.value;
+    if (scaleName) {
+        // TODO: 可以通过AJAX加载量表问题
+        console.log('加载量表:', scaleName);
+    }
+});
+</script>
+{% endblock %}

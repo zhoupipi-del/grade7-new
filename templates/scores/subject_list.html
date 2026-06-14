@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}科目管理{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>科目管理</h3>
+    {% if session['role'] in ['ms_admin','grade_leader'] %}
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createSubjectModal">
+      <i class="bi bi-plus-lg"></i> 添加科目
+    </button>
+    {% endif %}
+  </div>
+
+  <table class="table table-sm table-hover">
+    <thead><tr><th>序号</th><th>科目名称</th><th>满分</th><th>及格分</th><th>排序</th><th>操作</th></tr></thead>
+    <tbody>
+      {% for s in subjects %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td><strong>{{ s.name }}</strong></td>
+        <td>{{ s.full_score }}</td>
+        <td>{{ s.pass_score }}</td>
+        <td>{{ s.sort_order }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('scores.delete_subject', sid=s.id) }}" class="d-inline" onsubmit="return confirm('确认删除「{{ s.name }}」？删除后已录入的成绩将保留但无法按此科目统计。')">
+            <button class="btn btn-sm btn-outline-danger">删除</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-center text-muted">暂无科目，请点击「添加科目」</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 添加科目弹窗 -->
+<div class="modal fade" id="createSubjectModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST" action="{{ url_for('scores.create_subject') }}">
+        <div class="modal-header"><h5 class="modal-title">添加科目</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label">科目名称 <span class="text-danger">*</span></label>
+            <input name="name" class="form-control" placeholder="例：语文" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">满分</label>
+            <input name="full_score" type="number" step="0.5" class="form-control" value="100">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">及格分</label>
+            <input name="pass_score" type="number" step="0.5" class="form-control" value="60">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">排序权重</label>
+            <input name="sort_order" type="number" class="form-control" value="0" placeholder="数字越小越靠前">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

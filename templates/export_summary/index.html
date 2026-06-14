@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}数据导出 - 梨江中学{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="mb-1"><i class="bi bi-download me-2"></i>数据导出</h4>
+        <p class="text-muted mb-0">选择模块导出 Excel 报表（支持多选，一个文件包含多个Sheet）</p>
+    </div>
+    {% if grade_id %}
+    <div class="alert alert-info mb-0 py-2 px-3">
+        <i class="bi bi-info-circle me-1"></i>仅导出本年级数据
+    </div>
+    {% endif %}
+</div>
+
+{% if grades and session.role == 'ms_admin' %}
+<div class="mb-3">
+    <form method="get" class="row g-2 align-items-center">
+        <div class="col-auto">
+            <label class="col-form-label">年级筛选：</label>
+        </div>
+        <div class="col-auto">
+            <select name="grade_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="">全部年级</option>
+                {% for g in grades %}
+                <option value="{{ g.id }}" {% if grade_id and grade_id == g.id %}selected{% endif %}>
+                    {{ g.name }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+</div>
+{% endif %}
+
+<!-- 操作栏：全选/导出选中/导出全部 -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+        <label class="form-check-label" for="selectAll">全选/取消全选</label>
+    </div>
+    <div class="btn-group btn-group-sm">
+        <button class="btn btn-primary" onclick="exportSelected()" id="btnExportSelected" disabled>
+            <i class="bi bi-file-earmark-excel me-1"></i>导出选中 (<span id="selectedCount">0</span>)
+        </button>
+        <a href="{{ url_for('export_summary.excel', module_key='students,discipline,routine,tasks,wings,home_visits,comments') }}"
+           class="btn btn-outline-success">
+            <i class="bi bi-box-arrow-down me-1"></i>导出全部
+        </a>
+    </div>
+</div>
+
+{% set card_colors = [
+    'linear-gradient(135deg, #e3f2fd, #bbdefb)',
+    'linear-gradient(135deg, #fce4ec, #f8bbd0)',
+    'linear-gradient(135deg, #fff8e1, #ffecb3)',
+    'linear-gradient(135deg, #f3e5f5, #e1bee7)',
+    'linear-gradient(135deg, #e8f5e9, #c8e6c9)',
+    'linear-gradient(135deg, #fff3e0, #ffe0b2)',
+    'linear-gradient(135deg, #e0f2f1, #b2dfdb)'
+] %}
+
+<div class="row g-4">
+    {% for m in modules %}
+    {% set idx = loop.index0 % 7 %}
+    {% set module_count = counts.get(m.key, 0) %}
+    <div class="col-lg-4 col-md-6 col-12">
+        <div class="card border-0 shadow-sm h-100" style="background: {{ card_colors[idx] }};">
+            <div class="card-body d-flex flex-column p-4">
+                <div class="d-flex align-items-center mb-3">
+                    <input class="form-check-input me-2" type="checkbox" value="{{ m.key }}" id="check_{{ m.key }}" onchange="updateSelectedCount()">
+                    <div class="rounded-circle bg-white bg-opacity-75 d-flex align-items-center justify-content-center me-3" style="width: 48px; height: 48px;">
+                        <i class="bi {{ m.icon }} fs-5 text-dark"></i>
+                    </div>
+                    <h5 class="card-title mb-0">{{ m.name }}</h5>
+                </div>
+                <div class="mb-3">
+                    <span class="badge bg-dark bg-opacity-25 text-dark fs-6">
+                        {{ module_count }} 条记录
+                    </span>
+                </div>
+                <a href="{{ url_for('export_summary.excel', module_key=m.key) }}"
+                   class="btn btn-outline-dark btn-sm mt-auto align-self-start">
+                    <i class="bi bi-file-earmark-excel me-1"></i>单独导出
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 全选/取消全选
+function toggleSelectAll(checkbox) {
+    const checkboxes = document.querySelectorAll('input[type="checkbox"][value]');
+    checkboxes.forEach(cb => {
+        cb.checked = checkbox.checked;
+    });
+    updateSelectedCount();
+}
+
+// 更新选中数量
+function updateSelectedCount() {
+    const checked = document.querySelectorAll('input[type="checkbox"][value]:checked');
+    document.getElementById('selectedCount').textContent = checked.length;
+    document.getElementById('btnExportSelected').disabled = (checked.length === 0);
+}
+
+// 导出选中模块（一个Excel文件，多个Sheet）
+function exportSelected() {
+    const checked = document.querySelectorAll('input[type="checkbox"][value]:checked');
+    if (checked.length === 0) {
+        alert('请至少选择一个模块');
+        return;
+    }
+    const keys = Array.from(checked).map(cb => cb.value).join(',');
+    window.location.href = `/export-summary/excel/${keys}`;
+}
+</script>
+{% endblock %}

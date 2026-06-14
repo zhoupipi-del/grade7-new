@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: grade7-new-app
+    restart: unless-stopped
+    environment:
+      - SECRET_KEY=lijiang-grade7-new-2026-secret
+      - DATABASE_URL=mysql+pymysql://grade7:grade7_password_2024@db:3306/grade7_new
+      - FLASK_ENV=production
+    expose:
+      - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - app_uploads:/app/uploads
+    networks:
+      - grade7-new-network
+
+  db:
+    image: mysql:8.0
+    container_name: grade7-new-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password_2024
+      MYSQL_DATABASE: grade7_new
+      MYSQL_USER: grade7
+      MYSQL_PASSWORD: grade7_password_2024
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - grade7-new-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "grade7", "-pgrade7_password_2024"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  nginx:
+    image: nginx:alpine
+    container_name: grade7-new-nginx
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+    networks:
+      - grade7-new-network
+
+networks:
+  grade7-new-network:
+    driver: bridge
+
+volumes:
+  db_data:
+  app_uploads:

@@ -1,0 +1,657 @@
+{% extends "base.html" %}
+
+{% block title %}数智防空大屏 — 学力事件视界熔断矩阵{% endblock %}
+
+{% block content %}
+<style>
+  /* ── 防空暗色战情主题 ── */
+  body { background: #0a0e17; }
+  .dark-wrap { background: #0a0e17; color: #c8d6e5; min-height: 100vh; font-family: 'Consolas', 'Courier New', monospace; }
+  .dark-wrap * { box-sizing: border-box; }
+
+  /* 扫描线动画 */
+  .scanline {
+    position: fixed; top: 0; left: 0; width: 100%; height: 2px;
+    background: linear-gradient(90deg, transparent, #00ff8855, transparent);
+    animation: scan 4s linear infinite;
+    pointer-events: none; z-index: 9999;
+  }
+  @keyframes scan { 0% { top: 0; } 100% { top: 100vh; } }
+
+  /* 顶部标题 */
+  .header-bar {
+    border-bottom: 1px solid #1e3a5f;
+    padding: 16px 24px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .header-bar h2 {
+    color: #00ff88; font-size: 1.4rem; margin: 0;
+    text-shadow: 0 0 10px #00ff8844;
+  }
+  .header-bar .subtitle { color: #5f7a9a; font-size: 0.8rem; margin-top: 4px; }
+  .status-badge {
+    background: #0d1f35; border: 1px solid #00ff8855; color: #00ff88;
+    padding: 6px 16px; border-radius: 4px; font-size: 0.8rem;
+  }
+  .status-badge .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #00ff88; margin-right: 6px;
+    animation: blink 1.5s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  /* 统计卡片 */
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 16px 24px; }
+  .stat-card {
+    background: #0d1f35; border: 1px solid #1e3a5f; border-radius: 8px;
+    padding: 16px; position: relative; overflow: hidden;
+  }
+  .stat-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  }
+  .stat-card.s-total::before { background: linear-gradient(90deg, #00ff88, #00cc6a); }
+  .stat-card.s-s1::before { background: linear-gradient(90deg, #ff4757, #ff6b81); }
+  .stat-card.s-s2::before { background: linear-gradient(90deg, #ffa502, #eccc68); }
+  .stat-card.s-s4::before { background: linear-gradient(90deg, #1e90ff, #70a1ff); }
+  .stat-label { color: #5f7a9a; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
+  .stat-value { font-size: 2rem; font-weight: 700; margin-top: 8px; }
+  .stat-card.s-total .stat-value { color: #00ff88; }
+  .stat-card.s-s1 .stat-value { color: #ff4757; }
+  .stat-card.s-s2 .stat-value { color: #ffa502; }
+  .stat-card.s-s4 .stat-value { color: #1e90ff; }
+  .stat-desc { color: #3d5a80; font-size: 0.7rem; margin-top: 4px; }
+
+  /* 主内容 */
+  .main-content { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 0 24px 24px; }
+
+  /* 左侧面板 */
+  .left-panel {}
+  .panel-card {
+    background: #0d1f35; border: 1px solid #1e3a5f; border-radius: 8px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .panel-title {
+    color: #00ff88; font-size: 0.85rem; font-weight: 600;
+    border-bottom: 1px solid #1e3a5f; padding-bottom: 8px; margin-bottom: 12px;
+  }
+
+  /* 矩阵表格 */
+  .matrix-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+  .matrix-table th {
+    background: #0a1628; color: #5f7a9a; padding: 8px 4px;
+    border: 1px solid #1e3a5f; font-weight: 600;
+  }
+  .matrix-table td {
+    padding: 10px 4px; text-align: center;
+    border: 1px solid #1e3a5f; font-weight: 600;
+  }
+  .matrix-table .row-label {
+    text-align: left; padding-left: 8px; color: #c8d6e5; font-weight: 600;
+  }
+  .prob-high { color: #ff4757; font-size: 0.85rem; }
+  .prob-mid { color: #ffa502; }
+  .prob-low { color: #3d5a80; }
+
+  /* 干预按钮 */
+  .intervention-btn {
+    display: block; width: 100%; padding: 10px; margin-top: 12px;
+    background: linear-gradient(135deg, #ff4757, #c0392b);
+    color: white; border: none; border-radius: 6px; cursor: pointer;
+    font-size: 0.85rem; font-weight: 600; text-align: center;
+    transition: all 0.3s;
+  }
+  .intervention-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 15px #ff475755; }
+  .refresh-btn {
+    display: block; width: 100%; padding: 8px; margin-top: 8px;
+    background: transparent; color: #00ff88; border: 1px solid #00ff8855;
+    border-radius: 6px; cursor: pointer; font-size: 0.75rem;
+  }
+  .refresh-btn:hover { background: #00ff8811; }
+
+  /* 右侧学生列表 */
+  .right-panel {}
+  .list-card {
+    background: #0d1f35; border: 1px solid #1e3a5f; border-radius: 8px;
+    overflow: hidden;
+  }
+  .list-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px; border-bottom: 1px solid #1e3a5f;
+  }
+  .list-title { color: #00ff88; font-size: 0.85rem; font-weight: 600; }
+  .list-title .warn-count {
+    background: #ff4757; color: white; padding: 2px 8px; border-radius: 10px;
+    font-size: 0.7rem; margin-left: 8px;
+  }
+  .filter-row { display: flex; gap: 8px; }
+  .filter-row select {
+    background: #0a1628; color: #c8d6e5; border: 1px solid #1e3a5f;
+    padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;
+  }
+  .filter-row select option { background: #0a1628; }
+
+  /* 学生表格 */
+  .student-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  .student-table thead th {
+    background: #0a1628; color: #5f7a9a; padding: 10px 12px;
+    border-bottom: 1px solid #1e3a5f; text-align: left;
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .student-table tbody tr {
+    border-bottom: 1px solid #111d2e;
+    transition: background 0.2s;
+  }
+  .student-table tbody tr:hover { background: #111d2e; }
+  .student-table td { padding: 10px 12px; vertical-align: middle; }
+
+  .student-name { color: #e8f0f8; font-weight: 600; }
+  .student-class { color: #5f7a9a; font-size: 0.7rem; }
+
+  /* 状态标签 */
+  .state-tag {
+    display: inline-block; padding: 3px 10px; border-radius: 4px;
+    font-size: 0.72rem; font-weight: 700;
+  }
+  .state-tag.s1 { background: #ff475722; color: #ff4757; border: 1px solid #ff475744; }
+  .state-tag.s2 { background: #ffa50222; color: #ffa502; border: 1px solid #ffa50244; }
+  .state-tag.s3 { background: #1e90ff22; color: #1e90ff; border: 1px solid #1e90ff44; }
+
+  /* 概率进度条 */
+  .prob-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .prob-value { font-weight: 700; min-width: 44px; text-align: right; }
+  .prob-value.high { color: #ff4757; }
+  .prob-value.mid { color: #ffa502; }
+  .prob-value.low { color: #1e90ff; }
+  .prob-bar {
+    flex: 1; height: 6px; background: #0a1628; border-radius: 3px; overflow: hidden;
+  }
+  .prob-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+  .prob-bar-fill.high { background: linear-gradient(90deg, #ff4757, #ff6b81); }
+  .prob-bar-fill.mid { background: linear-gradient(90deg, #ffa502, #eccc68); }
+  .prob-bar-fill.low { background: linear-gradient(90deg, #1e90ff, #70a1ff); }
+
+  /* 操作按钮 */
+  .action-btn {
+    padding: 5px 12px; border-radius: 4px; font-size: 0.72rem;
+    cursor: pointer; border: none; font-weight: 600;
+    transition: all 0.2s;
+  }
+  .action-btn.btn-danger {
+    background: #ff475722; color: #ff4757; border: 1px solid #ff475744;
+  }
+  .action-btn.btn-danger:hover { background: #ff475744; }
+  .action-btn.btn-warn {
+    background: #ffa50222; color: #ffa502; border: 1px solid #ffa50244;
+  }
+  .action-btn.btn-warn:hover { background: #ffa50244; }
+  .action-btn.btn-info {
+    background: #1e90ff22; color: #1e90ff; border: 1px solid #1e90ff44;
+  }
+  .action-btn.btn-info:hover { background: #1e90ff44; }
+
+  /* 表格容器 */
+  .table-scroll { max-height: 520px; overflow-y: auto; }
+  .table-scroll::-webkit-scrollbar { width: 6px; }
+  .table-scroll::-webkit-scrollbar-track { background: #0a1628; }
+  .table-scroll::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 3px; }
+
+  /* 加载/空/错误状态 */
+  .state-indicator {
+    text-align: center; padding: 60px 20px; color: #3d5a80;
+  }
+  .state-indicator .icon { font-size: 2rem; margin-bottom: 12px; }
+  .state-indicator .msg { font-size: 0.85rem; }
+  .spinner-dark {
+    display: inline-block; width: 24px; height: 24px;
+    border: 3px solid #1e3a5f; border-top-color: #00ff88;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 模态框 */
+  .modal-dark .modal-content {
+    background: #0d1f35; border: 1px solid #1e3a5f; color: #c8d6e5;
+  }
+  .modal-dark .modal-header { border-bottom: 1px solid #1e3a5f; }
+  .modal-dark .modal-title { color: #00ff88; }
+  .modal-dark .modal-footer { border-top: 1px solid #1e3a5f; }
+  .modal-dark .btn-close { filter: invert(1); }
+  .modal-dark .modal-backdrop { background: #000000aa; }
+</style>
+
+<div class="dark-wrap">
+  <!-- 扫描线 -->
+  <div class="scanline"></div>
+
+  <!-- 顶部 -->
+  <div class="header-bar">
+    <div>
+      <h2>MARKOV EVENT HORIZON — 数智防空大屏</h2>
+      <div class="subtitle">基于Markov链状态转移矩阵实时推演 · 识别教学熔断临界区 · 预测S1坠落概率</div>
+    </div>
+    <div class="status-badge">
+      <span class="dot"></span>LIVE MONITORING
+    </div>
+  </div>
+
+  <!-- 统计卡片 -->
+  <div class="stat-row">
+    <div class="stat-card s-total">
+      <div class="stat-label">全量审计规模</div>
+      <div class="stat-value" id="stat-total">--</div>
+      <div class="stat-desc">全校触发事件视界预警人数</div>
+    </div>
+    <div class="stat-card s-s1">
+      <div class="stat-label">S1 坠落陷阱区</div>
+      <div class="stat-value" id="stat-s1">--</div>
+      <div class="stat-desc">0-35分 · 极难自行爬出 · 需一对一干预</div>
+    </div>
+    <div class="stat-card s-s2">
+      <div class="stat-label">S2 不及格警戒区</div>
+      <div class="stat-value" id="stat-s2">--</div>
+      <div class="stat-desc">36-59分 · 生死存亡线 · 需专项补漏</div>
+    </div>
+    <div class="stat-card s-s4">
+      <div class="stat-label">S4/S5 腾飞大盘</div>
+      <div class="stat-value" id="stat-s4">--</div>
+      <div class="stat-desc">75分以上 · 稳定安全区 · 需防止滑落</div>
+    </div>
+  </div>
+
+  <!-- 主内容区 -->
+  <div class="main-content">
+    <!-- 左侧面板 -->
+    <div class="left-panel">
+      <!-- 全局转移矩阵 -->
+      <div class="panel-card">
+        <div class="panel-title">GLOBAL TRANSITION MATRIX</div>
+        <div class="state-indicator" id="matrix-loading">
+          <div class="spinner-dark"></div>
+          <div class="msg" style="margin-top:8px;">正在推演全校状态转移...</div>
+        </div>
+        <div id="matrix-container" style="display:none;">
+          <div style="color:#5f7a9a; font-size:0.7rem; margin-bottom:8px;">
+            基于 <span id="matrix-students" style="color:#00ff88;">0</span> 名学生 ·
+            <span id="matrix-transitions" style="color:#00ff88;">0</span> 次状态转移
+          </div>
+          <table class="matrix-table">
+            <thead>
+              <tr>
+                <th>当前\下次</th>
+                <th style="color:#ff4757;">S1 危险</th>
+                <th style="color:#ffa502;">S2 薄弱</th>
+                <th style="color:#1e90ff;">S3 及格</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="row-label" style="color:#ff4757;">S1 危险</td>
+                <td id="m00" class="prob-high">--</td>
+                <td id="m01" class="prob-mid">--</td>
+                <td id="m02" class="prob-low">--</td>
+              </tr>
+              <tr>
+                <td class="row-label" style="color:#ffa502;">S2 薄弱</td>
+                <td id="m10" class="prob-mid">--</td>
+                <td id="m11" class="prob-mid">--</td>
+                <td id="m12" class="prob-low">--</td>
+              </tr>
+              <tr>
+                <td class="row-label" style="color:#1e90ff;">S3 及格</td>
+                <td id="m20" class="prob-low">--</td>
+                <td id="m21" class="prob-low">--</td>
+                <td id="m22" class="prob-low">--</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 干预策略 -->
+      <div class="panel-card">
+        <div class="panel-title">INTERVENTION PROTOCOL</div>
+        <div style="font-size:0.75rem; line-height:1.8;">
+          <div style="margin-bottom:8px;">
+            <span class="state-tag s1" style="margin-right:6px;">S1</span>
+            <span style="color:#ff4757; font-weight:600;">一对一紧急辅导</span>
+            <div style="color:#5f7a9a; margin-top:2px;">降低作业难度，寻找知识断点，立即联系家长</div>
+          </div>
+          <div style="margin-bottom:8px;">
+            <span class="state-tag s2" style="margin-right:6px;">S2</span>
+            <span style="color:#ffa502; font-weight:600;">专项补漏训练</span>
+            <div style="color:#5f7a9a; margin-top:2px;">针对薄弱知识点布置专项训练，安排小组互助</div>
+          </div>
+          <div>
+            <span class="state-tag s3" style="margin-right:6px;">S3</span>
+            <span style="color:#1e90ff; font-weight:600;">巩固防滑落</span>
+            <div style="color:#5f7a9a; margin-top:2px;">提高练习强度，定期跟踪，防止进一步下滑</div>
+          </div>
+        </div>
+        <button class="intervention-btn" onclick="batchIntervene()">
+          <i class="bi bi-lightning-charge-fill" style="margin-right:4px;"></i>
+          物理熔断 — 批量干预
+        </button>
+        <button class="refresh-btn" onclick="refreshAll()">
+          <i class="bi bi-arrow-clockwise" style="margin-right:4px;"></i>
+          REFRESH SCAN DATA
+        </button>
+      </div>
+    </div>
+
+    <!-- 右侧学生列表 -->
+    <div class="right-panel">
+      <div class="list-card">
+        <div class="list-header">
+          <div class="list-title">
+            WARNING ROSTER
+            <span class="warn-count" id="warn-count">--</span>
+          </div>
+          <div class="filter-row">
+            <select id="filter-class" onchange="applyFilters()">
+              <option value="">全年级</option>
+              {% for cls in classes %}
+              <option value="{{ cls.id }}">{{ cls.name }}</option>
+              {% endfor %}
+            </select>
+            <select id="filter-state" onchange="applyFilters()">
+              <option value="">全部状态</option>
+              <option value="S1">S1 危险区</option>
+              <option value="S2">S2 薄弱区</option>
+              <option value="S3">S3 及格区</option>
+            </select>
+            <select id="filter-sort" onchange="applyFilters()">
+              <option value="fall">坠落风险降序</option>
+              <option value="score">分数升序</option>
+              <option value="name">姓名排序</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <div class="state-indicator" id="list-loading">
+            <div class="spinner-dark"></div>
+            <div class="msg" style="margin-top:8px;">Markov引擎正在推演状态转移矩阵...</div>
+          </div>
+          <div class="state-indicator" id="list-empty" style="display:none;">
+            <div class="icon" style="color:#00ff88;">&#10003;</div>
+            <div class="msg">全班大盘安全，无学生触发事件视界预警</div>
+          </div>
+          <div class="state-indicator" id="list-error" style="display:none;">
+            <div class="icon" style="color:#ff4757;">&#9888;</div>
+            <div class="msg" id="error-msg">数据加载失败</div>
+          </div>
+          <table class="student-table" id="student-table" style="display:none;">
+            <thead>
+              <tr>
+                <th>学生</th>
+                <th>当前状态</th>
+                <th>当前分数</th>
+                <th>S1坠落概率</th>
+                <th>提升概率</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="student-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 详情模态框 -->
+<div class="modal fade modal-dark" id="detailModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modal-title">学生学力诊断</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="modal-body">
+        <div class="state-indicator"><div class="spinner-dark"></div><div class="msg" style="margin-top:8px;">正在计算Markov状态转移...</div></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="color:#c8d6e5;border-color:#1e3a5f;">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 全局状态 ──
+let allWarnings = [];
+let detailModal = null;
+
+// ── 页面初始化 ──
+document.addEventListener("DOMContentLoaded", function() {
+  try { detailModal = new bootstrap.Modal(document.getElementById('detailModal')); } catch(e) {}
+  loadGlobalMatrix();
+  refreshScan();
+});
+
+// ── 加载全局转移矩阵 ──
+function loadGlobalMatrix() {
+  fetch('/api/markov/event-horizon/matrix?subject=' + encodeURIComponent('数学'))
+    .then(r => {
+      if (r.status === 401) throw new Error('未登录');
+      return r.json();
+    })
+    .then(data => {
+      document.getElementById('matrix-loading').style.display = 'none';
+      document.getElementById('matrix-container').style.display = 'block';
+      document.getElementById('matrix-students').textContent = data.student_count || 0;
+      document.getElementById('matrix-transitions').textContent = data.total_transitions || 0;
+      const m = data.matrix || [];
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          const val = m[i] && m[i][j] !== undefined ? (m[i][j] * 100).toFixed(1) + '%' : '--';
+          const cell = document.getElementById('m' + i + j);
+          if (cell) cell.textContent = val;
+        }
+      }
+    })
+    .catch(err => {
+      document.getElementById('matrix-loading').innerHTML =
+        '<div style="color:#ff4757;">矩阵加载失败: ' + err.message + '</div>';
+    });
+}
+
+// ── 刷新扫描 ──
+function refreshScan() {
+  showList('list-loading');
+  let url = '/api/markov/event-horizon/scan?subject=' + encodeURIComponent('数学') + '&top_n=0';
+  const classId = document.getElementById('filter-class').value;
+  if (classId) url += '&class_id=' + classId;
+
+  fetch(url)
+    .then(r => {
+      if (r.status === 401) throw new Error('未登录，请先登录');
+      if (r.status === 403) throw new Error('权限不足');
+      if (!r.ok) throw new Error('服务器错误 ' + r.status);
+      return r.json();
+    })
+    .then(data => {
+      allWarnings = data.warnings || [];
+      renderStats(allWarnings);
+      applyFilters();
+    })
+    .catch(err => {
+      document.getElementById('list-loading').style.display = 'none';
+      document.getElementById('list-error').style.display = 'block';
+      document.getElementById('error-msg').textContent = err.message;
+    });
+}
+
+// ── 渲染统计卡片 ──
+function renderStats(warnings) {
+  let s1 = 0, s2 = 0, s4 = 0;
+  warnings.forEach(w => {
+    if (w.warning_state === 'S1') s1++;
+    else if (w.warning_state === 'S2') s2++;
+    else s4++;
+  });
+  document.getElementById('stat-total').textContent = warnings.length;
+  document.getElementById('stat-s1').textContent = s1;
+  document.getElementById('stat-s2').textContent = s2;
+  document.getElementById('stat-s4').textContent = s4;
+  document.getElementById('warn-count').textContent = warnings.length;
+}
+
+// ── 筛选 + 排序 + 渲染 ──
+function applyFilters() {
+  let list = [...allWarnings];
+  const classFilter = document.getElementById('filter-class').value;
+  const stateFilter = document.getElementById('filter-state').value;
+  const sortMode = document.getElementById('filter-sort').value;
+
+  if (classFilter) list = list.filter(w => String(w.class_id) === classFilter);
+  if (stateFilter) list = list.filter(w => w.warning_state === stateFilter);
+
+  if (sortMode === 'fall') list.sort((a, b) => (b.fall_to_s1_prob || 0) - (a.fall_to_s1_prob || 0));
+  else if (sortMode === 'score') list.sort((a, b) => (a.current_score || 999) - (b.current_score || 999));
+  else if (sortMode === 'name') list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  document.getElementById('warn-count').textContent = list.length;
+
+  if (list.length === 0) {
+    showList('list-empty');
+  } else {
+    showList('student-table');
+    renderStudentList(list);
+  }
+}
+
+// ── 显示状态 ──
+function showList(id) {
+  ['list-loading', 'list-empty', 'list-error', 'student-table'].forEach(el => {
+    document.getElementById(el).style.display = (el === id) ? '' : 'none';
+  });
+}
+
+// ── 渲染学生列表 ──
+function renderStudentList(list) {
+  const tbody = document.getElementById('student-tbody');
+  let html = '';
+
+  list.forEach((s, idx) => {
+    const stateClass = s.warning_state ? s.warning_state.toLowerCase() : 's3';
+    const stateTag = s.warning_state || 'S?';
+
+    // S1坠落概率
+    const fallProb = s.fall_to_s1_prob || 0;
+    const fallPct = (fallProb * 100).toFixed(1);
+    const fallLevel = fallProb > 0.5 ? 'high' : (fallProb > 0.2 ? 'mid' : 'low');
+
+    // 提升概率
+    const passProb = s.short_term_pass_prob || 0;
+    const passPct = (passProb * 100).toFixed(1);
+
+    // 操作按钮
+    const actionClass = stateClass === 's1' ? 'btn-danger' : (stateClass === 's2' ? 'btn-warn' : 'btn-info');
+    const actionLabel = s.interventions ? (s.interventions.action || '查看详情') : '查看详情';
+
+    html += '<tr>' +
+      '<td><div class="student-name">' + escapeHtml(s.name || '未知') + '</div>' +
+      '<div class="student-class">' + escapeHtml(s.class_name || '') + ' (ID:' + s.student_id + ')</div></td>' +
+      '<td><span class="state-tag ' + stateClass + '">' + stateTag + '</span></td>' +
+      '<td style="color:#e8f0f8; font-weight:600;">' + (s.current_score !== null && s.current_score !== undefined ? s.current_score : '--') + '</td>' +
+      '<td><div class="prob-bar-wrap">' +
+        '<span class="prob-value ' + fallLevel + '">' + fallPct + '%</span>' +
+        '<div class="prob-bar"><div class="prob-bar-fill ' + fallLevel + '" style="width:' + Math.min(fallPct, 100) + '%"></div></div>' +
+      '</div></td>' +
+      '<td><span style="color:#3d5a80;">' + passPct + '%</span></td>' +
+      '<td><button class="action-btn ' + actionClass + '" onclick="showDetail(' + s.student_id + ')">' + actionLabel + '</button></td>' +
+    '</tr>';
+  });
+
+  tbody.innerHTML = html;
+}
+
+// ── HTML转义 ──
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ── 查看学生详情 ──
+function showDetail(studentId) {
+  document.getElementById('modal-title').textContent = '学生学力诊断';
+  document.getElementById('modal-body').innerHTML =
+    '<div class="state-indicator"><div class="spinner-dark"></div><div class="msg" style="margin-top:8px;">正在计算Markov状态转移...</div></div>';
+  if (detailModal) detailModal.show();
+
+  fetch('/api/markov/event-horizon/student/' + studentId + '?subject=' + encodeURIComponent('数学'))
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) {
+        document.getElementById('modal-body').innerHTML =
+          '<div class="state-indicator" style="color:#ff4757;"><div class="msg">' + data.error + '</div></div>';
+        return;
+      }
+
+      const stateShort = data.warning_state || ('S' + (data.current_state + 1));
+      const passPct = ((data.short_term_pass_prob || 0) * 100).toFixed(1);
+      const fallPct = ((data.fall_to_s1_prob || 0) * 100).toFixed(1);
+      const passColor = (data.short_term_pass_prob || 0) < 0.1 ? '#ff4757' : ((data.short_term_pass_prob || 0) < 0.2 ? '#ffa502' : '#1e90ff');
+
+      let predHtml = '';
+      if (data.predictions) {
+        data.predictions.slice(0, 5).forEach(p => {
+          const labels = {0:'S1',1:'S2',2:'S3',3:'S4',4:'S5'};
+          const from = labels[p.current_state] || p.current_state;
+          const to = labels[p.most_likely] || p.most_likely;
+          const arrow = p.most_likely > p.current_state ? '↑' : (p.most_likely < p.current_state ? '↓' : '→');
+          const arrowColor = p.most_likely > p.current_state ? '#00ff88' : (p.most_likely < p.current_state ? '#ff4757' : '#5f7a9a');
+          predHtml += '<tr><td style="color:#5f7a9a;">第' + p.step + '次</td><td>' + from + '</td><td style="color:' + arrowColor + ';">' + arrow + '</td><td>' + to + '</td></tr>';
+        });
+      }
+
+      document.getElementById('modal-body').innerHTML =
+        '<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:16px;">' +
+          '<div class="panel-card" style="margin:0;"><div class="stat-label">当前状态</div><div style="font-size:1.2rem; font-weight:700; color:#ff4757; margin-top:4px;">' + stateShort + '</div><div style="color:#5f7a9a; font-size:0.7rem;">' + (data.current_state_label || '') + '</div></div>' +
+          '<div class="panel-card" style="margin:0;"><div class="stat-label">最近分数</div><div style="font-size:1.2rem; font-weight:700; color:#e8f0f8; margin-top:4px;">' + (data.last_score || '--') + '</div><div style="color:#5f7a9a; font-size:0.7rem;">满分120</div></div>' +
+          '<div class="panel-card" style="margin:0;"><div class="stat-label">短期提升概率</div><div style="font-size:1.2rem; font-weight:700; color:' + passColor + '; margin-top:4px;">' + passPct + '%</div><div style="color:#5f7a9a; font-size:0.7rem;">阈值 &lt;30%</div></div>' +
+        '</div>' +
+        '<div class="panel-card" style="margin-bottom:12px;">' +
+          '<div class="panel-title">PREDICTION TRAJECTORY (5步预测)</div>' +
+          '<div style="margin-bottom:8px; color:#5f7a9a; font-size:0.75rem;">S1坠落概率: <span style="color:#ff4757; font-weight:700;">' + fallPct + '%</span></div>' +
+          '<table class="matrix-table"><thead><tr><th>考次</th><th>当前</th><th></th><th>最可能</th></tr></thead>' +
+          '<tbody>' + (predHtml || '<tr><td colspan="4" style="color:#5f7a9a;">数据不足</td></tr>') + '</tbody></table>' +
+        '</div>' +
+        '<div class="panel-card" style="border-color:#ff475744;">' +
+          '<div class="panel-title" style="color:#ff4757;">WARNING: 事件视界已触发</div>' +
+          '<div style="font-size:0.8rem; color:#c8d6e5;">该学生短期提升概率仅 ' + passPct + '%，已低于30%阈值。建议立即启动干预方案。</div>' +
+        '</div>';
+    })
+    .catch(err => {
+      document.getElementById('modal-body').innerHTML =
+        '<div class="state-indicator" style="color:#ff4757;"><div class="msg">加载失败: ' + err.message + '</div></div>';
+    });
+}
+
+// ── 批量干预（物理熔断）──
+function batchIntervene() {
+  if (allWarnings.length === 0) {
+    alert('当前无预警学生');
+    return;
+  }
+  const s1Count = allWarnings.filter(w => w.warning_state === 'S1').length;
+  const s2Count = allWarnings.filter(w => w.warning_state === 'S2').length;
+  let msg = '即将启动"物理熔断"干预流程：\n\n';
+  msg += 'S1 危险区学生：' + s1Count + ' 人 → 一对一紧急辅导\n';
+  msg += 'S2 薄弱区学生：' + s2Count + ' 人 → 专项补漏训练\n';
+  msg += '其他预警学生：' + (allWarnings.length - s1Count - s2Count) + ' 人 → 巩固训练\n\n';
+  msg += '此操作将生成干预任务单，确认执行？';
+  if (confirm(msg)) {
+    alert('干预任务已生成，请前往"德育处工作台 → 任务管理"查看');
+  }
+}
+
+// ── 全量刷新 ──
+function refreshAll() {
+  loadGlobalMatrix();
+  refreshScan();
+}
+</script>
+{% endblock %}

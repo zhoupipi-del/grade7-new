@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block title %}违纪统计{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5><i class="bi bi-bar-chart me-2"></i>违纪统计</h5>
+    </div>
+
+    <!-- 图表行 -->
+    <div class="row g-3 mb-3">
+        <!-- 违纪类型饼图 -->
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-header"><h6 class="mb-0"><i class="bi bi-pie-chart me-1"></i>违纪等级分布</h6></div>
+                <div class="card-body">
+                    {% if type_stats %}
+                    <canvas id="typeChart" height="220"></canvas>
+                    {% else %}
+                    <div class="text-muted text-center py-5">暂无数据</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 违纪类别柱状图 -->
+        <div class="col-md-8">
+            <div class="card h-100">
+                <div class="card-header"><h6 class="mb-0"><i class="bi bi-bar-chart-steps me-1"></i>违纪类别分布</h6></div>
+                <div class="card-body">
+                    {% if category_stats %}
+                    <canvas id="categoryChart" height="220"></canvas>
+                    {% else %}
+                    <div class="text-muted text-center py-5">暂无数据</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 班级违纪柱状图 -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header"><h6 class="mb-0"><i class="bi bi-building me-1"></i>各班级违纪总数</h6></div>
+                <div class="card-body">
+                    {% if class_stats %}
+                    <canvas id="classChart" height="200"></canvas>
+                    {% else %}
+                    <div class="text-muted text-center py-5">暂无数据</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据表格 -->
+    <div class="row g-3">
+        <!-- 按年级统计 -->
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header"><h6 class="mb-0"><i class="bi bi-table me-1"></i>各年级违纪概况</h6></div>
+                <div class="card-body p-0">
+                    {% if grade_stats %}
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead class="table-light"><tr><th>年级</th><th>总数</th><th>处理中</th><th>已解决</th></tr></thead>
+                            <tbody>
+                                {% for g in grade_stats %}
+                                <tr>
+                                    <td><strong>{{ g.name }}</strong></td>
+                                    <td>{{ g.total }}</td>
+                                    <td><span class="badge bg-warning text-dark">{{ g.active }}</span></td>
+                                    <td><span class="badge bg-success">{{ g.resolved }}</span></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-muted text-center py-4">暂无数据</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 类别详情表 -->
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header"><h6 class="mb-0"><i class="bi bi-list-ul me-1"></i>违纪类别详情</h6></div>
+                <div class="card-body p-0">
+                    {% if category_stats %}
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead class="table-light"><tr><th>类别</th><th>数量</th><th>总扣分</th></tr></thead>
+                            <tbody>
+                                {% for c in category_stats %}
+                                <tr>
+                                    <td>{{ c.category }}</td>
+                                    <td>{{ c.cnt }}</td>
+                                    <td>{% if c.points_sum %}<span class="text-danger fw-bold">{{ c.points_sum }}</span>{% else %}0{% endif %}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-muted text-center py-4">暂无数据</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if type_stats %}
+<script>
+// 违纪等级饼图
+new Chart(document.getElementById('typeChart'), {
+    type: 'doughnut',
+    data: {
+        labels: {{ chart_data.typeLabels | safe }},
+        datasets: [{
+            data: {{ chart_data.typeCounts | safe }},
+            backgroundColor: ['#dc3545', '#fd7e14', '#0dcaf0', '#6c757d'],
+            borderWidth: 2,
+            borderColor: '#fff'
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'bottom', labels: { padding: 15, usePointStyle: true } }
+        }
+    }
+});
+</script>
+{% endif %}
+
+{% if category_stats %}
+<script>
+// 违纪类别柱状图 + 扣分折线
+new Chart(document.getElementById('categoryChart'), {
+    type: 'bar',
+    data: {
+        labels: {{ chart_data.categoryLabels | safe }},
+        datasets: [
+            {
+                label: '次数',
+                data: {{ chart_data.categoryCounts | safe }},
+                backgroundColor: 'rgba(13, 110, 253, 0.7)',
+                borderColor: '#0d6efd',
+                borderWidth: 1,
+                yAxisID: 'y'
+            },
+            {
+                label: '总扣分',
+                data: {{ chart_data.categoryPoints | safe }},
+                type: 'line',
+                borderColor: '#dc3545',
+                backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                borderWidth: 2,
+                pointRadius: 4,
+                tension: 0.3,
+                yAxisID: 'y1'
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'bottom', labels: { usePointStyle: true } }
+        },
+        scales: {
+            y: {
+                type: 'linear',
+                position: 'left',
+                title: { display: true, text: '次数' },
+                beginAtZero: true
+            },
+            y1: {
+                type: 'linear',
+                position: 'right',
+                title: { display: true, text: '扣分' },
+                beginAtZero: true,
+                grid: { drawOnChartArea: false }
+            }
+        }
+    }
+});
+</script>
+{% endif %}
+
+{% if class_stats %}
+<script>
+// 班级违纪柱状图
+const classBgColors = {{ chart_data.classCounts | safe }}.map((_, i) => {
+    const colors = ['#0d6efd', '#6610f2', '#d63384', '#dc3545', '#fd7e14', '#ffc107',
+                    '#198754', '#20c997', '#0dcaf0', '#6f42c1', '#e83e8c', '#17a2b8'];
+    return colors[i % colors.length];
+});
+new Chart(document.getElementById('classChart'), {
+    type: 'bar',
+    data: {
+        labels: {{ chart_data.classLabels | safe }},
+        datasets: [{
+            label: '违纪次数',
+            data: {{ chart_data.classCounts | safe }},
+            backgroundColor: classBgColors,
+            borderWidth: 1,
+            borderColor: '#fff'
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: { stepSize: 1 }
+            }
+        }
+    }
+});
+</script>
+{% endif %}
+{% endblock %}

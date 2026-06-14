@@ -1,0 +1,46 @@
+# Gitee Go — 自动部署流水线
+# 当 main 分支收到 push 时自动触发
+# 通过 SSH 连接生产服务器执行 git pull + systemctl restart
+
+name: deploy-production
+displayName: 部署到生产环境
+triggers:
+  push:
+    branches:
+      - main
+
+stages:
+  - stage:
+      name: 部署
+      jobs:
+        - job: ssh-deploy
+          runs-on: ubuntu-latest
+          steps:
+            - name: 部署到 8.137.180.152
+              run: |
+                echo "=== 开始部署 ==="
+                ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                  -p ${{ SSH_PORT }} \
+                  ${{ SSH_USER }}@${{ SSH_HOST }} << 'DEPLOY_EOF'
+                set -e
+                cd /opt/grade7-new
+                echo "--- git pull ---"
+                git pull origin main
+                echo "--- restart service ---"
+                systemctl restart grade7-new
+                sleep 3
+                echo "--- health check ---"
+                STATUS=$(systemctl is-active grade7-new)
+                if [ "$STATUS" = "active" ]; then
+                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5001/health)
+                  echo "Service: $STATUS | Health: $HTTP_CODE"
+                  if [ "$HTTP_CODE" = "200" ]; then
+                    echo "=== DEPLOY SUCCESS ==="
+                    exit 0
+                  fi
+                fi
+                echo "=== DEPLOY FAILED === rolling back..."
+                git checkout HEAD~1 -- .
+                systemctl restart grade7-new
+                exit 1
+                DEPLOY_EOF

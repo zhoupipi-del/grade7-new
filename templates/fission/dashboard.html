@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}链式核裂变溯源引擎{% endblock %}
+
+{% block content %}
+<style>
+  body { background: #0a0e17; }
+  .fission-wrap { background: #0a0e17; color: #c8d6e5; min-height: 100vh; font-family: 'Consolas', monospace; }
+  .scanline { position: fixed; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, #ff475755, transparent); animation: scan 4s linear infinite; pointer-events: none; z-index: 9999; }
+  @keyframes scan { 0% { top: 0; } 100% { top: 100vh; } }
+
+  .header-bar { border-bottom: 1px solid #1e3a5f; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+  .header-bar h2 { color: #ff4757; font-size: 1.3rem; margin: 0; text-shadow: 0 0 10px #ff475744; }
+  .header-bar .subtitle { color: #5f7a9a; font-size: 0.75rem; margin-top: 4px; }
+
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 16px 24px; }
+  .stat-card { background: #0d1f35; border: 1px solid #1e3a5f; border-radius: 8px; padding: 16px; }
+  .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .stat-label { color: #5f7a9a; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; }
+  .stat-value { font-size: 1.8rem; font-weight: 700; margin-top: 6px; }
+
+  .main-grid { display: grid; grid-template-columns: 1fr; gap: 16px; padding: 0 24px 24px; }
+  .panel { background: #0d1f35; border: 1px solid #1e3a5f; border-radius: 8px; padding: 16px; }
+  .panel-title { color: #ff4757; font-size: 0.85rem; font-weight: 600; border-bottom: 1px solid #1e3a5f; padding-bottom: 8px; margin-bottom: 12px; }
+
+  .source-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  .source-table thead th { background: #0a1628; color: #5f7a9a; padding: 10px; border-bottom: 1px solid #1e3a5f; text-align: left; font-size: 0.72rem; }
+  .source-table tbody tr { border-bottom: 1px solid #111d2e; transition: background 0.2s; }
+  .source-table tbody tr:hover { background: #111d2e; }
+  .source-table td { padding: 10px; }
+
+  .name-cell { color: #e8f0f8; font-weight: 600; }
+  .score-bar { display: flex; align-items: center; gap: 8px; }
+  .score-fill { height: 6px; border-radius: 3px; background: linear-gradient(90deg, #ff4757, #ff6b81); }
+
+  .chain-card { background: #111d2e; border: 1px solid #1e3a5f; border-radius: 6px; padding: 12px; margin-bottom: 10px; }
+  .chain-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .chain-id { color: #ffa502; font-size: 0.72rem; font-weight: 600; }
+
+  .filter-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .filter-row select { background: #0a1628; color: #c8d6e5; border: 1px solid #1e3a5f; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; }
+
+  .btn-fission { display: inline-block; padding: 8px 20px; background: linear-gradient(135deg, #ff4757, #c0392b); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: 600; }
+  .btn-fission:hover { transform: translateY(-1px); box-shadow: 0 4px 15px #ff475755; }
+</style>
+
+<div class="fission-wrap">
+  <div class="scanline"></div>
+  <div class="header-bar">
+    <div>
+      <h2>CHAIN FISSION ENGINE — 链式核裂变溯源</h2>
+      <div class="subtitle">48小时滑动窗口 · 频率堆叠分析 · 识别群体违纪"超级传播源"</div>
+    </div>
+    <button class="btn-fission" onclick="runTrace()">
+      <i class="bi bi-lightning-charge-fill" style="margin-right:4px;"></i>启动溯源
+    </button>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat-card" style="position:relative;">
+      <div class="stat-label">违纪记录总数</div>
+      <div class="stat-value" id="stat-records" style="color:#c8d6e5;">--</div>
+      <div class="stat-desc" style="color:#3d5a80; font-size:0.7rem; margin-top:4px;">时间窗口内已验证记录</div>
+    </div>
+    <div class="stat-card" style="position:relative;">
+      <div class="stat-label">链式事件数</div>
+      <div class="stat-value" id="stat-chains" style="color:#ffa502;">--</div>
+      <div class="stat-desc" style="color:#3d5a80; font-size:0.7rem; margin-top:4px;">48h窗口内≥3人聚集</div>
+    </div>
+    <div class="stat-card" style="position:relative;">
+      <div class="stat-label">超级传播源</div>
+      <div class="stat-value" id="stat-sources" style="color:#ff4757;">--</div>
+      <div class="stat-desc" style="color:#3d5a80; font-size:0.7rem; margin-top:4px;">多次触发链式反应</div>
+    </div>
+    <div class="stat-card" style="position:relative;">
+      <div class="stat-label">涉及学生数</div>
+      <div class="stat-value" id="stat-students" style="color:#1e90ff;">--</div>
+      <div class="stat-desc" style="color:#3d5a80; font-size:0.7rem; margin-top:4px;">参与违纪的学生总数</div>
+    </div>
+  </div>
+
+  <div class="main-grid">
+    <div class="panel">
+      <div class="panel-title">SUPER SOURCES — 超级传播源排行</div>
+      <div class="filter-row">
+        <select id="filter-class" onchange="runTrace()">
+          <option value="">全年级</option>
+          {% for cls in classes %}
+          <option value="{{ cls.id }}">{{ cls.name }}</option>
+          {% endfor %}
+        </select>
+        <select id="filter-days" onchange="runTrace()">
+          <option value="7">最近7天</option>
+          <option value="14">最近14天</option>
+          <option value="30" selected>最近30天</option>
+          <option value="90">最近90天</option>
+        </select>
+      </div>
+      <div id="sources-loading" style="text-align:center; padding:40px; color:#3d5a80;">
+        <div style="font-size:0.85rem;">点击"启动溯源"开始分析</div>
+      </div>
+      <div id="sources-empty" style="text-align:center; padding:40px; color:#3d5a80; display:none;">
+        <div style="color:#00ff88; font-size:1.5rem; margin-bottom:8px;">&#10003;</div>
+        <div>未检测到链式核裂变事件，群体态势安全</div>
+      </div>
+      <table class="source-table" id="sources-table" style="display:none;">
+        <thead>
+          <tr>
+            <th>排名</th>
+            <th>传播源</th>
+            <th>影响力评分</th>
+            <th>触发次数</th>
+            <th>受感染人数</th>
+            <th>置信度</th>
+            <th>高频类别</th>
+          </tr>
+        </thead>
+        <tbody id="sources-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">CHAIN EVENTS — 链式事件详情</div>
+      <div id="chains-container">
+        <div style="text-align:center; padding:20px; color:#3d5a80; font-size:0.85rem;">启动溯源后显示事件链</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function runTrace() {
+  const classId = document.getElementById('filter-class').value;
+  const days = document.getElementById('filter-days').value;
+
+  let url = '/api/fission/trace?days=' + days;
+  if (classId) url += '&class_id=' + classId;
+
+  document.getElementById('sources-loading').style.display = 'block';
+  document.getElementById('sources-empty').style.display = 'none';
+  document.getElementById('sources-table').style.display = 'none';
+  document.getElementById('chains-container').innerHTML = '<div style="text-align:center; padding:20px; color:#3d5a80;"><div class="spinner-dark" style="display:inline-block;width:20px;height:20px;border:2px solid #1e3a5f;border-top-color:#ff4757;border-radius:50%;animation:spin 0.8s linear infinite;"></div><div style="margin-top:8px;">正在扫描链式裂变事件...</div></div>';
+
+  fetch(url)
+    .then(r => {
+      if (r.status === 401) throw new Error('未登录');
+      if (r.status === 403) throw new Error('权限不足');
+      return r.json();
+    })
+    .then(data => {
+      const summary = data.summary || {};
+      const sources = data.super_sources || [];
+      const chains = data.chain_events || [];
+
+      document.getElementById('stat-records').textContent = summary.total_records || 0;
+      document.getElementById('stat-chains').textContent = summary.chain_count || 0;
+      document.getElementById('stat-sources').textContent = sources.length;
+      document.getElementById('stat-students').textContent = summary.student_count || 0;
+
+      document.getElementById('sources-loading').style.display = 'none';
+
+      if (sources.length === 0) {
+        document.getElementById('sources-empty').style.display = 'block';
+      } else {
+        document.getElementById('sources-table').style.display = 'table';
+        renderSources(sources);
+      }
+
+      renderChains(chains);
+    })
+    .catch(err => {
+      document.getElementById('sources-loading').innerHTML = '<div style="color:#ff4757;">错误: ' + err.message + '</div>';
+    });
+}
+
+function renderSources(sources) {
+  const tbody = document.getElementById('sources-tbody');
+  let html = '';
+  sources.forEach((s, idx) => {
+    const maxScore = sources[0].influence_score || 1;
+    const barWidth = Math.round((s.influence_score / maxScore) * 100);
+    const confPct = (s.confidence * 100).toFixed(0);
+    html += '<tr>' +
+      '<td style="color:#ffa502; font-weight:700;">#' + (idx + 1) + '</td>' +
+      '<td><div class="name-cell">' + escapeHtml(s.name || '未知') + '</div><div style="color:#5f7a9a; font-size:0.7rem;">' + escapeHtml(s.class_name || '') + ' (ID:' + s.source_student_id + ')</div></td>' +
+      '<td><div class="score-bar"><div style="min-width:50px; color:#ff4757; font-weight:700;">' + s.influence_score + '</div><div style="flex:1; height:6px; background:#0a1628; border-radius:3px;"><div class="score-fill" style="width:' + barWidth + '%;"></div></div></div></td>' +
+      '<td style="color:#e8f0f8;">' + s.as_source_count + '</td>' +
+      '<td style="color:#ffa502;">' + s.total_infect + '</td>' +
+      '<td><div style="display:flex;align-items:center;gap:4px;"><div style="width:40px;height:4px;background:#0a1628;border-radius:2px;"><div style="height:100%;background:#1e90ff;border-radius:2px;width:' + confPct + '%;"></div></div><span style="color:#1e90ff;font-size:0.72rem;">' + confPct + '%</span></div></td>' +
+      '<td style="color:#5f7a9a; font-size:0.72rem;">' + escapeHtml(s.top_category || '--') + '</td>' +
+    '</tr>';
+  });
+  tbody.innerHTML = html;
+}
+
+function renderChains(chains) {
+  const container = document.getElementById('chains-container');
+  if (!chains.length) {
+    container.innerHTML = '<div style="text-align:center; padding:20px; color:#3d5a80;">未检测到链式事件</div>';
+    return;
+  }
+
+  let html = '';
+  chains.slice(0, 10).forEach(chain => {
+    const infected = chain.infected_details || [];
+    let infectedHtml = infected.map(d =>
+      '<span style="background:#1e3a5f; padding:2px 8px; border-radius:4px; font-size:0.7rem; margin:2px; display:inline-block;">' +
+      escapeHtml(d.name) + ' <span style="color:#5f7a9a;">' + d.time_offset_hours + 'h后</span></span>'
+    ).join('');
+
+    html += '<div class="chain-card">' +
+      '<div class="chain-header"><span class="chain-id">' + chain.chain_id + '</span><span style="color:#5f7a9a; font-size:0.7rem;">' + chain.event_category + ' · Granger=' + chain.granger_score + '</span></div>' +
+      '<div style="font-size:0.78rem; margin-bottom:6px;">传播源: <span style="color:#ff4757; font-weight:600;">' + escapeHtml(chain.source_name) + '</span> → 感染 <span style="color:#ffa502;">' + chain.infected_count + '</span> 人 · 涉及 <span style="color:#1e90ff;">' + chain.total_involved + '</span> 人</div>' +
+      '<div>' + infectedHtml + '</div>' +
+    '</div>';
+  });
+
+  if (chains.length > 10) {
+    html += '<div style="text-align:center; color:#5f7a9a; font-size:0.75rem; padding:8px;">显示前10条，共 ' + chains.length + ' 条事件链</div>';
+  }
+
+  container.innerHTML = html;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+{% endblock %}

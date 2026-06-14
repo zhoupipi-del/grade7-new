@@ -1,0 +1,122 @@
+<div class="row g-3 mb-3">
+  <div class="col-md-3">
+    <div class="card border-primary"><div class="card-body text-center py-3">
+      <div class="fs-2 fw-bold text-primary">{{ student_count }}</div>
+      <div class="text-muted small">覆盖学生</div>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-success"><div class="card-body text-center py-3">
+      <div class="fs-2 fw-bold text-success">{{ score_count }}</div>
+      <div class="text-muted small">评分总数</div>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-warning"><div class="card-body text-center py-3">
+      <div class="fs-2 fw-bold text-warning">{{ dim_avgs|length }}</div>
+      <div class="text-muted small">活跃维度</div>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-info"><div class="card-body text-center py-3">
+      <div class="fs-2 fw-bold text-info">{{ recent_scores|length }}</div>
+      <div class="text-muted small">近期评分</div>
+    </div></div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <!-- 五翼雷达 -->
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><strong><i class="bi bi-graph-up me-2"></i>五翼画像</strong></div>
+      <div class="card-body">
+        {% if score_count > 0 %}
+        <canvas id="radarChart" style="max-height:280px;"></canvas>
+        {% else %}
+        <div class="text-center py-4 text-muted">
+          <i class="bi bi-bar-chart display-4"></i>
+          <p class="mt-2">暂无评分数据</p>
+          <a href="{{ url_for('wings.score_page') }}" class="btn btn-primary btn-sm">开始评分</a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- 快速入口 -->
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><strong><i class="bi bi-lightning me-2"></i>快捷操作</strong></div>
+      <div class="card-body">
+        <div class="row g-2">
+          {% set entries = [
+            ('score_teacher', 'bi-pencil-square', 'primary', '教师评分'),
+            ('score_page', 'bi-people', 'success', '多角色评分'),
+            ('class_ranking', 'bi-bar-chart-steps', 'warning', '班级排名'),
+            ('medals', 'bi-award', 'danger', '勋章墙'),
+            ('portfolio', 'bi-journal-bookmark', 'info', '成长档案'),
+            ('analysis', 'bi-graph-up-arrow', 'dark', '数据分析'),
+          ] %}
+          {% for route, icon, color, label in entries %}
+          <div class="col-4">
+            <a href="{{ url_for('wings.' + route) }}" class="btn btn-outline-{{ color }} w-100 py-3">
+              <div class="fs-4"><i class="bi {{ icon }}"></i></div>
+              <small>{{ label }}</small>
+            </a>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 近期评分 -->
+{% if recent_scores %}
+<div class="card mt-3">
+  <div class="card-header"><strong><i class="bi bi-clock-history me-2"></i>近期评分记录</strong></div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead class="table-light">
+        <tr><th>学生</th><th>维度</th><th>分数</th><th>评分者</th><th>时间</th></tr>
+      </thead>
+      <tbody>
+      {% for s in recent_scores %}
+      <tr>
+        <td>{{ s.student.name if s.student else '?' }}</td>
+        <td><span class="badge bg-info">{{ s.dimension }}</span></td>
+        <td><strong>{{ s.score }}</strong></td>
+        <td><small>{{ s.scorer_type }}</small></td>
+        <td><small>{{ s.created_at.strftime('%m-%d %H:%M') if s.created_at }}</small></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if score_count > 0 %}
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<script>
+new Chart(document.getElementById('radarChart'), {
+  type: 'radar',
+  data: {
+    labels: ['德','智','体','美','劳'],
+    datasets: [{
+      label: '平均分',
+      data: [{{ dim_dist['德'] }}, {{ dim_dist['智'] }}, {{ dim_dist['体'] }}, {{ dim_dist['美'] }}, {{ dim_dist['劳'] }}],
+      backgroundColor: 'rgba(54,162,235,0.2)',
+      borderColor: 'rgba(54,162,235,1)',
+      pointBackgroundColor: 'rgba(54,162,235,1)',
+      borderWidth: 2
+    }]
+  },
+  options: {
+    scales: { r: { min: 0, max: 10, ticks: { stepSize: 2 } } },
+    plugins: { legend: { display: false } }
+  }
+});
+</script>
+{% endif %}

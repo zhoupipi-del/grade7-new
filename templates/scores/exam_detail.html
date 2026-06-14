@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}考试详情{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <a href="{{ url_for('scores.exam_list') }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回列表</a>
+  <h3>{{ exam.name }} <span class="badge bg-secondary">{{ exam.exam_type }}</span></h3>
+  <div class="text-muted mb-3">{{ exam.exam_date }} | {{ exam.grade.name if exam.grade else '' }}</div>
+
+  <div class="d-flex gap-2 mb-3">
+    <a href="{{ url_for('scores.score_input', eid=exam.id) }}" class="btn btn-success">录入成绩</a>
+    <a href="{{ url_for('scores.exam_ranking', eid=exam.id) }}" class="btn btn-warning">查看排名</a>
+    <a href="{{ url_for('scores.exam_analysis', eid=exam.id) }}" class="btn btn-info">数据分析</a>
+    <form method="POST" action="{{ url_for('scores.calculate_rank', eid=exam.id) }}" class="d-inline">
+      <button class="btn btn-primary" onclick="return confirm('确认计算排名？')">计算排名</button>
+    </form>
+  </div>
+
+  <h5>成绩表</h5>
+  <div class="table-responsive">
+    <table class="table table-sm table-bordered">
+      <thead>
+        <tr>
+          <th>学号</th><th>姓名</th><th>班级</th>
+          {% for s in subjects %}<th>{{ s.name }}</th>{% endfor %}
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for stu in students %}
+        <tr>
+          <td>{{ stu.student_no }}</td>
+          <td>{{ stu.name }}</td>
+          <td>{{ stu.class_.name if stu.class_ else '' }}</td>
+          {% for s in subjects %}
+            {% set sc = score_matrix.get((stu.id, s.id)) %}
+            <td>{% if sc %}{{ sc.score }}{% if sc.rank_class %} <small class="text-muted">({{ sc.rank_class }})</small>{% endif %}{% endif %}</td>
+          {% endfor %}
+          <td>
+            <a href="{{ url_for('scores.score_input', eid=exam.id, class_id=stu.class_id) }}" class="btn btn-xs btn-outline-primary">录入</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="{{ 3 + subjects|length + 1 }}" class="text-center text-muted">暂无学生数据，请先选择班级录入成绩</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

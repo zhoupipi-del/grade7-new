@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 梨江中学德育管理平台</title>
+    <link rel="dns-prefetch" href="//lijiangschool.online">
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+    <style>
+        /* 登录页专用最小化样式，不依赖 app.css / bootstrap-icons.css / 任何 JS */
+        :root {
+            --bs-primary: #0d6efd;
+        }
+        html, body {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .login-wrapper {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            width: 100%;
+            max-width: 400px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,.2);
+        }
+        .login-card .card-body {
+            padding: 2.5rem;
+        }
+        .login-brand-icon {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1rem;
+            font-size: 28px;
+            color: #fff;
+        }
+        .btn-login {
+            padding: 12px;
+            font-size: 16px;
+            font-weight: 500;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+        }
+        .btn-login:hover {
+            background: linear-gradient(135deg, #5a6fd6 0%, #6a4196 100%);
+        }
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102,126,234,.25);
+        }
+        /* flash 消息自动消失（纯CSS动画） */
+        .alert-dismissible {
+            animation: fadeOut 0.5s ease-in-out 3s forwards;
+        }
+        @keyframes fadeOut {
+            to { opacity: 0; height: 0; padding: 0; margin: 0; overflow: hidden; }
+        }
+    </style>
+</head>
+<body>
+<div class="login-wrapper">
+    <div class="login-card card">
+        <div class="card-body">
+            <!-- 品牌标识 -->
+            <div class="text-center mb-4">
+                <div class="login-brand-icon">🏫</div>
+                <h3 class="fw-bold mt-2 mb-1">梨江中学</h3>
+                <p class="text-muted small">德育管理平台</p>
+            </div>
+
+            <!-- 闪存消息 -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show py-2 small" role="alert">
+                    {{ message }}
+                </div>
+                {% endfor %}
+            {% endwith %}
+
+            <!-- 登录表单 -->
+            <form method="post">
+                <div class="mb-3">
+                    <label class="form-label small fw-medium">用户名</label>
+                    <input type="text" name="username" class="form-control" required autofocus
+                           placeholder="请输入用户名" autocomplete="username">
+                </div>
+                <div class="mb-4">
+                    <label class="form-label small fw-medium">密码</label>
+                    <input type="password" name="password" class="form-control" required
+                           placeholder="请输入密码" autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-login w-100 text-white">
+                    登 录
+                </button>
+            </form>
+
+            <!-- 提示信息 -->
+            <div class="text-center mt-3">
+                <small class="text-muted">默认管理员: admin / admin123</small>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

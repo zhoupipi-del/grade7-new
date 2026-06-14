@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}批量报名 - {{ activity.title }}{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4" style="max-width: 800px;">
+  <a href="{{ url_for('activity.registrations', aid=activity.id) }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回报名列表</a>
+  <h3>批量报名</h3>
+  <p class="text-muted">活动: {{ activity.title }}</p>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, msg in messages %}
+        <div class="alert alert-{{ 'danger' if category=='danger' else ('warning' if category=='warning' else 'success') }} alert-dismissible fade show">
+          {{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <form method="GET" class="mb-3">
+    <div class="row g-2">
+      <div class="col-md-6">
+        <label class="form-label">选择班级</label>
+        <select name="class_id" class="form-select" onchange="this.form.submit()">
+          <option value="">-- 请选择班级 --</option>
+          {% for c in classes %}
+          <option value="{{ c.id }}" {% if selected_class == c.id %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </form>
+
+  {% if students %}
+  <form method="POST">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>共 {{ students|length }} 名学生</span>
+        <div>
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAll(true)">全选</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAll(false)">取消全选</button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-hover table-sm mb-0">
+          <thead><tr><th width="50">选</th><th>学号</th><th>姓名</th><th>性别</th><th>状态</th></tr></thead>
+          <tbody>
+            {% for s in students %}
+            <tr>
+              <td>
+                <input class="form-check-input student-checkbox" type="checkbox" name="student_ids" value="{{ s.id }}"
+                       {% if s.id in existing_ids %}disabled{% endif %}>
+              </td>
+              <td>{{ s.student_no }}</td>
+              <td>{{ s.name }}</td>
+              <td>{{ s.gender }}</td>
+              <td>
+                {% if s.id in existing_ids %}
+                <span class="badge bg-secondary">已报名</span>
+                {% else %}
+                <span class="badge bg-light text-dark">可选</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer">
+        <button type="submit" class="btn btn-primary">
+          批量报名 (<span id="selected-count">0</span> 人)
+        </button>
+        <a href="{{ url_for('activity.registrations', aid=activity.id) }}" class="btn btn-secondary">取消</a>
+      </div>
+    </div>
+  </form>
+  {% elif selected_class %}
+  <div class="text-center py-4 text-muted">该班级暂无学生</div>
+  {% else %}
+  <div class="text-center py-4 text-muted">请先选择班级</div>
+  {% endif %}
+</div>
+
+<script>
+function selectAll(check) {
+    document.querySelectorAll('.student-checkbox:not([disabled])').forEach(function(cb) {
+        cb.checked = check;
+    });
+    updateCount();
+}
+document.querySelectorAll('.student-checkbox').forEach(function(cb) {
+    cb.addEventListener('change', updateCount);
+});
+function updateCount() {
+    var count = document.querySelectorAll('.student-checkbox:checked').length;
+    document.getElementById('selected-count').textContent = count;
+}
+updateCount();
+</script>
+{% endblock %}

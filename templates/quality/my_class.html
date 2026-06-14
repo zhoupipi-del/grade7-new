@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}本班评价结果 - 梨江中学综合素质评价{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-people me-2"></i>本班评价结果</h4>
+  <span class="text-muted small">共 {{ student_results|length }} 名学生</span>
+</div>
+
+<!-- 班级总体雷达图 -->
+<div class="card mb-3">
+  <div class="card-header"><strong>班级五维均分</strong></div>
+  <div class="card-body text-center">
+    <canvas id="classRadar" style="max-height:300px;max-width:450px;display:inline-block;"></canvas>
+  </div>
+</div>
+
+<!-- 学生卡片列表 -->
+<div class="row g-3">
+  {% for item in student_results %}
+  {% set stu = item.student %}
+  {% set ds = item.dim_scores %}
+  {% set total = item.total %}
+  <div class="col-lg-4 col-md-6">
+    <div class="card h-100">
+      <div class="card-header d-flex justify-content-between align-items-center py-2">
+        <strong>{{ loop.index }}. {{ stu.name }}</strong>
+        <span class="badge {% if total >= 80 %}bg-success{% elif total >= 60 %}bg-warning text-dark{% else %}bg-danger{% endif%}">
+          总分: {{ total }}
+        </span>
+      </div>
+      <div class="card-body p-2">
+        <!-- 迷你雷达 -->
+        <div class="text-center mb-2">
+          <canvas id="miniRadar{{ stu.id }}" height="140"></canvas>
+        </div>
+        <!-- 五维明细 -->
+        <div class="row g-1 text-center small">
+          {% for dim in DIMENSIONS %}
+          {% set dkey = dim.key %}
+          <div class="col">
+            <div class="rounded p-1 bg-light">
+              <div class="text-muted" style="font-size:.7rem;">{{ dim.name[:2] }}</div>
+              <div class="fw-bold">{{ ds.get(dkey, 0) }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="col-12"><div class="alert alert-info">暂无学生数据</div></div>
+  {% endfor %}
+</div>
+
+<script>
+// 班级总体（由后端预计算，避免 Jinja2 sum 过滤器 UndefinedError）
+var classAvgData = {{ class_avg_data | tojson }};
+new Chart(document.getElementById('classRadar'), {
+  type: 'radar',
+  data: {
+    labels: [{% for dim in DIMENSIONS %}'{{ dim.name }}'{% if not loop.last %},{% endif %}{% endfor %}],
+    datasets: [{ label: '班级均分', data: classAvgData,
+      backgroundColor:'rgba(13,110,253,0.15)', borderColor:'rgba(13,110,253,1)',
+      pointBackgroundColor:'rgba(13,110,253,1)', borderWidth:2 }]
+  },
+  options: { scales:{ r:{ min:0, max:100, ticks:{stepSize:20}}}, plugins:{legend:{display:false}} }
+});
+
+// 各学生迷你雷达
+{% for item in student_results %}
+{% set stu = item.student %}
+{% set ds = item.dim_scores %}
+(function(){
+  var ctx = document.getElementById('miniRadar{{ stu.id }}');
+  new Chart(ctx, {
+    type: 'radar',
+    data: {
+      labels:[{% for dim in DIMENSIONS %}'{{ dim.name[:2] }}'{% if not loop.last %},{% endif %}{% endfor %}],
+      datasets:[{ data:[
+        {% for d in DIMENSION_KEYS %}{{ ds.get(d, 0) }}{{ "," if not loop.last }}{% endfor %}
+      ], backgroundColor:'rgba(13,110,253,0.15)', borderColor:'rgba(13,110,253,1)', borderWidth:1.5 }]
+    },
+    options: { responsive:true, scales:{ r:{ display:false }}, plugins:{ legend:{display:false } } }
+  });
+})();
+{% endfor %}
+</script>
+{% endblock %}

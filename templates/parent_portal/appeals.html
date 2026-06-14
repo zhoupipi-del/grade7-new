@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}我的申诉 · 家长端{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5><i class="bi bi-shield-check me-2"></i>申诉记录</h5>
+    </div>
+
+    {% if appeals %}
+    <div class="row g-3">
+        {% for a in appeals %}
+        {% set disc = a.discipline %}
+        {% set status_map = {'pending': ('warning', 'text-dark', '待处理'), 'reviewing': ('info', '', '复核中'), 'approved': ('success', '', '已通过'), 'rejected': ('danger', '', '已驳回')} %}
+        {% set badge = status_map.get(a.status, ('secondary', '', a.status)) %}
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <span class="badge bg-{{ badge[0] }} {{ badge[1] }} me-2">{{ badge[2] }}</span>
+                            <strong>{{ disc.category or '违纪' }}</strong>
+                            <small class="text-muted ms-2">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                        </div>
+                    </div>
+
+                    <div class="bg-light rounded p-2 mb-2">
+                        <small class="text-muted">原违纪描述：</small>{{ disc.description[:100] }}
+                    </div>
+
+                    <div class="row small">
+                        <div class="col-md-6">
+                            <strong>申诉理由：</strong>{{ a.reason[:150] }}
+                        </div>
+                        <div class="col-md-6">
+                            {% if a.reviewed_at %}
+                            <strong>处理时间：</strong>{{ a.reviewed_at.strftime('%Y-%m-%d %H:%M') }}<br>
+                            <strong>审核意见：</strong>{{ a.review_comment or '-' }}
+                            {% else %}
+                            <span class="text-muted">等待德育处复核中...</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-5 text-muted">
+        <i class="bi bi-shield-check fs-1 d-block mb-3"></i>
+        <p>暂无申诉记录</p>
+        <a href="{{ url_for('parent_portal.discipline') }}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-journal-x me-1"></i>查看违纪记录
+        </a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

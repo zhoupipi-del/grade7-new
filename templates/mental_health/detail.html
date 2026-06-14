@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+{% block title %}评估详情 - 梨江中学{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+
+        <!-- 返回按钮 -->
+        <div class="mb-3">
+            <a href="{{ url_for('mental_health.index') }}" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-left me-1"></i>返回列表
+            </a>
+        </div>
+
+        <!-- 评估基本信息 -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-emoji-smile me-2"></i>心理健康评估详情
+                </h5>
+                <div>
+                    {% if session.role in ['ms_admin', 'grade_leader', 'class_teacher'] %}
+                    <a href="{{ url_for('mental_health.edit', aid=assessment.id) }}" 
+                       class="btn btn-sm btn-outline-primary me-2">
+                        <i class="bi bi-pencil"></i> 编辑
+                    </a>
+                    <button onclick="confirmDelete({{ assessment.id }}, '{{ assessment.student.name if assessment.student else '未知' }}')"
+                            class="btn btn-sm btn-outline-danger">
+                        <i class="bi bi-trash"></i> 删除
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <!-- 学生信息 -->
+                    <div class="col-md-6">
+                        <h6 class="text-muted mb-2">学生信息</h6>
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="rounded-circle bg-primary bg-opacity-10 d-flex align-items-center justify-content-center me-3" 
+                                 style="width: 48px; height: 48px;">
+                                <i class="bi bi-person-fill text-primary"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">{{ assessment.student.name if assessment.student else '未知' }}</h5>
+                                <small class="text-muted">
+                                    {{ assessment.student.class_.name if assessment.student and assessment.student.class_ else '—' }}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 评估信息 -->
+                    <div class="col-md-6">
+                        <h6 class="text-muted mb-2">评估信息</h6>
+                        <table class="table table-sm table-borderless">
+                            <tr>
+                                <td class="text-muted" style="width: 100px;">评估类型</td>
+                                <td>
+                                    {% set type_label = assessment_types | selectattr('0', 'equalto', assessment.assessment_type) | map(attribute='1') | first %}
+                                    {{ type_label or assessment.assessment_type }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">量表名称</td>
+                                <td>{{ assessment.scale_name or '—' }}</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">评估日期</td>
+                                <td>{{ assessment.assessment_date.strftime('%Y年%m月%d日') if assessment.assessment_date else '—' }}</td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">评估人</td>
+                                <td>{{ assessment.assessor.display_name if assessment.assessor else '—' }}</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 风险等级 -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-4">
+                        <div class="card border-0 bg-light">
+                            <div class="card-body text-center py-3">
+                                <h6 class="text-muted mb-2">风险等级</h6>
+                                {% if assessment.risk_level == 'high' %}
+                                    <span class="badge bg-danger fs-6">高风险</span>
+                                {% elif assessment.risk_level == 'medium' %}
+                                    <span class="badge bg-warning fs-6">中风险</span>
+                                {% else %}
+                                    <span class="badge bg-success fs-6">低风险</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card border-0 bg-light">
+                            <div class="card-body text-center py-3">
+                                <h6 class="text-muted mb-2">总分</h6>
+                                <h4 class="mb-0 {% if assessment.total_score and assessment.total_score >= 60 %}text-success{% elif assessment.total_score and assessment.total_score >= 40 %}text-warning{% else %}text-danger{% endif %}">
+                                    {{ assessment.total_score or '—' }}
+                                </h4>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card border-0 bg-light">
+                            <div class="card-body text-center py-3">
+                                <h6 class="text-muted mb-2">是否需要干预</h6>
+                                {% if assessment.need_intervention %}
+                                    <span class="badge bg-warning fs-6">是</span>
+                                {% else %}
+                                    <span class="badge bg-success fs-6">否</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 详细得分 -->
+                {% if assessment.dimension_scores %}
+                <div class="mb-4">
+                    <h6 class="text-muted mb-2">详细得分</h6>
+                    <div class="card border-0 bg-light">
+                        <div class="card-body">
+                            <div class="row g-2">
+                                {% set scores = assessment.dimension_scores.split(',') %}
+                                {% for score in scores %}
+                                <div class="col-md-4">
+                                    <div class="d-flex justify-content-between align-items-center p-2 border-bottom">
+                                        <span>{{ loop.index }}维</span>
+                                        <span class="fw-bold {% if score|int >= 60 %}text-success{% elif score|int >= 40 %}text-warning{% else %}text-danger{% endif %}">
+                                            {{ score }}
+                                        </span>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- 评估结论 -->
+                {% if assessment.conclusion %}
+                <div class="mb-4">
+                    <h6 class="text-muted mb-2">评估结论</h6>
+                    <div class="card border-0 bg-light">
+                        <div class="card-body">
+                            <p class="mb-0">{{ assessment.conclusion }}</p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- 建议措施 -->
+                {% if assessment.recommendations %}
+                <div class="mb-4">
+                    <h6 class="text-muted mb-2">建议措施</h6>
+                    <div class="card border-0 bg-light">
+                        <div class="card-body">
+                            <p class="mb-0">{{ assessment.recommendations }}</p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- 干预措施 -->
+                {% if assessment.need_intervention and assessment.intervention_plan %}
+                <div class="mb-4">
+                    <h6 class="text-muted mb-2">干预措施</h6>
+                    <div class="card border-0 bg-warning bg-opacity-10">
+                        <div class="card-body">
+                            <p class="mb-0">{{ assessment.intervention_plan }}</p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- 辅助数据：帮助评估人员全面了解学生情况 -->
+                <hr>
+                <h6 class="text-muted mb-3"><i class="bi bi-clipboard-data me-1"></i>辅助判断数据（该生近期表现）</h6>
+
+                <div class="row g-3 mb-3">
+                    <!-- 违纪记录 -->
+                    <div class="col-md-6">
+                        <div class="card border-0 bg-light h-100">
+                            <div class="card-body py-2">
+                                <h6 class="mb-2"><i class="bi bi-exclamation-triangle text-warning me-1"></i>近期违纪记录</h6>
+                                {% if discipline_records %}
+                                <div class="table-responsive" style="max-height: 180px;">
+                                    <table class="table table-sm table-borderless small mb-0">
+                                        <thead class="text-muted">
+                                            <tr><th>日期</th><th>类型</th><th>描述</th></tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for d in discipline_records %}
+                                            <tr>
+                                                <td>{{ d.created_at.strftime('%m-%d') if d.created_at else '—' }}</td>
+                                                <td>
+                                                    {% if d.type == 'serious' or d.type == 'major' %}
+                                                    <span class="badge bg-danger">{{ d.type }}</span>
+                                                    {% elif d.type == 'moderate' %}
+                                                    <span class="badge bg-warning">{{ d.type }}</span>
+                                                    {% else %}
+                                                    <span class="badge bg-secondary">{{ d.type }}</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="text-truncate" style="max-width: 120px;">{{ d.description[:20] if d.description else '—' }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <small class="text-muted">共 {{ discipline_records|length }} 条记录</small>
+                                {% else %}
+                                <p class="text-muted small mb-0">无违纪记录</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 近期成绩 -->
+                    <div class="col-md-6">
+                        <div class="card border-0 bg-light h-100">
+                            <div class="card-body py-2">
+                                <h6 class="mb-2"><i class="bi bi-bar-chart text-primary me-1"></i>最近考试成绩
+                                    {% if latest_exam %}<small class="text-muted">（{{ latest_exam.name }}）</small>{% endif %}
+                                </h6>
+                                {% if recent_scores %}
+                                <div class="table-responsive" style="max-height: 180px;">
+                                    <table class="table table-sm table-borderless small mb-0">
+                                        <thead class="text-muted">
+                                            <tr><th>科目</th><th>分数</th><th>排名</th></tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for sc in recent_scores %}
+                                            <tr>
+                                                <td>{{ subjects.get(sc.subject_id, '科目#' ~ sc.subject_id) }}</td>
+                                                <td>
+                                                    <span class="fw-bold {% if sc.score is not none and sc.score >= 80 %}text-success{% elif sc.score is not none and sc.score >= 60 %}text-warning{% else %}text-danger{% endif %}">
+                                                        {{ sc.score if sc.score is not none else '—' }}
+                                                    </span>
+                                                </td>
+                                                <td class="text-muted">{{ sc.class_rank if sc.class_rank else '—' }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <p class="text-muted small mb-0">暂无成绩数据</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <!-- 考勤概况 -->
+                    <div class="col-md-6">
+                        <div class="card border-0 bg-light h-100">
+                            <div class="card-body py-2">
+                                <h6 class="mb-2"><i class="bi bi-calendar-check text-success me-1"></i>近30天考勤概况</h6>
+                                <div class="d-flex justify-content-around text-center">
+                                    <div>
+                                        <span class="fw-bold text-success">{{ att_stats.present + att_stats.absent + att_stats.late + att_stats.leave }}</span>
+                                        <small class="d-block text-muted">总记录</small>
+                                    </div>
+                                    <div>
+                                        <span class="fw-bold text-success">{{ att_stats.present }}</span>
+                                        <small class="d-block text-muted">出勤</small>
+                                    </div>
+                                    <div>
+                                        <span class="fw-bold text-danger">{{ att_stats.absent }}</span>
+                                        <small class="d-block text-muted">缺勤</small>
+                                    </div>
+                                    <div>
+                                        <span class="fw-bold text-warning">{{ att_stats.late }}</span>
+                                        <small class="d-block text-muted">迟到</small>
+                                    </div>
+                                    <div>
+                                        <span class="fw-bold text-info">{{ att_stats.leave }}</span>
+                                        <small class="d-block text-muted">请假</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 请假记录 -->
+                    <div class="col-md-6">
+                        <div class="card border-0 bg-light h-100">
+                            <div class="card-body py-2">
+                                <h6 class="mb-2"><i class="bi bi-envelope-paper text-info me-1"></i>近期请假记录</h6>
+                                {% if leave_records %}
+                                <div class="table-responsive" style="max-height: 180px;">
+                                    <table class="table table-sm table-borderless small mb-0">
+                                        <thead class="text-muted">
+                                            <tr><th>时间</th><th>类型</th><th>原因</th></tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for lr in leave_records %}
+                                            <tr>
+                                                <td>{{ lr.start_date.strftime('%m-%d') if lr.start_date else '—' }}</td>
+                                                <td>
+                                                    {% if lr.leave_type == 'sick' %}病假
+                                                    {% elif lr.leave_type == 'personal' %}事假
+                                                    {% elif lr.leave_type == 'other'%}其他
+                                                    {% else %}{{ lr.leave_type }}
+                                                    {% endif %}
+                                                </td>
+                                                <td class="text-truncate" style="max-width: 100px;">{{ lr.reason[:15] if lr.reason else '—' }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <p class="text-muted small mb-0">无请假记录</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 审核信息 -->
+                {% if assessment.status != 'draft' %}
+                <div class="mb-4">
+                    <h6 class="text-muted mb-2">审核信息</h6>
+                    <table class="table table-sm">
+                        <tr>
+                            <td class="text-muted" style="width: 100px;">审核状态</td>
+                            <td>
+                                {% if assessment.status == 'reviewed' %}
+                                    <span class="badge bg-success">已审核</span>
+                                {% elif assessment.status == 'archived' %}
+                                    <span class="badge bg-secondary">已归档</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% if assessment.reviewer %}
+                        <tr>
+                            <td class="text-muted">审核人</td>
+                            <td>{{ assessment.reviewer.display_name }}</td>
+                        </tr>
+                        {% endif %}
+                        {% if assessment.reviewed_at %}
+                        <tr>
+                            <td class="text-muted">审核时间</td>
+                            <td>{{ assessment.reviewed_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        </tr>
+                        {% endif %}
+                        {% if assessment.review_comment %}
+                        <tr>
+                            <td class="text-muted">审核意见</td>
+                            <td>{{ assessment.review_comment }}</td>
+                        </tr>
+                        {% endif %}
+                    </table>
+                </div>
+                {% endif %}
+
+                <!-- 时间信息 -->
+                <div class="text-muted small text-end">
+                    创建时间：{{ assessment.created_at.strftime('%Y-%m-%d %H:%M') if assessment.created_at else '—' }}
+                    {% if assessment.updated_at %}
+                    | 更新时间：{{ assessment.updated_at.strftime('%Y-%m-%d %H:%M') }}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 删除确认模态框 -->
+{% if session.role in ['ms_admin', 'grade_leader'] %}
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">确认删除</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>确定要删除 <strong id="deleteStudentName"></strong> 的心理健康评估记录吗？</p>
+                <p class="text-danger">此操作不可恢复！</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <form id="deleteForm" method="post" style="display: inline;">
+                    <button type="submit" class="btn btn-danger">确认删除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function confirmDelete(assessmentId, studentName) {
+    document.getElementById('deleteStudentName').textContent = studentName;
+    document.getElementById('deleteForm').action = '/mental-health/' + assessmentId + '/delete';
+    new bootstrap.Modal(document.getElementById('deleteModal')).show();
+}
+</script>
+{% endblock %}

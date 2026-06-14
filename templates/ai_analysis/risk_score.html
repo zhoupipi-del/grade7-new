@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}综合风险评分 - AI分析{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row mb-3">
+        <div class="col">
+            <h2><i class="bi bi-shield-check"></i> 综合风险评分模型</h2>
+            <p class="text-muted">基于心理+成绩+违纪+考勤的四维风险评估（规则引擎）</p>
+        </div>
+    </div>
+
+    <!-- 学生选择器 -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="input-group">
+                <input type="text" class="form-control" id="studentSearch" placeholder="输入学生姓名搜索...">
+                <button class="btn btn-primary" onclick="searchStudent()">
+                    <i class="bi bi-search"></i> 搜索
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 结果展示区 -->
+    <div id="resultArea" style="display:none;">
+        <div class="row">
+            <!-- 总分卡片 -->
+            <div class="col-md-4 mb-3">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">综合风险评分</h5>
+                        <div class="display-1 fw-bold" id="totalScore">0</div>
+                        <div class="mt-2">
+                            <span class="badge bg-danger fs-6" id="riskLevelBadge">低风险</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 因子分解 -->
+            <div class="col-md-8 mb-3">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white">
+                        <h5 class="mb-0"><i class="bi bi-pie-chart"></i> 风险因子分解</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">心理健康 (权重 40%)</label>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar bg-info" id="psychBar" style="width: 0%">0分</div>
+                            </div>
+                            <small class="text-muted" id="psychDetails"></small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">成绩趋势 (权重 30%)</label>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar bg-warning" id="gradeBar" style="width: 0%">0分</div>
+                            </div>
+                            <small class="text-muted" id="gradeDetails"></small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">违纪记录 (权重 20%)</label>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar bg-danger" id="disciplineBar" style="width: 0%">0分</div>
+                            </div>
+                            <small class="text-muted" id="disciplineDetails"></small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">考勤异常 (权重 10%)</label>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar bg-secondary" id="attendanceBar" style="width: 0%">0分</div>
+                            </div>
+                            <small class="text-muted" id="attendanceDetails"></small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 干预建议 -->
+        <div class="row">
+            <div class="col">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white">
+                        <h5 class="mb-0"><i class="bi bi-lightbulb"></i> 干预建议</h5>
+                    </div>
+                    <div class="card-body">
+                        <ul id="suggestionsList" class="mb-0"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载提示 -->
+    <div id="loadingArea" style="display:none;" class="text-center mt-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">加载中...</span>
+        </div>
+        <p class="mt-2">正在计算风险评分...</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentStudentId = null;
+
+function searchStudent() {
+    const query = document.getElementById('studentSearch').value.trim();
+    if (!query) {
+        alert('请输入学生姓名');
+        return;
+    }
+
+    document.getElementById('loadingArea').style.display = 'block';
+    document.getElementById('resultArea').style.display = 'none';
+
+    // 先搜索学生
+    fetch(`/search/api?q=${encodeURIComponent(query)}&type=student`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.students && data.students.length > 0) {
+                const student = data.students[0];
+                currentStudentId = student.id;
+                loadRiskScore(student.id);
+            } else {
+                alert('未找到该学生');
+                document.getElementById('loadingArea').style.display = 'none';
+            }
+        })
+        .catch(err => {
+            alert('搜索失败: ' + err);
+            document.getElementById('loadingArea').style.display = 'none';
+        });
+}
+
+function loadRiskScore(studentId) {
+    fetch(`/ai-analysis/api/comprehensive-risk/${studentId}`)
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('loadingArea').style.display = 'none';
+
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+
+            // 显示结果
+            document.getElementById('resultArea').style.display = 'block';
+
+            // 总分
+            document.getElementById('totalScore').textContent = data.total_score;
+            const badge = document.getElementById('riskLevelBadge');
+            if (data.risk_level === 'red') {
+                badge.className = 'badge bg-danger fs-6';
+                badge.textContent = '🔴 高风险';
+            } else if (data.risk_level === 'yellow') {
+                badge.className = 'badge bg-warning fs-6';
+                badge.textContent = '🟡 中风险';
+            } else {
+                badge.className = 'badge bg-success fs-6';
+                badge.textContent = '🟢 低风险';
+            }
+
+            // 因子分解
+            const factors = data.factors;
+            updateFactorBar('psych', factors.psych);
+            updateFactorBar('grade', factors.grade);
+            updateFactorBar('discipline', factors.discipline);
+            updateFactorBar('attendance', factors.attendance);
+
+            // 干预建议
+            const list = document.getElementById('suggestionsList');
+            list.innerHTML = '';
+            (data.suggested_actions || []).forEach(s => {
+                const li = document.createElement('li');
+                li.className = 'mb-2';
+                li.innerHTML = `<i class="bi bi-check-circle text-primary"></i> ${s}`;
+                list.appendChild(li);
+            });
+        })
+        .catch(err => {
+            alert('加载失败: ' + err);
+            document.getElementById('loadingArea').style.display = 'none';
+        });
+}
+
+function updateFactorBar(name, factor) {
+    const bar = document.getElementById(`${name}Bar`);
+    const details = document.getElementById(`${name}Details`);
+    const score = factor.score;
+    const weightedScore = Math.round(score * factor.weight);
+
+    bar.style.width = score + '%';
+    bar.textContent = `${score}分 (加权${weightedScore}分)`;
+    details.textContent = factor.details;
+}
+
+// 回车搜索
+document.getElementById('studentSearch').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') searchStudent();
+});
+</script>
+{% endblock %}

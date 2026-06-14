@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}成绩预测模型{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row mb-3">
+        <div class="col">
+            <h2><i class="bi bi-graph-up"></i> 成绩预测模型（线性回归）</h2>
+            <p class="text-muted">基于历史成绩趋势，预测下次考试成绩</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4 mb-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-search"></i> 学生搜索</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">学生姓名</label>
+                        <input type="text" class="form-control" id="studentName" placeholder="输入学生姓名">
+                    </div>
+                    <button class="btn btn-primary w-100" onclick="predictGrades()">
+                        <i class="bi bi-cpu"></i> 开始预测
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8 mb-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="bi bi-table"></i> 预测结果</h5>
+                </div>
+                <div class="card-body">
+                    <div id="loadingArea" style="display:none;" class="text-center py-5">
+                        <div class="spinner-border text-primary"></div>
+                        <p class="mt-2">正在训练模型并预测...</p>
+                    </div>
+                    <div id="resultArea" style="display:none;">
+                        <p><strong>学生：</strong><span id="studentNameSpan"></span></p>
+                        <table class="table table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>科目</th>
+                                    <th>历史成绩</th>
+                                    <th>预测成绩</th>
+                                    <th>趋势</th>
+                                    <th>置信度</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsBody"></tbody>
+                        </table>
+                    </div>
+                    <div id="noDataArea" style="display:none;" class="text-center py-5 text-muted">
+                        <i class="bi bi-exclamation-circle" style="font-size: 3rem;"></i>
+                        <p class="mt-2">该学生无成绩数据，无法预测</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function predictGrades() {
+    const name = document.getElementById('studentName').value.trim();
+    if (!name) {
+        alert('请输入学生姓名');
+        return;
+    }
+
+    document.getElementById('loadingArea').style.display = 'block';
+    document.getElementById('resultArea').style.display = 'none';
+    document.getElementById('noDataArea').style.display = 'none';
+
+    // 先搜索学生
+    fetch(`/search/api?q=${encodeURIComponent(name)}&type=student`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.results && data.results.length > 0) {
+                const student = data.results[0];
+                document.getElementById('studentNameSpan').textContent = student.name;
+                return fetch(`/ai-analysis/api/predict/grades/${student.id}`);
+            } else {
+                throw new Error('未找到该学生');
+            }
+        })
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('loadingArea').style.display = 'none';
+
+            if (data.code === 1) {
+                document.getElementById('noDataArea').style.display = 'block';
+                return;
+            }
+
+            document.getElementById('resultArea').style.display = 'block';
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = '';
+
+            (data.predictions || []).forEach(p => {
+                const trendIcon = p.trend === 'rising' ? '📈' : (p.trend === 'declining' ? '📉' : '➡️');
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${p.subject}</td>
+                    <td>${p.historical ? p.historical.slice(-3).join(', ') + ', ...' : '-'}</td>
+                    <td><strong>${p.predicted}</strong></td>
+                    <td>${trendIcon} ${p.trend === 'rising' ? '上升' : (p.trend === 'declining' ? '下降' : '稳定')}</td>
+                    <td>${Math.round(p.confidence * 100)}%</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        })
+        .catch(err => {
+            document.getElementById('loadingArea').style.display = 'none';
+            alert('预测失败: ' + err.message);
+        });
+}
+
+// 回车搜索
+document.getElementById('studentName').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') predictGrades();
+});
+</script>
+{% endblock %}

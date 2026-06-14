@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}家长会管理{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>家长会管理</h3>
+    {% if session['role'] in ['ms_admin','grade_leader'] %}
+    <a href="{{ url_for('parent_meeting.create') }}" class="btn btn-primary">
+      <i class="bi bi-plus-lg"></i> 创建家长会
+    </a>
+    {% endif %}
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, msg in messages %}
+        <div class="alert alert-{{ 'danger' if category=='danger' else ('warning' if category=='warning' else 'success') }} alert-dismissible fade show">
+          {{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <table class="table table-hover table-sm">
+    <thead><tr>
+      <th>标题</th><th>日期</th><th>时间</th><th>地点</th><th>年级</th><th>状态</th><th>操作</th>
+    </tr></thead>
+    <tbody>
+      {% for pm in meetings %}
+      <tr>
+        <td>{{ pm.title }}</td>
+        <td>{{ pm.meeting_date }}</td>
+        <td>{% if pm.start_time %}{{ pm.start_time }}{% if pm.end_time %} ~ {{ pm.end_time }}{% endif %}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td>{{ pm.location or '—' }}</td>
+        <td>{{ pm.grade.name if pm.grade else '—' }}</td>
+        <td>
+          {% if pm.status=='planned' %}<span class="badge bg-secondary">未开始</span>
+          {% elif pm.status=='ongoing' %}<span class="badge bg-success">进行中</span>
+          {% else %}<span class="badge bg-muted">已结束</span>{% endif %}
+        </td>
+        <td>
+          <a href="{{ url_for('parent_meeting.detail', mid=pm.id) }}" class="btn btn-sm btn-outline-primary">详情</a>
+          <a href="{{ url_for('parent_meeting.batch_signin', mid=pm.id) }}" class="btn btn-sm btn-outline-success">批量签到</a>
+          {% if session['role'] in ['ms_admin','grade_leader'] %}
+          <form method="POST" action="{{ url_for('parent_meeting.delete_meeting', mid=pm.id) }}" class="d-inline" onsubmit="return confirm('确认删除该家长会？签到记录也将被删除。')">
+            <button class="btn btn-sm btn-outline-danger">删除</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-center text-muted">暂无家长会记录，请点击「创建家长会」</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

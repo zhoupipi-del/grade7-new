@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block title %}{{ activity.title }} - 活动详情{% endblock %}
+{% block content %}
+<div class="container-fluid mt-4">
+  <a href="{{ url_for('activity.index') }}" class="btn btn-sm btn-secondary mb-2">&larr; 返回列表</a>
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <h3>{{ activity.title }}</h3>
+      <div class="text-muted mb-1">
+        <span class="badge bg-info">{{ activity.activity_type }}</span>
+        <span class="badge
+          {% if activity.status == 'draft' %}bg-secondary
+          {% elif activity.status == 'published' %}bg-primary
+          {% elif activity.status == 'ongoing' %}bg-success
+          {% elif activity.status == 'completed' %}bg-dark
+          {% else %}bg-danger{% endif %}">
+          {{ STATUS_LABELS.get(activity.status, activity.status) }}
+        </span>
+      </div>
+    </div>
+    {% if session['role'] == 'ms_admin' %}
+    <div class="d-flex gap-1">
+      <a href="{{ url_for('activity.edit', aid=activity.id) }}" class="btn btn-sm btn-outline-primary">编辑</a>
+      {% if activity.status == 'draft' %}
+      <form method="POST" action="{{ url_for('activity.publish', aid=activity.id) }}" class="d-inline">
+        <button class="btn btn-sm btn-outline-success">发布</button>
+      </form>
+      <form method="POST" action="{{ url_for('activity.delete', aid=activity.id) }}" class="d-inline"
+            onsubmit="return confirm('确认删除该活动？报名和签到数据也将被删除。')">
+        <button class="btn btn-sm btn-outline-danger">删除</button>
+      </form>
+      {% elif activity.status == 'ongoing' %}
+      <form method="POST" action="{{ url_for('activity.complete', aid=activity.id) }}" class="d-inline">
+        <button class="btn btn-sm btn-outline-dark">结束活动</button>
+      </form>
+      {% endif %}
+      {% if activity.status not in ('completed', 'cancelled') %}
+      <form method="POST" action="{{ url_for('activity.cancel_activity', aid=activity.id) }}" class="d-inline"
+            onsubmit="return confirm('确认取消该活动？')">
+        <button class="btn btn-sm btn-outline-danger">取消活动</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, msg in messages %}
+        <div class="alert alert-{{ 'danger' if category=='danger' else ('warning' if category=='warning' else 'success') }} alert-dismissible fade show">
+          {{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <!-- Info Section -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card text-bg-light">
+        <div class="card-body text-center">
+          <small class="text-muted">日期</small>
+          <p class="mb-0">{{ activity.start_date }}{% if activity.end_date and activity.end_date != activity.start_date %} ~ {{ activity.end_date }}{% endif %}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-bg-light">
+        <div class="card-body text-center">
+          <small class="text-muted">类型</small>
+          <p class="mb-0">{{ activity.activity_type }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-bg-light">
+        <div class="card-body text-center">
+          <small class="text-muted">组织者</small>
+          <p class="mb-0">{{ activity.organizer or '—' }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-bg-light">
+        <div class="card-body text-center">
+          <small class="text-muted">报名人数</small>
+          <p class="mb-0">{{ confirmed_reg }}{% if max_p > 0 %} / {{ max_p }}{% endif %}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if activity.location %}
+  <p class="text-muted"><i class="bi bi-geo-alt"></i> 地点: {{ activity.location }}</p>
+  {% endif %}
+
+  <!-- Description -->
+  {% if activity.description %}
+  <div class="card mb-4">
+    <div class="card-header">活动描述</div>
+    <div class="card-body">{{ activity.description }}</div>
+  </div>
+  {% endif %}
+
+  <!-- Tabs -->
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-reg" type="button">报名列表 ({{ confirmed_reg }})</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-signin" type="button">签到管理 ({{ total_signins }})</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-stats" type="button">统计</button>
+    </li>
+  </ul>
+
+  <div class="tab-content">
+    <!-- 报名列表 Tab -->
+    <div class="tab-pane fade show active" id="tab-reg">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span>已确认 {{ confirmed_reg }} / 已取消 {{ cancelled_reg }} / 总计 {{ total_reg }}</span>
+        <a href="{{ url_for('activity.registrations', aid=activity.id) }}" class="btn btn-sm btn-outline-primary">管理报名</a>
+      </div>
+      {% for cid, regs in reg_by_class.items() %}
+      <div class="card mb-3">
+        <div class="card-header">
+          {{ class_map.get(cid).name if class_map.get(cid) else '班级ID: ' ~ cid }} ({{ regs|length }}人)
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>学号</th><th>姓名</th><th>报名时间</th><th>状态</th></tr></thead>
+            <tbody>
+              {% for r in regs %}
+              <tr>
+                <td>{{ r.student.student_no if r.student else '—' }}</td>
+                <td>{{ r.student.name if r.student else '—' }}</td>
+                <td>{{ r.registered_at.strftime('%Y-%m-%d %H:%M') if r.registered_at else '—' }}</td>
+                <td>
+                  {% if r.status == 'registered' %}<span class="badge bg-warning">已报名</span>
+                  {% elif r.status == 'confirmed' %}<span class="badge bg-success">已确认</span>
+                  {% else %}<span class="badge bg-secondary">已取消</span>{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-center py-4 text-muted">暂无报名记录</div>
+      {% endfor %}
+    </div>
+
+    <!-- 签到管理 Tab -->
+    <div class="tab-pane fade" id="tab-signin">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span>已签到 {{ on_time_signins }} / 迟到 {{ late_signins }} / 缺席 {{ absent_signins }}</span>
+        <a href="{{ url_for('activity.signin', aid=activity.id) }}" class="btn btn-sm btn-outline-primary">签到管理</a>
+      </div>
+      {% for cid, sigs in signin_by_class.items() %}
+      <div class="card mb-3">
+        <div class="card-header">
+          {{ class_map.get(cid).name if class_map.get(cid) else '班级ID: ' ~ cid }} ({{ sigs|length }}人)
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>学号</th><th>姓名</th><th>签到时间</th><th>状态</th><th>备注</th></tr></thead>
+            <tbody>
+              {% for s in sigs %}
+              <tr>
+                <td>{{ s.student.student_no if s.student else '—' }}</td>
+                <td>{{ s.student.name if s.student else '—' }}</td>
+                <td>{{ s.signin_time.strftime('%Y-%m-%d %H:%M') if s.signin_time else '—' }}</td>
+                <td>
+                  {% if s.status == 'on_time' %}<span class="badge bg-success">准时</span>
+                  {% elif s.status == 'late' %}<span class="badge bg-warning">迟到</span>
+                  {% else %}<span class="badge bg-danger">缺席</span>{% endif %}
+                </td>
+                <td>{{ s.note or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-center py-4 text-muted">暂无签到记录</div>
+      {% endfor %}
+    </div>
+
+    <!-- 统计 Tab -->
+    <div class="tab-pane fade" id="tab-stats">
+      <div class="row g-3 mb-4">
+        <div class="col-md-4">
+          <div class="card text-bg-success">
+            <div class="card-body text-center">
+              <h5>已签到</h5>
+              <p class="display-6">{{ on_time_signins }}</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card text-bg-warning">
+            <div class="card-body text-center">
+              <h5>迟到</h5>
+              <p class="display-6">{{ late_signins }}</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card text-bg-danger">
+            <div class="card-body text-center">
+              <h5>缺席</h5>
+              <p class="display-6">{{ absent_signins }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header">签到状态分布</div>
+            <div class="card-body">
+              <canvas id="pieChart" height="250"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header">按班级签到统计</div>
+            <div class="card-body">
+              <canvas id="barChart" height="250"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Pie Chart
+(function() {
+  var pieCanvas = document.getElementById('pieChart');
+  if (pieCanvas) {
+    new Chart(pieCanvas, {
+      type: 'pie',
+      data: {
+        labels: ['已签到', '迟到', '缺席'],
+        datasets: [{
+          data: [{{ on_time_signins }}, {{ late_signins }}, {{ absent_signins }}],
+          backgroundColor: ['#198754', '#ffc107', '#dc3545']
+        }]
+      },
+      options: { plugins: { legend: { position: 'bottom' } } }
+    });
+  }
+
+  // Bar Chart
+  var barCanvas = document.getElementById('barChart');
+  if (barCanvas) {
+    var labels = [];
+    var signed = [];
+    var unsigned = [];
+    {% for s in signin_stats %}
+    labels.push('{{ s.class_name }}');
+    signed.push({{ s.signed }});
+    unsigned.push({{ s.unsigned }});
+    {% endfor %}
+
+    new Chart(barCanvas, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: '已签到', data: signed, backgroundColor: '#198754' },
+          { label: '未签到', data: unsigned, backgroundColor: '#dc3545' }
+        ]
+      },
+      options: {
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+        plugins: { legend: { position: 'bottom' } }
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{% if indicator %}编辑指标{% else %}新建指标{% endif %} - 梨江中学综合素质评价{% endblock %}
+
+{% block content %}
+<h4 class="mb-3">
+  <i class="bi bi-pencil-square me-2"></i>
+  {% if indicator %}编辑「{{ indicator.name }}」{% else %}新建评价指标{% endif %}
+</h4>
+
+<div class="card">
+  <div class="card-body" style="max-width:600px;">
+    <form method="POST">
+      <div class="mb-3">
+        <label class="form-label fw-bold">指标名称 <span class="text-danger">*</span></label>
+        <input type="text" name="name" class="form-control"
+               value="{{ indicator.name if indicator else '' }}" required placeholder="如：爱国守法">
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-bold">所属维度</label>
+          <select name="dimension" class="form-select">
+            <option value="">-- 无 --</option>
+            {% for dim in [
+              ('moral','思想品德'),('academic','学业水平'),
+              ('health','身心健康'),('art','艺术素养'),('social','社会实践')
+            ] %}
+            <option value="{{ dim[0] }}"
+              {% if indicator and indicator.dimension == dim[0] %}selected{% endif %}>
+              {{ dim[1] }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-bold">父级指标</label>
+          <select name="parent_id" class="form-select">
+            <option value="0">一级指标（无父级）</option>
+            {% for l1 in level1 %}
+            <option value="{{ l1.id }}"
+              {% if indicator and indicator.parent_id == l1.id %}selected{% endif %}>
+              {{ l1.name }}
+            </option>
+            {% endfor %}
+          </select>
+          <div class="form-text">选择父级后此为二级指标</div>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-md-4">
+          <label class="form-label fw-bold">权重 (0~1)</label>
+          <input type="number" name="weight" class="form-control" step="0.01" min="0" max="1"
+                 value="{% if indicator %}{{ indicator.weight }}{% else %}0.0{% endif %}"
+                 placeholder="0.30">
+          <div class="form-text">二级指标权重之和应为1.0</div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-bold">满分</label>
+          <input type="number" name="max_score" class="form-control" step="0.1" min="0"
+                 value="{% if indicator %}{{ indicator.max_score }}{% else %}100.0{% endif %}"
+                 placeholder="100">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-bold">排序号</label>
+          <input type="number" name="sort_order" class="form-control"
+                 value="{% if indicator %}{{ indicator.sort_order }}{% else %}0{% endif %}"
+                 placeholder="0">
+        </div>
+      </div>
+
+      <div class="mt-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-check-lg me-1"></i>{% if indicator %}保存修改{% else %}创建{% endif %}
+        </button>
+        <a href="{{ url_for('quality.indicator_list') }}" class="btn btn-outline-secondary">取消</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

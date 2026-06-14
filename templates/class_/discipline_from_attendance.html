@@ -1,0 +1,92 @@
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-arrow-left-right me-2"></i>考勤 → 违纪批量生成</h4>
+  <a href="{{ url_for('class.discipline_list') }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left"></i> 返回违纪列表
+  </a>
+</div>
+
+<p class="text-muted small">以下为今日考勤异常的记录，勾选后一键转为违纪记录。</p>
+
+{% if records %}
+<form method="post" action="{{ url_for('class.discipline_from_attendance') }}">
+  <div class="card mb-3">
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label mb-0 small">违纪类别</label>
+          <select name="category" class="form-select form-select-sm">
+            <option value="迟到缺勤" selected>迟到缺勤</option>
+            <option value="课堂违纪">课堂违纪</option>
+            <option value="仪容仪表">仪容仪表</option>
+            <option value="其他">其他</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0 small">严重程度</label>
+          <select name="type" class="form-select form-select-sm">
+            <option value="minor" selected>轻微</option>
+            <option value="warning">警告</option>
+            <option value="major">严重</option>
+            <option value="serious">重大</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0 small">扣分</label>
+          <input type="number" name="points" class="form-control form-control-sm" value="1" min="1" max="50" style="width:80px;">
+        </div>
+        <div class="col-auto">
+          <label class="form-label mb-0 small">处理措施</label>
+          <input type="text" name="action_taken" class="form-control form-control-sm" placeholder="如：口头警告" value="待班主任处理">
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm('确认生成违纪记录？')">
+            <i class="bi bi-lightning"></i> 批量生成违纪记录
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th width="40"><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>
+            <th>学生</th>
+            <th>日期</th>
+            <th>考勤状态</th>
+            <th>备注</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in records %}
+          {% set s = students_map.get(r.student_id) %}
+          <tr>
+            <td><input type="checkbox" name="attendance_ids" value="{{ r.id }}" class="record-check"></td>
+            <td><strong>{{ s.name if s else '未知' }}</strong></td>
+            <td>{{ r.record_date.strftime('%Y-%m-%d') }}</td>
+            <td><span class="badge bg-danger">{{ r.status }}</span></td>
+            <td class="small text-muted">{{ r.remark or '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</form>
+{% else %}
+<div class="card text-center py-5">
+  <div class="card-body">
+    <i class="bi bi-check-circle display-3 text-success"></i>
+    <h5 class="mt-3 text-muted">今日无缺勤记录</h5>
+    <p class="text-muted small">没有需要转为违纪的考勤异常</p>
+  </div>
+</div>
+{% endif %}
+
+<script>
+function toggleAll(el) {
+  document.querySelectorAll('.record-check').forEach(cb => cb.checked = el.checked);
+}
+</script>

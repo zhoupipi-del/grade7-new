@@ -1,0 +1,159 @@
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-calendar-check me-2"></i>请假管理</h4>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3">
+    <div class="card border-primary">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-primary">{{ leaves|length }}</div>
+        <div class="text-muted small">总申请数</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-warning">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-warning">{{ leaves|selectattr("status","equalto","pending")|list|length }}</div>
+        <div class="text-muted small">待审批</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-success">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-success">{{ leaves|selectattr("status","in",["class_approved","grade_approved"])|list|length }}</div>
+        <div class="text-muted small">已通过</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-danger">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-danger">{{ leaves|selectattr("status","equalto","rejected")|list|length }}</div>
+        <div class="text-muted small">已驳回</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if leaves %}
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>学生</th>
+        <th>请假原因</th>
+        <th>起止日期</th>
+        <th>天数</th>
+        <th>状态</th>
+        <th>申请时间</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for l in leaves %}
+      <tr>
+        <td>
+          <strong>{{ l.student.name if l.student else "?" }}</strong>
+        </td>
+        <td>
+          <span title="{{ l.reason }}">{{ l.reason[:30] }}{% if l.reason|length > 30 %}...{% endif %}</span>
+        </td>
+        <td>
+          <small>{{ l.start_date }} ~ {{ l.end_date }}</small>
+        </td>
+        <td>
+          {% set days = (l.end_date - l.start_date).days + 1 %}
+          <span class="badge bg-secondary">{{ days }}天</span>
+        </td>
+        <td>
+          {% if l.status == "pending" %}
+            <span class="badge bg-warning text-dark">待审批</span>
+          {% elif l.status == "class_approved" %}
+            <span class="badge bg-info">班主任已批</span>
+          {% elif l.status == "grade_approved" %}
+            <span class="badge bg-success">已通过</span>
+          {% elif l.status == "rejected" %}
+            <span class="badge bg-danger">已驳回</span>
+          {% else %}
+            <span class="badge bg-secondary">{{ l.status }}</span>
+          {% endif %}
+        </td>
+        <td><small class="text-muted">{{ l.created_at.strftime("%m-%d %H:%M") if l.created_at else "" }}</small></td>
+        <td>
+          {% if l.status == "pending" %}
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#approveModal{{ l.id }}">
+                <i class="bi bi-check-lg"></i> 同意
+              </button>
+              <button class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#rejectModal{{ l.id }}">
+                <i class="bi bi-x-lg"></i> 驳回
+              </button>
+            </div>
+          {% else %}
+            <small class="text-muted">
+              {% if l.class_approved_at %}
+                审批于 {{ l.class_approved_at.strftime("%m-%d %H:%M") if l.class_approved_at }}
+              {% endif %}
+            </small>
+          {% endif %}
+        </td>
+      </tr>
+      {% if l.status == "pending" %}
+      <!-- 同意确认 -->
+      <div class="modal fade" id="approveModal{{ l.id }}" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+          <div class="modal-content">
+            <form method="POST" action="{{ url_for('class.approve_leave', lid=l.id) }}">
+              <input type="hidden" name="action" value="approve">
+              <div class="modal-header">
+                <h5 class="modal-title text-success"><i class="bi bi-check-circle me-2"></i>确认同意</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body">
+                <p>同意 <strong>{{ l.student.name if l.student else "?" }}</strong> 的请假申请？</p>
+                <p class="text-muted small">{{ l.reason[:50] }}</p>
+                <p class="text-muted small">{{ l.start_date }} ~ {{ l.end_date }}</p>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-success btn-sm">确认同意</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+      <!-- 驳回确认 -->
+      <div class="modal fade" id="rejectModal{{ l.id }}" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+          <div class="modal-content">
+            <form method="POST" action="{{ url_for('class.approve_leave', lid=l.id) }}">
+              <input type="hidden" name="action" value="reject">
+              <div class="modal-header">
+                <h5 class="modal-title text-danger"><i class="bi bi-x-circle me-2"></i>确认驳回</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body">
+                <p>确定驳回 <strong>{{ l.student.name if l.student else "?" }}</strong> 的请假申请？</p>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-danger btn-sm">确认驳回</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-inbox display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无请假记录</p>
+  <p class="text-muted small">家长端提交的请假申请将显示在此处</p>
+</div>
+{% endif %}

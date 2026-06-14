@@ -1,0 +1,84 @@
+<div class="d-flex align-items-center mb-3">
+  <a href="{{ url_for('wings.portfolio') }}" class="btn btn-outline-secondary btn-sm me-3">
+    <i class="bi bi-arrow-left me-1"></i> 返回
+  </a>
+  <h4 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>{{ student.name }} 成长档案</h4>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header"><strong>基本信息</strong></div>
+      <div class="card-body">
+        <table class="table table-sm table-borderless mb-0">
+          <tr><td class="text-muted">姓名</td><td><strong>{{ student.name }}</strong></td></tr>
+          <tr><td class="text-muted">学号</td><td>{{ student.student_no or '-' }}</td></tr>
+          <tr><td class="text-muted">班级</td><td>{{ student.class_.name if student.class_ else '-' }}</td></tr>
+          <tr><td class="text-muted">总均分</td><td><span class="badge bg-primary fs-6">{{ total_avg }}</span></td></tr>
+          <tr><td class="text-muted">评分次数</td><td><span class="badge bg-secondary">{{ scores|length }}</span></td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-header"><strong><i class="bi bi-graph-up me-2"></i>五翼画像</strong></div>
+      <div class="card-body">
+        {% if scores %}
+        <canvas id="radarChart" style="max-height:250px;"></canvas>
+        {% else %}
+        <p class="text-center text-muted py-4">暂无评分数据</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 评分历史 -->
+{% if scores %}
+<div class="card mt-3">
+  <div class="card-header"><strong><i class="bi bi-clock-history me-2"></i>评分记录</strong></div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead class="table-light">
+        <tr><th>维度</th><th>分数</th><th>评分者</th><th>时间</th></tr>
+      </thead>
+      <tbody>
+      {% for s in scores %}
+      <tr>
+        <td><span class="badge bg-info">{{ s.dimension }}</span></td>
+        <td><strong>{{ s.score }}</strong></td>
+        <td>{{ s.scorer_type }}</td>
+        <td><small>{{ s.created_at.strftime('%m-%d %H:%M') if s.created_at }}</small></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if scores %}
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<script>
+new Chart(document.getElementById('radarChart'), {
+  type: 'radar',
+  data: {
+    labels: ['德','智','体','美','劳'],
+    datasets: [{
+      label: '{{ student.name }}',
+      data: [{{ dim_avgs['德'] }}, {{ dim_avgs['智'] }}, {{ dim_avgs['体'] }}, {{ dim_avgs['美'] }}, {{ dim_avgs['劳'] }}],
+      backgroundColor: 'rgba(255,99,132,0.2)',
+      borderColor: 'rgba(255,99,132,1)',
+      pointBackgroundColor: 'rgba(255,99,132,1)',
+      borderWidth: 2
+    }]
+  },
+  options: {
+    scales: { r: { min: 0, max: 10, ticks: { stepSize: 2 } } },
+    plugins: { legend: { display: false } }
+  }
+});
+</script>
+{% endif %}

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}{% if template %}编辑{% else %}创建{% endif %}消息模板 - 梨江中学{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0">
+        <i class="bi bi-{% if template %}pencil-square{% else %}plus-circle{% endif %}"></i>
+        {% if template %}编辑模板：{{ template.name }}{% else %}新建消息模板{% endif %}
+    </h4>
+    <a href="{{ url_for('message_templates.index') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+</div>
+
+<form method="post" class="card shadow-sm">
+    <div class="card-body">
+        <!-- 基本信息 -->
+        <div class="row g-3 mb-3">
+            <div class="col-md-5">
+                <label class="form-label fw-bold">模板名称 <span class="text-danger">*</span></label>
+                <input type="text" name="name" class="form-control"
+                       value="{{ template.name if template else '' }}" required
+                       placeholder="例：违纪通知、家长会通知" maxlength="100">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-bold">分类</label>
+                <select name="category" class="form-select">
+                    {% set cats = ['违纪通知','成绩通知','家长会','活动通知','请假通知','表扬','通用'] %}
+                    {% for c in cats %}
+                    <option value="{{ c }}" {{ 'selected' if template and template.category==c }}>{{ c }}</option>
+                    {% endfor %}
+                    <option value="" {{ 'selected' if not template or (template and not template.category) }}>其他/自定义</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-bold">目标角色</label>
+                <select name="target_role" class="form-select">
+                    <option value="">全部</option>
+                    <option value="parent" {{ 'selected' if template and template.target_role=='parent' }}>家长</option>
+                    <option value="student" {{ 'selected' if template and template.target_role=='student' }}>学生</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- 标题模板 -->
+        <div class="mb-3">
+            <label class="form-label fw-bold">消息标题模板</label>
+            <input type="text" name="title_template" class="form-control"
+                   value="{{ template.title_template if template else '' }}"
+                   placeholder="{student_name}同学违纪通知" maxlength="200">
+        </div>
+
+        <!-- 内容模板 + 变量提示 -->
+        <div class="row g-3">
+            <div class="col-md-8">
+                <label class="form-label fw-bold">
+                    内容模板 <span class="text-danger">*</span>
+                </label>
+                <textarea name="content_template" class="form-control font-monospace"
+                          rows="8" required
+                          placeholder="支持变量：{student_name}, {date}, {reason} ...">{{ template.content_template if template else '' }}</textarea>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-bold">可用变量</label>
+                <div class="list-group small">
+                    {% for var, desc in [
+                        ('{student_name}','学生姓名'),
+                        ('{class_name}','班级名称'),
+                        ('{score}','分数'),
+                        ('{reason}','原因'),
+                        ('{date}','日期'),
+                        ('{teacher_name}','教师姓名'),
+                        ('{meeting_title}','会议主题'),
+                        ('{meeting_date}','会议日期'),
+                        ('{meeting_location}','地点'),
+                        ('{points}','扣分'),
+                        ('{discipline_type}','违纪类型'),
+                        ('{discipline_desc}','违纪描述'),
+                        ('{semester}','学期'),
+                    ] %}
+                    <div class="list-group-item py-1 px-2">
+                        <code class="text-primary">{{ var }}</code>
+                        <small class="text-muted">{{ desc }}</small>
+                    </div>
+                    {% endfor %}
+                </div>
+                <small class="text-muted mt-2 d-block">
+                    点击右侧变量可复制到内容区。发送时自动填充学生信息。
+                </small>
+            </div>
+        </div>
+    </div>
+    <div class="card-footer text-end">
+        <a href="{{ url_for('message_templates.index') }}" class="btn btn-secondary me-2">取消</a>
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-lg"></i> {% if template %}保存修改{% else %}创建模板{% endif %}
+        </button>
+    </div>
+</form>
+{% endblock %}

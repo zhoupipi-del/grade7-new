@@ -1,0 +1,61 @@
+<div class="d-flex align-items-center mb-3">
+  <a href="{{ url_for('survey.psych_list') }}" class="btn btn-outline-secondary btn-sm me-3">
+    <i class="bi bi-arrow-left me-1"></i> 返回
+  </a>
+  <h4 class="mb-0"><i class="bi bi-bar-chart-line me-2"></i>心理筛查统计</h4>
+  {% if session.role in ('ms_admin', 'grade_leader') and high_risk %}
+  <form method="post" action="{{ url_for('survey.sync_to_assessment') }}" class="ms-auto" onsubmit="return confirm('确定将{{ high_risk }}名高风险学生同步到心理健康评估模块吗？')">
+    <button type="submit" class="btn btn-warning btn-sm">
+      <i class="bi bi-link-45deg me-1"></i> 同步到心理健康评估
+    </button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3"><div class="card border-primary"><div class="card-body text-center py-3">
+    <div class="fs-2 fw-bold text-primary">{{ surveys|length }}</div>
+    <div class="text-muted small">筛查总数</div>
+  </div></div></div>
+  <div class="col-md-3"><div class="card border-danger"><div class="card-body text-center py-3">
+    <div class="fs-2 fw-bold text-danger">{{ high_risk }}</div>
+    <div class="text-muted small">高风险 (&gt;160)</div>
+  </div></div></div>
+  <div class="col-md-3"><div class="card border-warning"><div class="card-body text-center py-3">
+    <div class="fs-2 fw-bold text-warning">{{ medium_risk }}</div>
+    <div class="text-muted small">中风险 (120-160)</div>
+  </div></div></div>
+  <div class="col-md-3"><div class="card border-success"><div class="card-body text-center py-3">
+    <div class="fs-2 fw-bold text-success">{{ low_risk }}</div>
+    <div class="text-muted small">低风险 (&lt;120)</div>
+  </div></div></div>
+</div>
+
+{% if high_risk_list %}
+<div class="card mb-3 border-danger">
+  <div class="card-header bg-danger bg-opacity-10"><strong><i class="bi bi-exclamation-triangle me-2 text-danger"></i>高风险学生列表</strong></div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>学生</th><th>班级</th><th>总分</th><th>类型</th><th>时间</th></tr></thead>
+      <tbody>
+      {% for s in high_risk_list %}
+      <tr>
+        <td><strong>{{ s.student.name if s.student else '?' }}</strong></td>
+        <td>{{ s.student.class_.name if s.student and s.student.class_ else '?' }}</td>
+        <td><span class="badge bg-danger">{{ s.total_score|int }}</span></td>
+        <td>{{ s.survey_type }}</td>
+        <td><small>{{ s.completed_at.strftime('%m-%d') if s.completed_at }}</small></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if not surveys %}
+<div class="text-center py-5">
+  <i class="bi bi-bar-chart display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无筛查数据</p>
+</div>
+{% endif %}

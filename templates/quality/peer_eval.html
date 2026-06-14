@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}学生互评 - 梨江中学综合素质评价{% endblock %}
+
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-person-lines-fill me-2"></i>学生互评</h4>
+
+<div class="row g-3">
+  <!-- 左侧：选择同学 -->
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header"><strong>选择同学进行互评</strong></div>
+      <div class="list-group list-group-flush" style="max-height:500px;overflow-y:auto;">
+        {% if me %}
+        <div class="list-group-item bg-light text-muted">
+          <i class="bi bi-person-fill me-1"></i> 我：{{ me.name }}
+        </div>
+        {% endif %}
+        {% for peer in classmates %}
+        <a href="{{ url_for('quality.peer_eval', peer_id=peer.id) }}"
+           class="list-group-item list-group-item-action {% if selected_peer and selected_peer.id == peer.id %}active{% endif %}">
+          {{ peer.student_no }} - {{ peer.name }}
+        </a>
+        {% else %}
+        <div class="list-group-item text-muted">暂无同班同学</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧：评分表单 -->
+  <div class="col-md-8">
+    {% if selected_peer %}
+    <div class="card">
+      <div class="card-header">
+        对 <strong>{{ selected_peer.name }}</strong> 的评价
+      </div>
+      <form method="POST" id="peerForm">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead class="table-light">
+              <tr>
+                <th width="130">维度</th>
+                <th>评价指标</th>
+                <th width="60">权重</th>
+                <th width="90">打分</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for group in indicators_tree %}
+            {% set l1 = group.level1 %}
+            {% set l2s = group.level2 %}
+            {% for ind in l2s %}
+            {% set existing = scores_map.get(ind.id) %}
+            <tr>
+              {% if loop.first %}
+              <td rowspan="{{ l2s|length }}" class="align-middle fw-bold" style="background:#f8f9fa;">
+                <span class="badge bg-secondary">{{ l1.name }}</span>
+              </td>
+              {% endif %}
+              <td>{{ ind.name }}</td>
+              <td class="text-center">{% if ind.weight > 0 %}{{ "%.0f"|format(ind.weight * 100) }}%{% else %}-{% endif %}</td>
+              <td>
+                <input type="number" name="score_{{ ind.id }}" class="form-control form-control-sm"
+                       min="0" max="{{ ind.max_score|int }}" step="0.5"
+                       value="{% if existing %}{{ existing.score }}{% endif %}"
+                       placeholder="0-{{ ind.max_score|int }}">
+              </td>
+            </tr>
+            {% endfor %}
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="card-footer">
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-lg me-1"></i>提交互评
+          </button>
+          <small class="text-muted ms-3">请客观公正地对同学进行评价</small>
+        </div>
+      </form>
+    </div>
+    {% elif classmates %}
+    <div class="card">
+      <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-person fs-1"></i>
+        <p class="mt-2">请在左侧选择要评价的同学</p>
+      </div>
+    </div>
+    {% else %}
+    <div class="card">
+      <div class="card-body text-center py-5 text-muted">
+        <i class="bi bi-exclamation-triangle fs-1"></i>
+        <p class="mt-2">暂无同班同学可供互评</p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}期末评语{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h5 class="mb-3"><i class="bi bi-journal-text"></i> 期末评语</h5>
+
+    {% if comments %}
+    <div class="row g-3">
+        {% for c in comments %}
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span class="fw-bold">{{ c.semester }}</span>
+                    <span class="badge bg-success">已发布</span>
+                </div>
+                <div class="card-body">
+                    <h6 class="text-primary">综合评语</h6>
+                    <p class="mb-2">{{ c.overall_comment or '暂无' }}</p>
+
+                    {% if c.strengths %}
+                    <h6 class="text-success">优点长处</h6>
+                    <p class="mb-2 small">{{ c.strengths }}</p>
+                    {% endif %}
+
+                    {% if c.improvements %}
+                    <h6 class="text-warning">待改进</h6>
+                    <p class="mb-2 small">{{ c.improvements }}</p>
+                    {% endif %}
+
+                    {% if c.teacher_suggestion %}
+                    <h6 class="text-info">教师建议</h6>
+                    <p class="mb-0 small">{{ c.teacher_suggestion }}</p>
+                    {% endif %}
+                </div>
+                <div class="card-footer text-muted small">
+                    填写人：{{ c.created_by or '—' }}
+                    · {{ c.created_at.strftime('%Y-%m-%d') if c.created_at else '' }}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center text-muted py-5">
+        <i class="bi bi-journal-x display-4"></i>
+        <p class="mt-2">暂无已发布的期末评语</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

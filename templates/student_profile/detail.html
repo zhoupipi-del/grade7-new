@@ -1,0 +1,684 @@
+{% extends "base.html" %}
+{% block title %}{{ student.name }} 学生画像 - 梨江中学{% endblock %}
+
+{% block extra_css %}
+<style>
+  .profile-header { background: linear-gradient(135deg, #1a237e 0%, #283593 100%); color: #fff; border-radius: 12px; padding: 24px 28px; margin-bottom: 20px; }
+  .profile-header .student-name { font-size: 22px; font-weight: 600; }
+  .profile-header .student-no { font-size: 13px; opacity: 0.7; }
+  .profile-header .tags .badge { font-size: 12px; margin-right: 4px; }
+  .risk-badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+  .risk-red { background: #ffcdd2; color: #c62828; }
+  .risk-yellow { background: #fff9c4; color: #f57f17; }
+  .risk-green { background: #c8e6c9; color: #2e7d32; }
+  .metric-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 16px 20px; text-align: center; }
+  .metric-card .metric-value { font-size: 28px; font-weight: 600; }
+  .metric-card .metric-label { font-size: 12px; color: #888; margin-top: 4px; }
+  .metric-card .metric-sub { font-size: 11px; color: #aaa; }
+  .section-title { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #1a237e; display: flex; align-items: center; gap: 8px; }
+  .section-title .bi { color: #1a237e; }
+  .timeline-item { position: relative; padding: 8px 0 8px 28px; border-left: 2px solid #e0e0e0; }
+  .timeline-item::before { content: ''; position: absolute; left: -6px; top: 14px; width: 10px; height: 10px; border-radius: 50%; background: #1a237e; }
+  .timeline-item.warning::before { background: #ff9800; }
+  .timeline-item.danger::before { background: #f44336; }
+  .timeline-item.success::before { background: #4caf50; }
+  .timeline-item.info::before { background: #2196f3; }
+  .timeline-item .tl-date { font-size: 11px; color: #999; }
+  .timeline-item .tl-title { font-size: 13px; font-weight: 500; }
+  .timeline-item .tl-detail { font-size: 12px; color: #666; }
+  .note-card { background: #fffef5; border: 1px solid #ffe082; border-radius: 8px; padding: 14px 18px; margin-bottom: 10px; }
+  .note-card .note-category { font-size: 11px; color: #ff8f00; margin-bottom: 4px; }
+  .note-card .note-content { font-size: 13px; color: #333; white-space: pre-wrap; }
+  .note-card .note-meta { font-size: 11px; color: #aaa; margin-top: 6px; }
+  .chart-container { position: relative; height: 260px; margin-bottom: 20px; }
+  .tab-content { padding-top: 16px; }
+  .nav-tabs .nav-link { font-size: 13px; color: #666; }
+  .nav-tabs .nav-link.active { color: #1a237e; font-weight: 500; }
+  .data-table th { font-size: 12px; color: #666; font-weight: 500; background: #fafafa; }
+  .data-table td { font-size: 13px; }
+  .process-form { display: inline; }
+  .empty-state { text-align: center; padding: 40px; color: #aaa; }
+  .empty-state .bi { font-size: 36px; margin-bottom: 8px; }
+  .wings-dim { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; margin: 2px; }
+  .wings-dim.de { background: #e8eaf6; color: #1a237e; }
+  .wings-dim.zhi { background: #e0f2f1; color: #00695c; }
+  .wings-dim.ti { background: #fff3e0; color: #e65100; }
+  .wings-dim.mei { background: #fce4ec; color: #880e4f; }
+  .wings-dim.lao { background: #f3e5f5; color: #4a148c; }
+  @media print { .navbar, .btn, form, .no-print { display: none !important; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show py-2" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <!-- ════════ 顶部：学生信息卡片 ════════ -->
+  <div class="profile-header">
+    <div class="row align-items-center">
+      <div class="col-auto">
+        <div style="width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;">
+          {{ student.name[0] }}
+        </div>
+      </div>
+      <div class="col">
+        <div class="student-name">{{ student.name }}
+          <span class="risk-badge
+            {% if risk_level == 'red' %}risk-red{% elif risk_level == 'yellow' %}risk-yellow{% else %}risk-green{% endif %}
+            ms-2">
+            {% if risk_level == 'red' %} 高风险 {% elif risk_level == 'yellow' %} 中风险 {% else %} 正常 {% endif %}
+          </span>
+          {% if not risk_latest or not risk_latest.is_processed %}
+            {% if risk_level != 'green' %}
+              <span class="badge bg-warning text-dark ms-1" style="font-size:11px">待处理</span>
+            {% endif %}
+          {% endif %}
+        </div>
+        <div class="student-no mt-1">
+          <span class="me-3">学号: {{ student.student_no }}</span>
+          <span class="me-3">{{ grade_info.name if grade_info else '' }} {{ class_info.name if class_info else '' }}</span>
+          <span class="me-3">{{ student.gender }}</span>
+          {% if student.tags_list %}
+            <span class="tags">
+              {% for tag in student.tags_list %}
+                <span class="badge bg-light text-dark">{{ tag }}</span>
+              {% endfor %}
+            </span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-auto text-end no-print">
+        <a href="{{ url_for('class.student_detail', sid=student.id) }}" class="btn btn-outline-light btn-sm me-1" title="基本信息">详情</a>
+        <a href="{{ url_for('ai_analysis.dashboard_detail', sid=student.id) }}" class="btn btn-outline-light btn-sm me-1" title="AI分析">AI分析</a>
+        <a href="{{ url_for('quality.report', sid=student.id) }}" class="btn btn-outline-light btn-sm me-1" title="素质评价">素质报告</a>
+        <a href="{{ url_for('wings.portfolio_detail', sid=student.id) }}" class="btn btn-outline-light btn-sm" title="五翼档案">五翼档案</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ 指标卡片 5格 ════════ -->
+  <div class="row g-3 mb-3">
+    <div class="col">
+      <div class="metric-card" style="border-left:3px solid #f44336">
+        <div class="metric-value text-danger">{{ discipline_total }}</div>
+        <div class="metric-label">违纪次数</div>
+        <div class="metric-sub">扣分: {{ discipline_points }} | 未处理: {{ discipline_active }}</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="metric-card" style="border-left:3px solid #2196f3">
+        <div class="metric-value text-primary">{{ att_rate }}%</div>
+        <div class="metric-label">本月出勤率</div>
+        <div class="metric-sub">迟到{{ att_late }} | 缺勤{{ att_absent }} | 请假{{ att_leave }}</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="metric-card" style="border-left:3px solid #ff9800">
+        <div class="metric-value text-warning">{{ leave_total }}</div>
+        <div class="metric-label">请假次数</div>
+        <div class="metric-sub">已批{{ leave_approved }}次 | 累计{{ leave_days }}天</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="metric-card" style="border-left:3px solid #4caf50">
+        {% if latest_scores %}
+          {% set avg = (latest_scores | sum(attribute='score') / latest_scores | length) | round(1) %}
+          <div class="metric-value text-success">{{ avg }}</div>
+        {% else %}
+          <div class="metric-value text-muted">—</div>
+        {% endif %}
+        <div class="metric-label">最近考试均分</div>
+        <div class="metric-sub">{{ latest_exam.name if latest_exam else '暂无' }}</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="metric-card" style="border-left:3px solid #9c27b0">
+        {% if wings_latest %}
+          {% set wavg = (wings_latest.values() | sum / wings_latest | length) | round(1) %}
+          <div class="metric-value text-purple" style="color:#9c27b0">{{ wavg }}</div>
+        {% else %}
+          <div class="metric-value text-muted">—</div>
+        {% endif %}
+        <div class="metric-label">五翼均分</div>
+        <div class="metric-sub">{{ wings_latest | length }}维已评</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ Tab切换: 趋势 / 时间轴 / 数据明细 ════════ -->
+  <ul class="nav nav-tabs mb-3" id="profileTab" role="tablist">
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-trends">趋势可视化</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-timeline">事件时间轴</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-data">数据明细</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-notes">班主任手记 ({{ notes | length }})</a></li>
+  </ul>
+
+  <div class="tab-content">
+
+    <!-- ── Tab 1: 趋势可视化 ── -->
+    <div class="tab-pane fade show active" id="tab-trends">
+      <div class="row g-3">
+        <!-- 成绩趋势 -->
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-graph-up"></i> 成绩趋势</div>
+              <div class="chart-container">
+                <canvas id="scoreChart" role="img" aria-label="成绩趋势图"></canvas>
+              </div>
+              {% if not score_trend %}
+                <div class="empty-state"><i class="bi bi-bar-chart"></i><p class="mt-2">暂无成绩数据</p></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <!-- 考勤趋势 -->
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-calendar-check"></i> 考勤月度走势</div>
+              <div class="chart-container">
+                <canvas id="attChart" role="img" aria-label="考勤月度走势图"></canvas>
+              </div>
+              {% if not att_total %}
+                <div class="empty-state"><i class="bi bi-calendar-x"></i><p class="mt-2">暂无考勤数据</p></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <!-- 五翼雷达图 -->
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-star"></i> 五翼综合评价</div>
+              <div class="chart-container" style="height:280px">
+                <canvas id="wingsChart" role="img" aria-label="五翼雷达图"></canvas>
+              </div>
+              {% if not wings_latest %}
+                <div class="empty-state"><i class="bi bi-star"></i><p class="mt-2">暂无评价数据</p></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <!-- AI预警历史 -->
+        <div class="col-md-4">
+          <div class="card">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-shield-exclamation"></i> AI 预警历史</div>
+              {% if risk_history %}
+                <div class="chart-container" style="height:280px">
+                  <canvas id="riskChart" role="img" aria-label="AI预警历史"></canvas>
+                </div>
+              {% else %}
+                <div class="empty-state"><i class="bi bi-shield-check"></i><p class="mt-2">无预警记录</p></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <!-- 心理 + 家访概览 -->
+        <div class="col-md-4">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-heart-pulse"></i> 心理 &amp; 家访</div>
+              {% if psych_latest %}
+                <div class="mb-2">
+                  <span class="fw-500" style="font-size:13px">MSSMHS-55 心理筛查</span>
+                  <span class="badge {% if psych_latest.total_score >= 160 %}bg-danger{% elif psych_latest.total_score >= 120 %}bg-warning text-dark{% else %}bg-success{% endif %} float-end">
+                    {{ psych_latest.total_score }}分
+                  </span>
+                </div>
+              {% else %}
+                <p class="text-muted" style="font-size:12px">未参与心理筛查</p>
+              {% endif %}
+              {% if mh_assessments %}
+                <div style="font-size:12px;color:#666">
+                  {% for mh in mh_assessments[:3] %}
+                    <div class="d-flex justify-content-between py-1 border-bottom">
+                      <span>{{ mh.scale_name or '评估' }}</span>
+                      <span class="badge {% if mh.risk_level == '高' %}bg-danger{% elif mh.risk_level == '中' %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                        {{ mh.risk_level or '未知' }}
+                      </span>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% endif %}
+              <hr>
+              <div style="font-size:12px">
+                <span>家访记录: <strong>{{ home_visits | length }}</strong> 次</span>
+                {% if home_visits %}
+                  <span class="text-muted ms-2">最近: {{ home_visits[0].visit_date.strftime('%m/%d') if home_visits[0].visit_date else '' }}</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab 2: 事件时间轴 ── -->
+    <div class="tab-pane fade" id="tab-timeline">
+      <div class="card">
+        <div class="card-body">
+          <div class="section-title"><i class="bi bi-clock-history"></i> 事件时间轴（近50条）</div>
+          {% if timeline %}
+            {% for item in timeline %}
+              <div class="timeline-item {{ item.color }}">
+                <div class="tl-date">{{ item.date.strftime('%Y-%m-%d %H:%M') if item.date else '' }}</div>
+                <div class="tl-title">
+                  {% if item.type == 'discipline' %} <i class="bi bi-exclamation-triangle text-danger"></i>
+                  {% elif item.type == 'leave' %} <i class="bi bi-calendar text-info"></i>
+                  {% elif item.type == 'risk' %} <i class="bi bi-shield-exclamation text-warning"></i>
+                  {% elif item.type == 'home_visit' %} <i class="bi bi-house-heart text-success"></i>
+                  {% elif item.type == 'mental_health' %} <i class="bi bi-heart-pulse text-secondary"></i>
+                  {% endif %}
+                  {{ item.title }}
+                  {% if item.badge %}
+                    <span class="badge bg-{{ item.color }} ms-1" style="font-size:10px">{{ item.badge }}</span>
+                  {% endif %}
+                </div>
+                {% if item.detail %}
+                  <div class="tl-detail">{{ item.detail }}</div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="empty-state"><i class="bi bi-clock"></i><p class="mt-2">暂无事件记录</p></div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab 3: 数据明细 ── -->
+    <div class="tab-pane fade" id="tab-data">
+      <div class="row g-3">
+        <!-- 违纪记录 -->
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-exclamation-diamond"></i> 违纪记录 ({{ discipline_total }})</div>
+              {% if discipline_all %}
+                <div style="max-height:400px;overflow-y:auto">
+                  <table class="table table-sm data-table">
+                    <thead><tr><th>日期</th><th>类型</th><th>描述</th><th>扣分</th><th>状态</th></tr></thead>
+                    <tbody>
+                      {% for d in discipline_all %}
+                        <tr>
+                          <td>{{ d.created_at.strftime('%m-%d') if d.created_at else '' }}</td>
+                          <td><span class="badge bg-secondary">{{ d.type }}</span></td>
+                          <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ d.description }}</td>
+                          <td class="text-danger">-{{ d.points }}</td>
+                          <td>{{ d.status }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% else %}
+                <div class="empty-state"><i class="bi bi-check-circle text-success"></i><p class="mt-2 text-success">无违纪记录</p></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <!-- 请假记录 -->
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-calendar-week"></i> 请假记录 ({{ leave_total }})</div>
+              {% if leaves %}
+                <div style="max-height:400px;overflow-y:auto">
+                  <table class="table table-sm data-table">
+                    <thead><tr><th>申请日期</th><th>起止</th><th>原因</th><th>状态</th></tr></thead>
+                    <tbody>
+                      {% for l in leaves %}
+                        <tr>
+                          <td>{{ l.created_at.strftime('%m-%d') if l.created_at else '' }}</td>
+                          <td>{{ l.start_date }}~{{ l.end_date }}</td>
+                          <td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ l.reason }}</td>
+                          <td>
+                            <span class="badge {% if 'approved' in l.status %}bg-success{% elif l.status == 'rejected' %}bg-danger{% else %}bg-warning{% endif %}">
+                              {{ l.status }}
+                            </span>
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% else %}
+                <div class="empty-state"><i class="bi bi-check-circle text-success"></i><p class="mt-2 text-success">无请假记录</p></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <!-- 家访记录 -->
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-house-heart"></i> 家访记录 ({{ home_visits | length }})</div>
+              {% if home_visits %}
+                {% for v in home_visits[:5] %}
+                  <div class="border-bottom pb-2 mb-2">
+                    <div style="font-size:12px;color:#999">{{ v.visit_date.strftime('%Y-%m-%d') if v.visit_date else '' }} · {{ v.visit_type }} · {{ v.teacher_name }}</div>
+                    <div style="font-size:13px">{{ (v.content_summary or '')[:100] }}</div>
+                    {% if v.parent_feedback %}<div style="font-size:12px;color:#4caf50">家长反馈: {{ v.parent_feedback[:60] }}</div>{% endif %}
+                  </div>
+                {% endfor %}
+              {% else %}
+                <div class="empty-state"><i class="bi bi-house"></i><p class="mt-2">暂无家访记录</p></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <!-- 期末评语 -->
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-chat-quote"></i> 期末评语 ({{ comments | length }})</div>
+              {% if comments %}
+                {% for c in comments %}
+                  <div class="border-bottom pb-2 mb-2">
+                    <div style="font-size:12px;color:#999">{{ c.semester or '' }} · {{ c.created_at.strftime('%Y-%m') if c.created_at else '' }}</div>
+                    <div style="font-size:13px">{{ (c.overall_comment or '')[:150] }}</div>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <div class="empty-state"><i class="bi bi-chat"></i><p class="mt-2">暂无期末评语</p></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab 4: 班主任手记 ── -->
+    <div class="tab-pane fade" id="tab-notes">
+      <div class="row g-3">
+        <div class="col-md-7">
+          <div class="card">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-journal-text"></i> 观察记录</div>
+              {% if notes %}
+                {% for note in notes %}
+                  <div class="note-card">
+                    <div class="note-category">
+                      {% if note.category == 'observation' %} 日常观察
+                      {% elif note.category == 'talk' %} 谈话记录
+                      {% elif note.category == 'intervention' %} 干预措施
+                      {% elif note.category == 'positive' %} 正面表现
+                      {% elif note.category == 'concern' %} 需关注
+                      {% else %} {{ note.category }}
+                      {% endif %}
+                    </div>
+                    <div class="note-content">{{ note.content }}</div>
+                    <div class="note-meta">
+                      {{ note.created_at.strftime('%Y-%m-%d %H:%M') if note.created_at else '' }}
+                      · {{ note.teacher.display_name if note.teacher else '' }}
+                      {% if note.created_at != note.updated_at %}
+                        · 编辑于 {{ note.updated_at.strftime('%m-%d %H:%M') if note.updated_at else '' }}
+                      {% endif %}
+                      {% if role in ('class_teacher', 'ms_admin') and note.teacher_id == session.user_id %}
+                        <span class="ms-3 no-print">
+                          <a href="#" class="text-muted" style="font-size:11px"
+                             onclick="editNote({{ note.id }}, '{{ note.content | e | replace("'", "\\'") }}', '{{ note.category }}')">
+                            <i class="bi bi-pencil"></i> 编辑
+                          </a>
+                          <form class="process-form" method="POST"
+                                action="{{ url_for('student_profile.delete_note', sid=student.id, nid=note.id) }}"
+                                onsubmit="return confirm('确认删除此手记？')">
+                            <button type="submit" class="btn btn-link text-danger p-0" style="font-size:11px">
+                              <i class="bi bi-trash"></i> 删除
+                            </button>
+                          </form>
+                        </span>
+                      {% endif %}
+                    </div>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <div class="empty-state">
+                  <i class="bi bi-journal-plus"></i>
+                  <p class="mt-2">暂无手记 — 在此记录对学生的日常观察、谈话、干预措施</p>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-5 no-print">
+          <!-- 新增手记 -->
+          {% if role in ('class_teacher', 'ms_admin') %}
+            <div class="card mb-3">
+              <div class="card-body">
+                <div class="section-title" id="note-form-title"><i class="bi bi-plus-circle"></i> 添加手记</div>
+                <form method="POST" action="{{ url_for('student_profile.add_note', sid=student.id) }}" id="noteForm">
+                  <input type="hidden" name="category" id="noteCategory" value="observation">
+                  <div class="mb-2">
+                    <div class="btn-group btn-group-sm w-100" role="group">
+                      <button type="button" class="btn btn-outline-secondary active" onclick="setCategory('observation', this)">观察</button>
+                      <button type="button" class="btn btn-outline-secondary" onclick="setCategory('talk', this)">谈话</button>
+                      <button type="button" class="btn btn-outline-secondary" onclick="setCategory('intervention', this)">干预</button>
+                      <button type="button" class="btn btn-outline-secondary" onclick="setCategory('positive', this)">正面</button>
+                      <button type="button" class="btn btn-outline-secondary" onclick="setCategory('concern', this)">关注</button>
+                    </div>
+                  </div>
+                  <textarea class="form-control mb-2" name="content" id="noteContent" rows="4"
+                            placeholder="记录对学生的观察、谈话、干预措施..."></textarea>
+                  <button type="submit" class="btn btn-primary btn-sm w-100">
+                    <i class="bi bi-save"></i> 保存手记
+                  </button>
+                </form>
+              </div>
+            </div>
+          {% endif %}
+          <!-- AI预警快速处置 -->
+          {% if risk_latest and not risk_latest.is_processed and role in ('class_teacher', 'grade_leader') %}
+            <div class="card border-warning">
+              <div class="card-body">
+                <div class="section-title"><i class="bi bi-shield-exclamation text-warning"></i> AI预警处置</div>
+                <p style="font-size:12px;color:#888">当前存在未处理的{{ risk_level }}预警，请选择处置方式：</p>
+                {% if risk_warnings %}
+                  <div style="max-height:120px;overflow-y:auto;font-size:12px;margin-bottom:10px">
+                    {% for w in risk_warnings[:5] %}
+                      <div class="text-{{ 'danger' if w.get('level') == 'red' else 'warning' }} mb-1">
+                        {{ w.get('text', '')[:60] }}
+                      </div>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+                <form method="POST" action="{{ url_for('student_profile.process_risk', sid=student.id, rid=risk_latest.id) }}">
+                  <div class="mb-2">
+                    <select name="action" class="form-select form-select-sm">
+                      <option value="talk">已谈话</option>
+                      <option value="home_visit">已家访</option>
+                      <option value="notify_parent">已通知家长</option>
+                      <option value="monitor">持续观察</option>
+                      <option value="resolved">问题已解决</option>
+                    </select>
+                  </div>
+                  <input type="text" name="note" class="form-control form-control-sm mb-2" placeholder="处置备注（选填）">
+                  <button type="submit" class="btn btn-warning btn-sm w-100">标记处理</button>
+                </form>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /tab-content -->
+</div>
+
+<!-- 编辑手记 Modal -->
+<div class="modal fade" id="editNoteModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST" id="editNoteForm">
+        <div class="modal-header">
+          <h5 class="modal-title">编辑手记</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="category" id="editNoteCategory" value="observation">
+          <textarea class="form-control" name="content" id="editNoteContent" rows="5"></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-sm btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/chart.min.js') }}"></script>
+<script>
+// ── 分类选择 ──
+function setCategory(cat, btn) {
+  document.getElementById('noteCategory').value = cat;
+  btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+function editNote(nid, content, category) {
+  document.getElementById('editNoteContent').value = content;
+  document.getElementById('editNoteCategory').value = category;
+  document.getElementById('editNoteForm').action = "{{ url_for('student_profile.detail', sid=student.id) }}/notes/" + nid + "/edit";
+  new bootstrap.Modal(document.getElementById('editNoteModal')).show();
+}
+
+// ── 成绩趋势 ──
+const trendCtx = document.getElementById('scoreChart');
+if (trendCtx) {
+  const trendData = {{ score_trend | tojson | safe }};
+  if (trendData.length > 0) {
+    new Chart(trendCtx, {
+      type: 'line',
+      data: {
+        labels: trendData.map(d => d.exam_name),
+        datasets: [{
+          label: '平均分',
+          data: trendData.map(d => d.avg_score),
+          borderColor: '#1a237e',
+          backgroundColor: 'rgba(26,35,126,0.1)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { min: 0, max: 100, ticks: { stepSize: 20 } },
+          x: { ticks: { maxRotation: 45, font: { size: 10 } } }
+        }
+      }
+    });
+  }
+}
+
+// ── 五翼雷达图 ──
+const wingsCtx = document.getElementById('wingsChart');
+if (wingsCtx) {
+  const wingsData = {{ wings_latest | tojson | safe }};
+  const dims = Object.keys(wingsData);
+  if (dims.length > 0) {
+    new Chart(wingsCtx, {
+      type: 'radar',
+      data: {
+        labels: dims,
+        datasets: [{
+          label: '五翼评分',
+          data: dims.map(d => wingsData[d]),
+          backgroundColor: 'rgba(26,35,126,0.15)',
+          borderColor: '#1a237e',
+          borderWidth: 2,
+          pointBackgroundColor: '#1a237e',
+          pointRadius: 3,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          r: {
+            min: 0, max: 10,
+            ticks: { stepSize: 2, font: { size: 9 }, backdropColor: 'transparent' },
+            pointLabels: { font: { size: 11 } }
+          }
+        }
+      }
+    });
+  }
+}
+
+// ── AI预警历史 ──
+const riskCtx = document.getElementById('riskChart');
+if (riskCtx) {
+  const riskHistory = {{ risk_history | tojson | safe }};
+  if (riskHistory.length > 0) {
+    const dates = riskHistory.map(r => r.scan_date || '').reverse();
+    const counts = riskHistory.map(r => r.warning_count || 0).reverse();
+    const reds = riskHistory.map(r => r.risk_level === 'red' ? r.warning_count : 0).reverse();
+    const yellows = riskHistory.map(r => r.risk_level === 'yellow' ? r.warning_count : 0).reverse();
+    new Chart(riskCtx, {
+      type: 'bar',
+      data: {
+        labels: dates,
+        datasets: [
+          { label: '红色预警', data: reds, backgroundColor: '#f44336', borderRadius: 4 },
+          { label: '黄色预警', data: yellows, backgroundColor: '#ff9800', borderRadius: 4 },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } },
+        scales: {
+          x: { stacked: true, ticks: { maxRotation: 45, font: { size: 9 } } },
+          y: { stacked: true, ticks: { stepSize: 1, font: { size: 10 } } }
+        }
+      }
+    });
+  }
+}
+
+// ── 考勤月度走势 ──
+fetch("{{ url_for('student_profile.api_trend', sid=student.id) }}")
+  .then(r => r.json())
+  .then(d => {
+    if (d.code === 0 && d.attendance && d.attendance.labels.length > 0) {
+      const attCtx = document.getElementById('attChart');
+      if (!attCtx) return;
+      new Chart(attCtx, {
+        type: 'bar',
+        data: {
+          labels: d.attendance.labels,
+          datasets: [
+            { label: '出勤', data: d.attendance.present, backgroundColor: '#4caf50', borderRadius: 4 },
+            { label: '迟到', data: d.attendance.late, backgroundColor: '#ff9800', borderRadius: 4 },
+            { label: '缺勤', data: d.attendance.absent, backgroundColor: '#f44336', borderRadius: 4 },
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } },
+          scales: {
+            x: { stacked: true, ticks: { font: { size: 10 } } },
+            y: { stacked: true, max: 100, ticks: { stepSize: 25, font: { size: 10 }, callback: v => v + '%' } }
+          }
+        }
+      });
+    }
+  });
+</script>
+{% endblock %}

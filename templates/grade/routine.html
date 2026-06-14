@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}常规评分{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5><i class="bi bi-clipboard-data me-2"></i>常规评分（{{ session.grade_name or '本年级' }}）</h5>
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
+            <i class="bi bi-plus-lg"></i> 录入评分
+        </button>
+    </div>
+
+    <!-- 评分列表 -->
+    <div class="card">
+        <div class="card-body p-0">
+            {% if scores %}
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-3">日期</th>
+                            <th>班级</th>
+                            <th>类别</th>
+                            <th>分数</th>
+                            <th>检查人</th>
+                            <th>备注</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in scores %}
+                        <tr>
+                            <td class="ps-3"><small>{{ s.record_date.strftime('%m-%d') if s.record_date else '-' }}</small></td>
+                            <td>
+                                {% set cls = classes | selectattr('id','equalto',s.class_id) | first %}
+                                <strong>{{ cls.name if cls else '班级'+s.class_id|string }}</strong>
+                            </td>
+                            <td>
+                                {% if s.category == '卫生' %}
+                                <span class="badge bg-success">卫生</span>
+                                {% elif s.category == '纪律' %}
+                                <span class="badge bg-primary">纪律</span>
+                                {% elif s.category == '两操' %}
+                                <span class="badge bg-warning text-dark">两操</span>
+                                {% elif s.category == '礼仪' %}
+                                <span class="badge bg-info">礼仪</span>
+                                {% elif s.category == '自习' %}
+                                <span class="badge bg-secondary">自习</span>
+                                {% else %}
+                                <span class="badge bg-light text-dark">{{ s.category }}</span>
+                                {% endif %}
+                            </td>
+                            <td><span class="fw-bold fs-6">{{ s.score }}</span></td>
+                            <td><small>{{ s.inspector or '-' }}</small></td>
+                            <td><small class="text-muted">{{ s.note[:20] if s.note else '-' }}{% if s.note and s.note|length > 20 %}...{% endif %}</small></td>
+                            <td>
+                                <button class="btn btn-xs btn-outline-danger" data-bs-toggle="modal" data-bs-target="#delModal{{ s.id }}">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center text-muted py-5">
+                <i class="bi bi-clipboard fs-1 d-block mb-2"></i>
+                暂无评分记录
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- 录入评分 Modal -->
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-md">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('grade.add_routine') }}">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>录入常规评分</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">班级 <span class="text-danger">*</span></label>
+                            <select name="class_id" class="form-select" required>
+                                <option value="">请选择班级</option>
+                                {% for c in classes %}
+                                <option value="{{ c.id }}">{{ c.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">类别 <span class="text-danger">*</span></label>
+                            <select name="category" class="form-select" required>
+                                <option value="卫生">卫生</option>
+                                <option value="纪律">纪律</option>
+                                <option value="两操">两操</option>
+                                <option value="礼仪">礼仪</option>
+                                <option value="自习">自习</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">评分 <span class="text-danger">*</span></label>
+                            <input type="number" name="score" class="form-control" value="0" min="0" max="100" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">日期</label>
+                            <input type="date" name="record_date" class="form-control" value="{{ now.strftime('%Y-%m-%d') }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">检查人</label>
+                            <input type="text" name="inspector" class="form-control" placeholder="检查人姓名">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">备注</label>
+                            <input type="text" name="note" class="form-control" placeholder="评分说明">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">提交评分</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 删除确认 Modals -->
+{% for s in scores %}
+<div class="modal fade" id="delModal{{ s.id }}" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('grade.delete_routine', sid=s.id) }}">
+                <div class="modal-header">
+                    <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle me-2"></i>确认删除</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>确定删除这条评分记录？</p>
+                    <p class="text-muted small mb-0">
+                        {% set cls = classes | selectattr('id','equalto',s.class_id) | first %}
+                        {{ cls.name if cls else '未知班级' }} — {{ s.category }} — {{ s.score }}分
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-danger btn-sm">确认删除</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}

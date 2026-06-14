@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}任务反馈 · 班主任{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h3 class="mb-0"><i class="bi bi-list-check text-primary"></i> 任务反馈</h3>
+            <p class="text-muted mb-0">接收上级任务，提交执行反馈</p>
+        </div>
+    </div>
+
+    <!-- 状态标签栏 -->
+    <div class="row g-2 mb-4">
+        <div class="col-sm-4">
+            <a href="{{ url_for('class.task_list') }}" class="text-decoration-none">
+                <div class="card border-0 shadow-sm text-center p-2 {% if not status %}bg-primary bg-opacity-10{% endif %}">
+                    <div class="fw-bold fs-5">{{ status_counts.pending + status_counts.done + status_counts.closed }}</div>
+                    <small class="text-muted">全部</small>
+                </div>
+            </a>
+        </div>
+        <div class="col-sm-4">
+            <a href="{{ url_for('class.task_list', status='pending') }}" class="text-decoration-none">
+                <div class="card border-0 shadow-sm text-center p-2 {% if status == 'pending' %}bg-warning bg-opacity-10{% endif %}">
+                    <div class="fw-bold fs-5 text-warning">{{ status_counts.pending }}</div>
+                    <small class="text-muted">待完成</small>
+                </div>
+            </a>
+        </div>
+        <div class="col-sm-4">
+            <a href="{{ url_for('class.task_list', status='done') }}" class="text-decoration-none">
+                <div class="card border-0 shadow-sm text-center p-2 {% if status == 'done' %}bg-success bg-opacity-10{% endif %}">
+                    <div class="fw-bold fs-5 text-success">{{ status_counts.done }}</div>
+                    <small class="text-muted">已完成</small>
+                </div>
+            </a>
+        </div>
+    </div>
+
+    {% if not tasks %}
+    <div class="card shadow-sm">
+        <div class="card-body text-center py-5 text-muted">
+            <i class="bi bi-check2-circle fs-1 d-block mb-3"></i>
+            <h5>暂无任务</h5>
+            <p>尚未收到需要执行的任务</p>
+        </div>
+    </div>
+    {% endif %}
+
+    {% for t in tasks %}
+    {% set fbs = feedbacks_by_task.get(t.id, []) %}
+    <div class="card shadow-sm mb-3 {% if t.deadline and t.status == 'pending' %}{% set days = (t.deadline - now.date()).days if now else 99 %}{% if days < 0 %}border-danger{% elif days < 3 %}border-warning{% endif %}{% endif %}">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="flex-grow-1">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <h5 class="mb-0">{{ t.title }}</h5>
+                        {% if t.status == 'pending' %}
+                            <span class="badge bg-warning text-dark">待完成</span>
+                        {% elif t.status == 'assigned' %}
+                            <span class="badge bg-info">已接收</span>
+                        {% elif t.status == 'done' %}
+                            <span class="badge bg-success">已完成</span>
+                        {% elif t.status == 'closed' %}
+                            <span class="badge bg-secondary">已关闭</span>
+                        {% endif %}
+                    </div>
+
+                    {% if t.content %}
+                    <p class="text-muted mb-2">{{ t.content[:200] }}{% if t.content|length > 200 %}...{% endif %}</p>
+                    {% endif %}
+
+                    <div class="d-flex gap-3 small text-muted">
+                        <span><i class="bi bi-person"></i> 来自：{{ t.from_user.display_name }}</span>
+                        {% if t.deadline %}
+                            {% set days = (t.deadline - now.date()).days if now else 99 %}
+                            <span class="{% if days < 0 %}text-danger{% elif days < 3 %}text-warning{% endif %}">
+                                <i class="bi bi-calendar-event"></i> 截止：{{ t.deadline.strftime('%Y-%m-%d') }}
+                                {% if t.status == 'pending' %}
+                                    {% if days < 0 %}<span class="text-danger">(已逾期{{ -days }}天)</span>
+                                    {% elif days == 0 %}<span class="text-warning">(今天截止!)</span>
+                                    {% elif days < 4 %}<span class="text-muted">(剩{{ days }}天)</span>
+                                    {% endif %}
+                                {% endif %}
+                            </span>
+                        {% endif %}
+                        <span><i class="bi bi-clock"></i> {{ t.created_at.strftime('%m-%d %H:%M') }}</span>
+                    </div>
+
+                    <!-- 已有反馈历史 -->
+                    {% if fbs %}
+                    <div class="mt-3">
+                        <small class="text-muted fw-semibold"><i class="bi bi-chat-square-text"></i> 反馈记录：</small>
+                        {% for fb in fbs %}
+                        <div class="ms-3 mt-1 p-2 bg-light rounded small">
+                            <div class="d-flex justify-content-between">
+                                <strong>{{ fb.user.display_name }}</strong>
+                                <span class="text-muted">{{ fb.created_at.strftime('%m-%d %H:%M') }}</span>
+                            </div>
+                            <p class="mb-0 mt-1">{{ fb.content }}</p>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+
+                {% if t.status == 'pending' %}
+                <div class="flex-shrink-0 ms-3">
+                    <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#executeModal{{ t.id }}">
+                        <i class="bi bi-check-lg"></i> 提交执行反馈
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 执行反馈 Modal ===== -->
+    <div class="modal fade" id="executeModal{{ t.id }}" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="POST" action="{{ url_for('class.task_feedback', tid=t.id) }}">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-check2-square"></i> 提交反馈：{{ t.title }}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info small mb-3">
+                            <i class="bi bi-info-circle"></i> 提交后任务将自动标记为「已完成」
+                        </div>
+                        <textarea class="form-control" name="content" rows="5" required
+                                  placeholder="请详细描述任务执行情况：
+例如：
+1. 已召开班会进行安全教育
+2. 排查了XX隐患并已整改
+3. 安排值日生每日检查..."></textarea>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="submit" class="btn btn-success"><i class="bi bi-check-lg"></i> 提交并完成</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

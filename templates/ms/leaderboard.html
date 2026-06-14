@@ -1,0 +1,72 @@
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-flag-fill text-danger me-2"></i>班级流动红旗</h4>
+  <form method="GET" class="d-flex gap-2">
+    <select name="grade_id" class="form-select form-select-sm" style="width:160px;" onchange="this.form.submit()">
+      <option value="">全部年级</option>
+      {% for g in grades %}
+      <option value="{{ g.id }}" {% if grade_filter == g.id %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+{% if leaderboard_data %}
+<div class="row g-3">
+  {% set medals = {1: "🥇", 2: "🥈", 3: "🥉"} %}
+  {% for item in leaderboard_data %}
+  <div class="col-md-3">
+    <div class="card {% if item.rank <= 3 %}border-warning{% endif %} h-100">
+      <div class="card-body text-center">
+        {% if item.rank <= 3 %}
+        <div class="display-3 mb-1">{{ medals[item.rank] }}</div>
+        {% else %}
+        <div class="fs-3 fw-bold text-muted mb-1">#{{ item.rank }}</div>
+        {% endif %}
+        <h5 class="card-title mb-1">{{ item.class_name }}</h5>
+        <div class="fs-3 fw-bold text-primary">{{ item.total }}</div>
+        <div class="text-muted small">总得分（{{ item.count }}次评分）</div>
+        {% if item.rank == 1 %}
+        <span class="badge bg-danger mt-2"><i class="bi bi-star-fill"></i> 流动红旗</span>
+        {% elif item.rank == 2 %}
+        <span class="badge bg-secondary mt-2">第二名</span>
+        {% elif item.rank == 3 %}
+        <span class="badge bg-warning text-dark mt-2">第三名</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<hr class="my-4">
+
+<!-- 排名进度条 -->
+<h5 class="mb-3"><i class="bi bi-bar-chart me-2"></i>得分排行</h5>
+{% set max_score = leaderboard_data[0].total if leaderboard_data else 1 %}
+{% for item in leaderboard_data %}
+<div class="mb-2">
+  <div class="d-flex justify-content-between mb-1">
+    <small>
+      {% if item.rank <= 3 %}{{ medals[item.rank] }}{% else %}#{{ item.rank }}{% endif %}
+      {{ item.class_name }}
+    </small>
+    <small class="fw-bold">{{ item.total }}分</small>
+  </div>
+  <div class="progress" style="height: 24px;">
+    <div class="progress-bar {% if item.rank == 1 %}bg-danger{% elif item.rank == 2 %}bg-warning text-dark{% elif item.rank == 3 %}bg-info text-dark{% else %}bg-primary{% endif %}"
+         style="width: {{ (item.total / max_score * 100)|round|int if max_score > 0 else 0 }}%">
+      {% if item.rank <= 3 %}{{ item.total }}分{% endif %}
+    </div>
+  </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-trophy display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无评分数据</p>
+  <p class="text-muted small">请先在「常规评分」中录入班级评分数据</p>
+  <a href="{{ url_for('ms.routine_overview') }}" class="btn btn-primary mt-2">
+    <i class="bi bi-plus-circle me-1"></i> 前往录入
+  </a>
+</div>
+{% endif %}

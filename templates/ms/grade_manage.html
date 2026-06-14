@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}年级管理 — 德育平台{% endblock %}
+{% block content %}
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0"><i class="bi bi-diagram-3"></i> 年级管理</h3>
+    <a href="{{ url_for('ms.grade_create') }}" class="btn btn-primary btn-sm">
+      <i class="bi bi-plus-lg"></i> 新增年级
+    </a>
+  </div>
+
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in msgs %}
+      <div class="alert alert-{{ 'danger' if cat=='danger' else ('warning' if cat=='warning' else 'success') }} alert-dismissible fade show">
+        {{ msg }}<button class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endwith %}
+
+  <div class="card">
+    <div class="card-body p-0">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th style="width:60px">#</th>
+            <th>年级名称</th>
+            <th style="width:100px">排序</th>
+            <th style="width:180px">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for g in grades %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td><strong>{{ g.name }}</strong></td>
+            <td>{{ g.sort_order }}</td>
+            <td>
+              <a href="{{ url_for('ms.grade_edit', gid=g.id) }}" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-pencil"></i> 编辑
+              </a>
+              <form method="POST" action="{{ url_for('ms.grade_delete', gid=g.id) }}" class="d-inline"
+                    onsubmit="return confirm('确定删除该年级？有班级的年级无法删除。')">
+                <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i> 删除</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-muted py-4">暂无年级数据</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
