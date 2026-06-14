@@ -10,17 +10,10 @@ from blueprints.audit_log import audit_log
 from decorators import login_required, require_role, require_permission
 from datetime import date, datetime, timezone, timedelta
 from utils.db_utils import safe_commit
+from utils import get_local_now
 
 # 声呐事件总线（违纪实时广播）
 from utils.sonar_bus import publish_discipline
-
-# 中国标准时间 (UTC+8)
-CST = timezone(timedelta(hours=8))
-
-
-def get_local_now():
-    """获取当前国内标准时间"""
-    return datetime.now(CST)
 
 class_bp = Blueprint("class", __name__, url_prefix="/class")
 

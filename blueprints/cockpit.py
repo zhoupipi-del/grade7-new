@@ -1,6 +1,6 @@
 """数据驾驶舱 — 交互式全景仪表盘 + 德育声呐实时战情大屏"""
 from flask import (Blueprint, render_template, request, jsonify, session,
-                   send_file, Response, stream_with_context)
+                   send_file, Response, stream_with_context, url_for)
 from models import (db, Student, Class, Grade, User, Subject, Exam, Score,
                     DisciplineRecord, Attendance, RoutineScore, WingsScore,
                     Notice, NoticeReceipt, HomeVisit, LeaveRequest,
@@ -166,7 +166,7 @@ def data_api():
             JOIN notices n ON nr.notice_id = n.id
             WHERE n.grade_id = :gid AND nr.status IN ('read', 'signed')
         """), {"gid": grade_id}).scalar()
-        notice_read_rate = round(read_count / total_receipts_needed * 100, 1) if read_count else 0
+        notice_read_rate = round(int(read_count or 0) / total_receipts_needed * 100, 1) if read_count else 0
 
     # ── 家访统计（优化：一次聚合查询）──
     visit_count = HomeVisit.query.filter(
@@ -219,6 +219,7 @@ def data_api():
               AND a.status IN ('completed', 'ongoing')
               AND ar.status = 'confirmed'
         """), {"gid_self": grade_id}).scalar() or 0
+        activity_reg_count = int(activity_reg_count)
 
     # ── 家长会参与率（优化：一次 JOIN 替代两次查询）──
     pm_total = ParentMeeting.query.filter_by(grade_id=grade_id).count()
@@ -231,7 +232,7 @@ def data_api():
             JOIN parent_meetings pm ON pms.meeting_id = pm.id
             WHERE pm.grade_id = :gid
         """), {"gid": grade_id}).scalar() or 0
-        pm_rate = round(pm_signin_count / (pm_total * 30) * 100, 1)
+        pm_rate = round(int(pm_signin_count) / (pm_total * 30) * 100, 1)
 
     # ── 五翼均分（优化：一次聚合查询）──
     wing_dimensions = db.session.query(

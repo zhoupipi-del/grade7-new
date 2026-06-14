@@ -12,6 +12,8 @@ from models import (
 from decorators import login_required, require_role
 from datetime import date, datetime
 import json as json_mod
+from utils import get_local_now
+from utils.db_utils import safe_commit
 from blueprints.discipline_utils import send_appeal_notifications
 
 parent_portal_bp = Blueprint("parent_portal", __name__, url_prefix="/parent")
@@ -294,7 +296,7 @@ def mark_notice_read(nid):
 
     if receipt and receipt.status == "unread":
         receipt.status = "read"
-        receipt.read_at = datetime.utcnow()
+        receipt.read_at = get_local_now()
         safe_commit()
 
     return jsonify({"ok": True})
@@ -315,7 +317,7 @@ def sign_notice(nid):
 
     if receipt:
         receipt.status = "signed"
-        receipt.signed_at = datetime.utcnow()
+        receipt.signed_at = get_local_now()
         receipt.signed_by = session.get("display_name", "")
         safe_commit()
         return jsonify({"ok": True})
@@ -474,7 +476,6 @@ def leave_list():
 @require_role("parent")
 def appeal(discipline_id):
     """家长提交申诉"""
-    from utils.db_utils import safe_commit
     student = _get_my_student()
     if not student:
         return redirect(url_for("parent_portal.dashboard"))

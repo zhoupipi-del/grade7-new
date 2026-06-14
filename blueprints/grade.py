@@ -9,6 +9,7 @@ from blueprints.common import notify_parent
 from blueprints.audit_log import audit_log
 from decorators import login_required, require_role, scope_query
 from utils.db_utils import safe_commit
+from utils import get_local_now
 from datetime import date, datetime, timedelta
 
 grade_bp = Blueprint("grade", __name__)
@@ -93,7 +94,7 @@ def task_feedback(tid):
     task = Task.query.get(tid)
     if task and request.form.get("action") == "close":
         task.status = "done"
-        task.finished_at = datetime.utcnow()
+        task.finished_at = get_local_now()
     safe_commit()
     flash("反馈已提交", "success")
     return redirect(url_for("grade.task_list"))
@@ -335,7 +336,7 @@ def resolve_discipline(rid):
         flash("无权操作", "danger")
         return redirect(url_for("grade.discipline_list"))
     record.status = "resolved"
-    record.resolved_at = datetime.utcnow()
+    record.resolved_at = get_local_now()
     safe_commit()
     flash("已标记为已解决", "success")
     return redirect(url_for("grade.discipline_list"))

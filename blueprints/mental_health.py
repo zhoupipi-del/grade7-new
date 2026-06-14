@@ -4,6 +4,7 @@ from models import db, Student, Class, Grade, User, MentalHealthAssessment, Ment
 from models import DisciplineRecord, Score, Exam, Subject, LeaveRequest, Attendance
 from decorators import login_required, require_role
 from datetime import date, datetime, timedelta
+from utils import get_local_now
 from utils.db_utils import safe_commit
 
 mental_health_bp = Blueprint("mental_health", __name__, url_prefix="/mental-health")
@@ -233,7 +234,7 @@ def edit(aid):
         assessment.recommendations = request.form.get("recommendations", "")
         assessment.need_intervention = request.form.get("need_intervention") == "on"
         assessment.intervention_plan = request.form.get("intervention_plan", "")
-        assessment.updated_at = datetime.utcnow()
+        assessment.updated_at = get_local_now()
 
         safe_commit()
 

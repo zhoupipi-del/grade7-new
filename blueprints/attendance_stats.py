@@ -392,9 +392,9 @@ def student_detail(sid):
         allowed = True
 
     if not allowed:
-        flash("无权查看此学生的考勤详情", "danger")
-        from flask import redirect as redir
-        return redir(url_for("attendance_stats.index"))
+        from flask import flash as _flash, redirect as _redir, url_for as _url_for
+        _flash("无权查看此学生的考勤详情", "danger")
+        return _redir(_url_for("attendance_stats.index"))
 
     today = date.today()
     # 最近90天的考勤记录

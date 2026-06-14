@@ -1321,11 +1321,24 @@ def api_regression():
 @ai_analysis_bp.route("/dashboard")
 @require_role("ms_admin", "grade_leader", "class_teacher")
 def dashboard():
-    """统一仪表盘：每个学生展示问卷分数 + 心理健康评估 + AI行为预警"""
+    """全景德育总账：全校学生静态底账 — 问卷 + 评估 + 综合亮灯"""
     role = session.get("role", "")
     grade_id = session.get("grade_id")
     class_id = session.get("class_id")
     today = date.today()
+
+    # ── 班级列表（供前端筛选器） ──
+    if role == "ms_admin":
+        all_classes = Class.query.order_by(Class.name).all()
+    elif role == "grade_leader" and grade_id:
+        all_classes = Class.query.filter_by(grade_id=grade_id).order_by(Class.name).all()
+    elif role in ("class_teacher", "teacher") and class_id:
+        all_classes = Class.query.filter_by(id=class_id).all()
+    else:
+        all_classes = Class.query.order_by(Class.name).all()
+
+    # 前端筛选参数
+    filter_class_id = request.args.get("class_id", type=int)
 
     # 1. 确定学生范围
     students_q = Student.query.filter_by(is_active=True)
@@ -1334,15 +1347,20 @@ def dashboard():
     elif role in ("class_teacher", "teacher") and class_id:
         students_q = students_q.filter_by(class_id=class_id)
 
+    # 前端传入的班级筛选（覆盖角色默认范围）
+    if filter_class_id:
+        students_q = students_q.filter_by(class_id=filter_class_id)
+
     all_students = students_q.options(
         joinedload(Student.class_)
     ).order_by(Student.class_id, Student.name).all()
     student_ids = [s.id for s in all_students]
 
     if not student_ids:
-        return render_template("ai_analysis/dashboard.html", students=[], stats={})
+        return render_template("ai_analysis/dashboard.html", students=[], stats={},
+                               classes=all_classes, filter_class_id=filter_class_id, today=today)
 
-    # 2. 批量查询三种数据源
+    # 2. 批量查询数据源
     # 2a. 心理问卷（MSSMHS-55，每人最新一条）
     psych_map = {}
     psychs = PsychSurvey.query.filter(
@@ -1363,48 +1381,92 @@ def dashboard():
         if a.student_id not in assessment_map:
             assessment_map[a.student_id] = a
 
-    # 2c. 最新的AI扫描记录
-    latest_scan = db.session.execute(
-        text("SELECT student_id, MAX(scan_date) FROM risk_records WHERE student_id IN :sids GROUP BY student_id"),
-        {"sids": tuple(student_ids) if len(student_ids) > 1 else f"({student_ids[0]})"}
-    ).fetchall()
-    latest_scan_dates = {row[0]: row[1] for row in latest_scan}
+    # 2c. 违纪记录（本学期，用于综合亮灯）
+    semester_start = today.replace(month=9, day=1) if today.month >= 9 else today.replace(month=2, day=1)
+    disc_map = defaultdict(list)
+    disc_records = DisciplineRecord.query.filter(
+        DisciplineRecord.student_id.in_(student_ids),
+        DisciplineRecord.created_at >= semester_start,
+    ).all()
+    for r in disc_records:
+        disc_map[r.student_id].append(r)
 
-    risk_map = {}
-    if latest_scan_dates:
-        risk_records = RiskRecord.query.filter(
-            RiskRecord.student_id.in_(student_ids),
-        ).all()
-        for r in risk_records:
-            if r.student_id in latest_scan_dates and r.scan_date == latest_scan_dates[r.student_id]:
-                risk_map[r.student_id] = r
+    # 2d. 考勤出勤率（最近30天，用于综合亮灯）
+    month_start = today.replace(day=1)
+    att_map = defaultdict(list)
+    att_records = Attendance.query.filter(
+        Attendance.student_id.in_(student_ids),
+        Attendance.record_date >= today - timedelta(days=30),
+    ).all()
+    for r in att_records:
+        att_map[r.student_id].append(r)
 
-    # 3. 组装学生数据
+    # 2e. 问题学生档案（用于标记）
+    problem_map = {}
+    problems = ProblemStudent.query.filter(
+        ProblemStudent.student_id.in_(student_ids),
+        ProblemStudent.status == "active",
+    ).all()
+    for p in problems:
+        if p.student_id not in problem_map:
+            problem_map[p.student_id] = p
+
+    # 3. 组装学生数据（综合亮灯：问卷+评估+违纪+考勤→综合风险等级）
     student_data = []
     for stu in all_students:
         sid = stu.id
         psych = psych_map.get(sid)
         assessment = assessment_map.get(sid)
-        risk = risk_map.get(sid)
 
-        # 计算综合风险等级（取三种数据源中最严重的）
+        # 计算综合风险等级
         levels = {"green": 0, "yellow": 1, "red": 2}
         combined = "green"
+
+        # 来源1: 心理问卷
         if psych and psych.total_score:
             if psych.total_score >= 160:
                 combined = "red"
-            elif psych.total_score >= 120 and combined == "green":
+            elif psych.total_score >= 120 and levels.get(combined, 0) < 1:
                 combined = "yellow"
 
+        # 来源2: 心理评估
         if assessment and assessment.risk_level:
-            lvl = assessment.risk_level
-            if levels.get(lvl, 0) > levels.get(combined, 0):
-                combined = lvl
+            if levels.get(assessment.risk_level, 0) > levels.get(combined, 0):
+                combined = assessment.risk_level
 
-        if risk and risk.risk_level:
-            lvl = risk.risk_level
-            if levels.get(lvl, 0) > levels.get(combined, 0):
-                combined = lvl
+        # 来源3: 违纪记录
+        major_count = sum(1 for r in disc_map.get(sid, []) if r.type == "major")
+        serious_count = sum(1 for r in disc_map.get(sid, []) if r.type == "serious")
+        disc_total = sum(1 for r in disc_map.get(sid, []))
+        if major_count >= 1 or serious_count >= 2:
+            combined = "red"
+        elif serious_count >= 1 or disc_total >= 3:
+            if levels.get(combined, 0) < 1:
+                combined = "yellow"
+
+        # 来源4: 出勤率
+        atts = att_map.get(sid, [])
+        if atts:
+            att_total = len(atts)
+            absent_count = sum(1 for r in atts if r.status == "absent")
+            absent_rate = absent_count / att_total
+            if absent_rate >= 0.1:  # 缺勤率>=10%
+                if levels.get(combined, 0) < 1:
+                    combined = "yellow"
+            if absent_rate >= 0.2:  # 缺勤率>=20%
+                combined = "red"
+
+        # 来源5: 问题学生档案
+        is_problem = sid in problem_map
+
+        # 出勤率计算
+        attendance_rate = None
+        if atts:
+            present_count = sum(1 for r in atts if r.status == "present")
+            attendance_rate = round(present_count / len(atts) * 100, 1)
+
+        # 违纪扣分合计
+        discipline_points = sum(int(r.points or 0) for r in disc_map.get(sid, []))
 
         student_data.append({
             "student": stu,
@@ -1416,20 +1478,20 @@ def dashboard():
                 )
             ),
             "assessment": assessment,
-            "risk_record": risk,
+            "disc_count": disc_total,
+            "discipline_points": discipline_points,
+            "attendance_rate": attendance_rate,
+            "is_problem": is_problem,
             "combined_risk": combined,
         })
 
-    # 4. 统计（含处置率）
-    total_risks = sum(1 for d in student_data if d["risk_record"])
-    processed_risks = sum(1 for d in student_data if d["risk_record"] and d["risk_record"].is_processed)
+    # 4. 统计
     stats = {
         "total": len(student_data),
         "has_psych": sum(1 for d in student_data if d["psych_score"] is not None),
         "has_assessment": sum(1 for d in student_data if d["assessment"]),
-        "has_risk": total_risks,
-        "processed_risks": processed_risks,
-        "disposal_rate": round(processed_risks / total_risks * 100, 1) if total_risks > 0 else 0,
+        "has_discipline": sum(1 for d in student_data if d["disc_count"] > 0),
+        "is_problem": sum(1 for d in student_data if d["is_problem"]),
         "red": sum(1 for d in student_data if d["combined_risk"] == "red"),
         "yellow": sum(1 for d in student_data if d["combined_risk"] == "yellow"),
         "green": sum(1 for d in student_data if d["combined_risk"] == "green"),
@@ -1438,6 +1500,8 @@ def dashboard():
     return render_template("ai_analysis/dashboard.html",
                            students=student_data,
                            stats=stats,
+                           classes=all_classes,
+                           filter_class_id=filter_class_id,
                            today=today)
 
 

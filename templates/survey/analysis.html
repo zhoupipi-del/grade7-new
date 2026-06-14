@@ -1,40 +1,540 @@
+{% extends "base.html" %}
+{% block title %}心理多维分析 - 梨江中学德育管理平台{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* 雷达图容器 */
+  #radar-container { width: 100%; height: 480px; }
+  #radar-container-sm { width: 100%; height: 300px; }
+
+  /* 筛选栏 */
+  .filter-bar {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 12px 20px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .filter-bar select {
+    min-width: 180px;
+  }
+
+  /* 统计卡片 */
+  .stat-card {
+    border: none;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    transition: transform 0.2s;
+    box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  }
+  .stat-card:hover { transform: translateY(-2px); }
+  .stat-card .stat-num { font-size: 2rem; font-weight: 700; }
+  .stat-card .stat-label { font-size: .85rem; color: #6c757d; margin-top: 4px; }
+
+  /* 维度最高分表格 */
+  .dim-top-table { font-size: .88rem; }
+  .dim-top-table td, .dim-top-table th { vertical-align: middle; padding: 8px 12px; }
+  .dim-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: .75rem;
+    font-weight: 600;
+    color: #fff;
+  }
+  .dim-badge.high { background: #dc3545; }
+  .dim-badge.medium { background: #ffc107; color: #333; }
+  .dim-badge.low { background: #28a745; }
+
+  /* AI面板 */
+  .ai-panel {
+    border: 2px dashed #dee2e6;
+    border-radius: 12px;
+    padding: 24px;
+    min-height: 200px;
+  }
+  .ai-panel.generating {
+    border-color: #0d6efd;
+    background: rgba(13, 110, 253, .03);
+  }
+  .ai-content {
+    line-height: 1.8;
+    color: #333;
+  }
+  .ai-content h1, .ai-content h2, .ai-content h3, .ai-content h4 {
+    margin-top: 16px;
+    margin-bottom: 8px;
+    color: #1a1a2e;
+  }
+  .ai-content h2 { font-size: 1.3rem; border-bottom: 2px solid #e9ecef; padding-bottom: 6px; }
+  .ai-content h3 { font-size: 1.1rem; }
+  .ai-content ul, .ai-content ol { padding-left: 24px; }
+  .ai-content li { margin-bottom: 4px; }
+  .ai-content p { margin-bottom: 10px; }
+  .ai-content strong { color: #0d6efd; }
+
+  /* 班级对比雷达 */
+  .class-compare-section { margin-top: 24px; }
+
+  /* 空状态 */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #adb5bd;
+  }
+  .empty-state i { font-size: 4rem; margin-bottom: 16px; }
+
+  @media (max-width: 768px) {
+    #radar-container { height: 320px; }
+    .filter-bar { flex-direction: column; align-items: stretch; }
+    .filter-bar select { min-width: 100%; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
 <div class="d-flex align-items-center mb-3">
   <a href="{{ url_for('survey.psych_list') }}" class="btn btn-outline-secondary btn-sm me-3">
     <i class="bi bi-arrow-left me-1"></i> 返回
   </a>
-  <h4 class="mb-0"><i class="bi bi-graph-up-arrow me-2"></i>问卷分析</h4>
+  <h4 class="mb-0"><i class="bi bi-radar me-2"></i>心理多维分析</h4>
+  <span class="badge bg-primary ms-2">MSSMHS-55</span>
+  <span class="text-muted ms-auto">
+    有效问卷 <strong id="total-count">{{ mssmhs_count }}</strong> 份
+  </span>
 </div>
 
-<div class="alert alert-info">
-  <i class="bi bi-info-circle me-2"></i> 问卷调查结果将在家长完成问卷后生成分析报告。
+<!-- 筛选栏 -->
+<div class="filter-bar">
+  <i class="bi bi-funnel text-muted"></i>
+  <label class="form-label mb-0 text-muted" style="font-size:.85rem;">筛选班级:</label>
+  <select id="filter-class" class="form-select form-select-sm">
+    <option value="">全部班级</option>
+    {% for c in classes %}
+    <option value="{{ c.id }}">{{ c.name }}</option>
+    {% endfor %}
+  </select>
+  <button id="btn-refresh" class="btn btn-primary btn-sm">
+    <i class="bi bi-arrow-clockwise me-1"></i>刷新数据
+  </button>
 </div>
 
-{% if surveys %}
-<div class="row g-3">
-  {% for survey in surveys %}
-  <div class="col-12">
-    <div class="card">
-      <div class="card-header d-flex justify-content-between">
-        <strong>{{ survey.student.name if survey.student else '?' }} - {{ survey.survey_type }}</strong>
-        <small class="text-muted">{{ survey.completed_at.strftime('%Y-%m-%d') if survey.completed_at }}</small>
-      </div>
+<!-- 统计卡片 -->
+<div class="row g-3 mb-4" id="stat-cards">
+  <div class="col-md-3 col-6">
+    <div class="stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff;">
+      <div class="stat-num" id="stat-total">--</div>
+      <div class="stat-label" style="color: rgba(255,255,255,.8);">有效问卷</div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: #fff;">
+      <div class="stat-num" id="stat-high">--</div>
+      <div class="stat-label" style="color: rgba(255,255,255,.8);">高风险</div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="stat-card" style="background: linear-gradient(135deg, #ffd89b 0%, #19547b 100%); color: #fff;">
+      <div class="stat-num" id="stat-medium">--</div>
+      <div class="stat-label" style="color: rgba(255,255,255,.8);">中风险</div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="stat-card" style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); color: #333;">
+      <div class="stat-num" id="stat-low">--</div>
+      <div class="stat-label">低风险</div>
+    </div>
+  </div>
+</div>
+
+<!-- 主内容：雷达图 + 维度详情 -->
+<div class="row g-4">
+  <!-- 左侧：雷达图 -->
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm" style="border-radius: 12px;">
       <div class="card-body">
-        <div class="progress" style="height: 30px;">
-          {% set total = survey.total_score or 0 %}
-          {% set pct = (total / 275 * 100)|int if total else 0 %}
-          <div class="progress-bar {% if total > 160 %}bg-danger{% elif total > 120 %}bg-warning{% else %}bg-success{% endif %}"
-               style="width: {{ pct }}%">
-            {{ total|int }} / 275
-          </div>
+        <h6 class="card-title"><i class="bi bi-diagram-3 me-2"></i>十维度心理雷达图</h6>
+        <div id="radar-container"></div>
+      </div>
+    </div>
+
+    <!-- 班级对比 -->
+    <div class="class-compare-section" id="class-compare-section" style="display:none;">
+      <div class="card border-0 shadow-sm" style="border-radius: 12px;">
+        <div class="card-body">
+          <h6 class="card-title"><i class="bi bi-people me-2"></i>各班级维度对比</h6>
+          <div id="radar-container-sm"></div>
         </div>
       </div>
     </div>
   </div>
-  {% endfor %}
+
+  <!-- 右侧：维度详情 + 最高分 -->
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm mb-4" style="border-radius: 12px;">
+      <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-list-ol me-2"></i>各维度均分详情</h6>
+        <div id="dim-detail-list"></div>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4" style="border-radius: 12px;">
+      <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-trophy me-2 text-warning"></i>维度最高分学生</h6>
+        <div class="table-responsive">
+          <table class="table table-sm dim-top-table" id="top-students-table">
+            <thead><tr><th>维度</th><th>最高分</th><th>学生</th><th>班级</th></tr></thead>
+            <tbody id="top-students-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
-{% else %}
-<div class="text-center py-5">
-  <i class="bi bi-file-earmark-bar-graph display-1 text-muted"></i>
-  <p class="text-muted mt-3">暂无问卷数据可供分析</p>
+
+<!-- AI 宏观分析面板 -->
+<div class="mt-4" id="ai-section">
+  <div class="card border-0 shadow-sm" style="border-radius: 12px;">
+    <div class="card-header bg-transparent d-flex justify-content-between align-items-center" style="border-bottom: 1px solid #eee;">
+      <h6 class="mb-0"><i class="bi bi-robot me-2 text-primary"></i>AI 宏观战术分析</h6>
+      {% if session.role in ('ms_admin', 'grade_leader') %}
+      <button id="btn-generate-ai" class="btn btn-primary btn-sm" onclick="generateAIReport()">
+        <i class="bi bi-magic me-1"></i>一键生成白皮书
+      </button>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <div class="ai-panel" id="ai-panel">
+        <div class="empty-state">
+          <i class="bi bi-robot"></i>
+          <p>点击「一键生成白皮书」，AI 将基于全校 {{ mssmhs_count }} 份 MSSMHS-55 问卷数据<br>生成《梨江中学学生心理健康宏观分析报告》</p>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
-{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
+<script>
+(function() {
+  var radarChart = null;
+  var compareChart = null;
+
+  /* ── 加载维度数据 ── */
+  function loadDimensionData() {
+    var classId = document.getElementById('filter-class').value;
+    var url = '{{ url_for("survey.dimension_data") }}';
+    var params = [];
+    if (classId) params.push('class_id=' + encodeURIComponent(classId));
+    if (params.length) url += '?' + params.join('&');
+
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) { renderDashboard(data); })
+      .catch(function(e) {
+        console.error('加载维度数据失败:', e);
+      });
+  }
+
+  /* ── 渲染整个仪表盘 ── */
+  function renderDashboard(data) {
+    var indicator = data.indicator || [];
+    var average = data.average || [];
+    var maxScores = data.max || [];
+    var maxPerDim = data.max_per_dim || 30;
+    var count = data.count || 0;
+    var riskDist = data.risk_distribution || {};
+    var topStudents = data.top_students || [];
+    var classComp = data.class_comparison || [];
+
+    // 更新统计卡片
+    document.getElementById('stat-total').textContent = count;
+    document.getElementById('stat-high').textContent = riskDist.high || 0;
+    document.getElementById('stat-medium').textContent = riskDist.medium || 0;
+    document.getElementById('stat-low').textContent = riskDist.low || 0;
+    document.getElementById('total-count').textContent = count;
+
+    // 雷达图
+    renderRadar(indicator, average, maxScores, maxPerDim);
+
+    // 维度详情列表
+    renderDimDetail(indicator, average, maxScores, maxPerDim);
+
+    // 最高分学生表
+    renderTopStudents(topStudents);
+
+    // 班级对比
+    if (classComp.length >= 2) {
+      renderClassComparison(indicator, classComp);
+      document.getElementById('class-compare-section').style.display = 'block';
+    } else {
+      document.getElementById('class-compare-section').style.display = 'none';
+    }
+  }
+
+  /* ── 渲染主雷达图 ── */
+  function renderRadar(indicator, average, maxScores, maxPerDim) {
+    var dom = document.getElementById('radar-container');
+    if (!dom) return;
+    if (!radarChart) {
+      radarChart = echarts.init(dom);
+    }
+
+    var option = {
+      tooltip: {
+        trigger: 'item',
+        formatter: function(params) {
+          var s = '<strong>' + params.seriesName + '</strong><br/>';
+          (params.value || []).forEach(function(v, i) {
+            s += indicator[i] + ': ' + v + ' / ' + maxPerDim + '<br/>';
+          });
+          return s;
+        }
+      },
+      legend: {
+        data: ['全校平均', '维度最高分'],
+        bottom: 0
+      },
+      radar: {
+        indicator: indicator.map(function(name) {
+          return { name: name, max: maxPerDim };
+        }),
+        shape: 'polygon',
+        splitNumber: 5,
+        axisName: {
+          color: '#333',
+          fontSize: 12
+        },
+        splitArea: {
+          areaStyle: {
+            color: ['rgba(13,110,253,.02)', 'rgba(13,110,253,.05)',
+                    'rgba(13,110,253,.08)', 'rgba(13,110,253,.11)',
+                    'rgba(13,110,253,.14)']
+          }
+        },
+        splitLine: {
+          lineStyle: { color: 'rgba(0,0,0,.1)' }
+        },
+        axisLine: {
+          lineStyle: { color: 'rgba(0,0,0,.15)' }
+        }
+      },
+      series: [{
+        type: 'radar',
+        data: [
+          {
+            value: average,
+            name: '全校平均',
+            areaStyle: { color: 'rgba(13,110,253,.2)' },
+            lineStyle: { color: '#0d6efd', width: 2 },
+            itemStyle: { color: '#0d6efd' }
+          },
+          {
+            value: maxScores,
+            name: '维度最高分',
+            areaStyle: { color: 'rgba(220,53,69,.08)' },
+            lineStyle: { color: '#dc3545', width: 1.5, type: 'dashed' },
+            itemStyle: { color: '#dc3545' }
+          }
+        ]
+      }]
+    };
+    radarChart.setOption(option, true);
+  }
+
+  /* ── 班级对比雷达图 ── */
+  function renderClassComparison(indicator, classComp) {
+    var dom = document.getElementById('radar-container-sm');
+    if (!dom) return;
+    if (!compareChart) {
+      compareChart = echarts.init(dom);
+    }
+
+    var maxPerDim = 30;
+    var colors = ['#0d6efd', '#dc3545', '#198754', '#ffc107', '#6f42c1',
+                  '#d63384', '#20c997', '#fd7e14'];
+
+    var seriesData = classComp.map(function(cls, i) {
+      return {
+        value: cls.averages,
+        name: cls.class_name,
+        lineStyle: { color: colors[i % colors.length], width: 2 },
+        itemStyle: { color: colors[i % colors.length] },
+        areaStyle: { color: 'transparent' }
+      };
+    });
+
+    var option = {
+      tooltip: { trigger: 'item' },
+      legend: {
+        data: classComp.map(function(c) { return c.class_name; }),
+        bottom: 0,
+        textStyle: { fontSize: 11 }
+      },
+      radar: {
+        indicator: indicator.map(function(name) {
+          return { name: name, max: maxPerDim };
+        }),
+        shape: 'polygon',
+        splitNumber: 5,
+        axisName: { color: '#333', fontSize: 10 },
+        splitArea: { areaStyle: { color: ['rgba(13,110,253,.02)'] } },
+        splitLine: { lineStyle: { color: 'rgba(0,0,0,.1)' } },
+        axisLine: { lineStyle: { color: 'rgba(0,0,0,.15)' } }
+      },
+      series: [{ type: 'radar', data: seriesData }]
+    };
+    compareChart.setOption(option, true);
+  }
+
+  /* ── 渲染维度详情 ── */
+  function renderDimDetail(indicator, average, maxScores, maxPerDim) {
+    var container = document.getElementById('dim-detail-list');
+    if (!container) return;
+    var html = '';
+    indicator.forEach(function(name, i) {
+      var avg = average[i] || 0;
+      var maxS = maxScores[i] || 0;
+      var pct = Math.round(avg / maxPerDim * 100);
+      var level, levelClass;
+      if (pct > 50) { level = '偏高'; levelClass = 'high'; }
+      else if (pct > 30) { level = '中等'; levelClass = 'medium'; }
+      else { level = '正常'; levelClass = 'low'; }
+
+      html += '<div class="mb-2">';
+      html += '  <div class="d-flex justify-content-between align-items-center mb-1">';
+      html += '    <span class="fw-medium" style="font-size:.88rem;">' + name + '</span>';
+      html += '    <span><span class="dim-badge ' + levelClass + '">' + level + '</span> ';
+      html += '    <small class="text-muted ms-1">' + avg + ' / ' + maxPerDim + '</small></span>';
+      html += '  </div>';
+      html += '  <div class="progress" style="height:8px; border-radius:4px;">';
+      html += '    <div class="progress-bar';
+      if (levelClass === 'high') html += ' bg-danger';
+      else if (levelClass === 'medium') html += ' bg-warning';
+      else html += ' bg-success';
+      html += '" style="width:' + pct + '%;"></div>';
+      html += '  </div>';
+      html += '</div>';
+    });
+    container.innerHTML = html;
+  }
+
+  /* ── 渲染最高分学生表格 ── */
+  function renderTopStudents(students) {
+    var tbody = document.getElementById('top-students-tbody');
+    if (!tbody) return;
+    var html = '';
+    students.forEach(function(s) {
+      html += '<tr>';
+      html += '  <td><span class="fw-medium">' + s.dimension + '</span></td>';
+      html += '  <td><strong class="text-danger">' + s.score + '</strong>/30</td>';
+      html += '  <td>' + s.name + '</td>';
+      html += '  <td><small class="text-muted">' + (s.class_name || '-') + '</small></td>';
+      html += '</tr>';
+    });
+    tbody.innerHTML = html || '<tr><td colspan="4" class="text-center text-muted">暂无数据</td></tr>';
+  }
+
+  /* ── AI 白皮书生成 ── */
+  window.generateAIReport = function() {
+    var btn = document.getElementById('btn-generate-ai');
+    var panel = document.getElementById('ai-panel');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>AI 分析中...';
+    panel.classList.add('generating');
+    panel.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div><p class="text-muted mt-3">DeepSeek 正在分析 ' + document.getElementById('stat-total').textContent + ' 份问卷数据...</p></div>';
+
+    fetch('{{ url_for("survey.analysis_ai") }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || '生成失败'); });
+      return r.json();
+    })
+    .then(function(data) {
+      panel.classList.remove('generating');
+      if (data.error) {
+        panel.innerHTML = '<div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>' + data.error + '</div>';
+      } else if (data.report) {
+        // 简单 Markdown → HTML 渲染
+        var html = markdownToHtml(data.report);
+        panel.innerHTML = '<div class="ai-content">' + html + '</div>';
+      }
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>重新生成';
+    })
+    .catch(function(e) {
+      panel.classList.remove('generating');
+      panel.innerHTML = '<div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>' + e.message + '</div>';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-magic me-1"></i>一键生成白皮书';
+    });
+  };
+
+  /* ── 简易 Markdown → HTML ── */
+  function markdownToHtml(md) {
+    if (!md) return '';
+    var lines = md.split('\n');
+    var html = '';
+    var inList = false;
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+
+      // 标题
+      if (line.match(/^###\s/)) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<h4>' + line.replace(/^###\s/, '') + '</h4>';
+      } else if (line.match(/^##\s/)) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<h3>' + line.replace(/^##\s/, '') + '</h3>';
+      } else if (line.match(/^#\s/)) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<h2>' + line.replace(/^#\s/, '') + '</h2>';
+      }
+      // 列表
+      else if (line.match(/^[-*]\s/) || line.match(/^\d+\.\s/)) {
+        if (!inList) { html += '<ul>'; inList = true; }
+        var content = line.replace(/^[-*]\s/, '').replace(/^\d+\.\s/, '');
+        // 粗体
+        content = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        html += '<li>' + content + '</li>';
+      }
+      // 空行
+      else if (line.trim() === '') {
+        if (inList) { html += '</ul>'; inList = false; }
+      }
+      // 普通段落
+      else {
+        if (inList) { html += '</ul>'; inList = false; }
+        line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        html += '<p>' + line + '</p>';
+      }
+    }
+    if (inList) html += '</ul>';
+    return html;
+  }
+
+  /* ── 事件绑定 ── */
+  document.getElementById('btn-refresh').addEventListener('click', loadDimensionData);
+  document.getElementById('filter-class').addEventListener('change', loadDimensionData);
+
+  // 窗口 resize 重绘雷达图
+  window.addEventListener('resize', function() {
+    if (radarChart) radarChart.resize();
+    if (compareChart) compareChart.resize();
+  });
+
+  // 首次加载
+  loadDimensionData();
+})();
+</script>
+{% endblock %}

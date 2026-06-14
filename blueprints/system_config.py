@@ -1,6 +1,6 @@
 """系统配置中心 — 学期管理 + 参数配置"""
 from datetime import datetime
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session
 from models import db, Semester, SystemConfig
 from decorators import login_required, require_role
 from utils.db_utils import safe_commit
@@ -153,7 +153,7 @@ def create_config():
             value=value,
             category=category,
             description=description,
-            updated_by=current_user.display_name,
+            updated_by=session.get("display_name", ""),
         )
         db.session.add(config)
         safe_commit()
@@ -173,8 +173,8 @@ def edit_config(cid):
         config.value = request.form.get("value", config.value).strip()
         config.category = request.form.get("category", config.category)
         config.description = request.form.get("description", config.description).strip()
-        config.updated_by = current_user.display_name
-        config.updated_at = datetime.utcnow()
+        config.updated_by = session.get("display_name", "")
+        config.updated_at = datetime.now()
         safe_commit()
         flash(f"配置项 [{config.key}] 更新成功", "success")
         return redirect(url_for("system_config.config_list"))
@@ -217,7 +217,7 @@ def init_config():
                 value=value,
                 category=category,
                 description=description,
-                updated_by=current_user.display_name,
+                updated_by=session.get("display_name", ""),
             )
             db.session.add(config)
             added += 1

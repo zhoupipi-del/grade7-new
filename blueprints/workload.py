@@ -1,5 +1,6 @@
 """教师工作量统计"""
 from flask import Blueprint, render_template, request, send_file, session
+from utils import get_local_now
 from datetime import datetime, timedelta
 from io import BytesIO
 import openpyxl
@@ -18,7 +19,7 @@ def index():
     user = db.session.get(User, session.get("user_id"))
     days = request.args.get("days", 30, type=int)
 
-    since = datetime.utcnow() - timedelta(days=days)
+    since = get_local_now() - timedelta(days=days)
     grade_id = user.grade_id if user.role == "grade_leader" else None
 
     # gather stats per teacher
@@ -146,7 +147,7 @@ def detail():
         return "教师未找到", 404
 
     days = request.args.get("days", 30, type=int)
-    since = datetime.utcnow() - timedelta(days=days)
+    since = get_local_now() - timedelta(days=days)
 
     disciplines = DisciplineRecord.query.filter(
         DisciplineRecord.created_by == teacher.id,

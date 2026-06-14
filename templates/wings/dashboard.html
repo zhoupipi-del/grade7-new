@@ -84,7 +84,7 @@
       <tbody>
       {% for s in recent_scores %}
       <tr>
-        <td>{{ s.student.name if s.student else '?' }}</td>
+        <td>{{ s._student.name if s._student else '?' }}</td>
         <td><span class="badge bg-info">{{ s.dimension }}</span></td>
         <td><strong>{{ s.score }}</strong></td>
         <td><small>{{ s.scorer_type }}</small></td>

@@ -6,14 +6,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 from utils.db_utils import safe_commit
-
-# 东八区时区工具（对齐 ms.py / class_.py 标准）
-CST = timezone(timedelta(hours=8))
-
-
-def get_local_now():
-    """获取当前国内标准时间"""
-    return datetime.now(CST)
+from utils import get_local_now
 
 quality_bp = Blueprint("quality", __name__)
 

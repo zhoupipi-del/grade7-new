@@ -3,6 +3,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from models import db, Student, Class, Grade, User, Notice, NoticeReceipt
 from decorators import login_required, require_role, scope_query
 from datetime import datetime
+from utils import get_local_now
 from utils.db_utils import safe_commit
 from blueprints.common import notify_parent
 from blueprints.audit_log import audit_log
@@ -144,7 +145,7 @@ def mark_read(nid):
 
     if receipt.status == "unread":
         receipt.status = "read"
-        receipt.read_at = datetime.utcnow()
+        receipt.read_at = get_local_now()
         db.session.add(receipt)
         safe_commit()
 
@@ -166,7 +167,7 @@ def mark_signed(nid):
     if not receipt:
         receipt = NoticeReceipt(notice_id=nid, student_id=student_id)
 
-    now = datetime.utcnow()
+    now = get_local_now()
     if receipt.status == "unread":
         receipt.read_at = now
     receipt.status = "signed"

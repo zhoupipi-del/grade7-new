@@ -236,7 +236,7 @@ def use_template(tid):
 
         if action == "preview":
             # 预览：用表单变量值渲染
-            variables = {v[0]: request.form.get(v[0].strip("{}"), "") for v in TEMPLATE_VARIABLES}
+            variables = {v[0].strip("{}"): request.form.get(v[0].strip("{}"), "") for v in TEMPLATE_VARIABLES}
             preview_title = template.title_template.format(**variables)
             preview_content = template.content_template.format(**variables)
             return render_template(
@@ -257,7 +257,7 @@ def use_template(tid):
             send_count = 0
 
             try:
-                variables = {v[0]: request.form.get(v[0].strip("{}"), "") for v in TEMPLATE_VARIABLES}
+                variables = {v[0].strip("{}"): request.form.get(v[0].strip("{}"), "") for v in TEMPLATE_VARIABLES}
             except Exception as e:
                 flash("预览失败：" + str(e), "danger")
 
@@ -279,14 +279,14 @@ def use_template(tid):
             for stu in recipients:
                 # 为每个学生填充变量
                 stu_vars = {
-                    "{student_name}": stu.name,
-                    "{class_name}": stu.class_.name if stu.class_ else "",
+                    "student_name": stu.name,
+                    "class_name": stu.class_.name if stu.class_ else "",
                     **variables,
                 }
                 # 清除空变量避免格式化错误
                 final_vars = {}
                 for k, v in stu_vars.items():
-                    final_vars[k] = v if v else f"[待填{k}]"
+                    final_vars[k] = v if v else f"[待填{{{k}}}]"
 
                 msg_title = template.title_template.format(**final_vars)
                 msg_content = template.content_template.format(**final_vars)

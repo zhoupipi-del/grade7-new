@@ -1,9 +1,12 @@
 """学期归档 — 学期数据快照/查看/恢复/对比"""
+import json
 from datetime import datetime
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
-from models import db, SemesterArchive, Student, DisciplineRecord, Score, Activity, Message, Attendance
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file
+from models import db, SemesterArchive, Student, Class, DisciplineRecord, Score, Activity, ActivityRegistration, Message, Attendance
 from decorators import login_required, require_role
+from utils import get_local_now
 from utils.db_utils import safe_commit
+from sqlalchemy import func
 
 semester_archive_bp = Blueprint("semester_archive", __name__, template_folder="../templates")
 
@@ -14,7 +17,7 @@ def archive_list():
     """归档列表"""
     archives = SemesterArchive.query.order_by(SemesterArchive.archived_at.desc()).all()
     # 生成当前学期名称
-    now = datetime.now()
+    now = get_local_now()
     if now.month >= 9:
         current_semester = f"{now.year}-{now.year+1}-1"
     elif now.month >= 3:
@@ -30,7 +33,6 @@ def archive_detail(semester_name):
     """查看归档详情"""
     archive = SemesterArchive.query.filter_by(semester_name=semester_name).first_or_404()
     summary = archive.summary_json if archive.summary_json else "{}"
-    import json
     data = json.loads(summary)
     return render_template("semester_archive/detail.html", archive=archive, data=data)
 
@@ -45,7 +47,6 @@ def create_archive(semester_name):
         return redirect(url_for("semester_archive.archive_list"))
 
     summary = _collect_semester_data(semester_name)
-    import json
     archive = SemesterArchive(
         semester_name=semester_name,
         display_name=request.form.get("display_name", semester_name),
@@ -77,7 +78,6 @@ def delete_archive(semester_name):
 def restore_archive(semester_name):
     """从归档恢复数据（覆盖当前学期部分数据）"""
     archive = SemesterArchive.query.filter_by(semester_name=semester_name).first_or_404()
-    import json
     data = json.loads(archive.summary_json) if archive.summary_json else {}
     # 恢复数据逻辑（TODO：根据 summary_json 恢复对应表数据）
     flash(f"已从归档 [{semester_name}] 恢复数据（功能完善中）", "warning")
@@ -96,7 +96,6 @@ def compare_semesters():
 @login_required
 def api_compare(s1, s2):
     """API：对比两个学期数据"""
-    import json
     archive1 = SemesterArchive.query.filter_by(semester_name=s1).first()
     archive2 = SemesterArchive.query.filter_by(semester_name=s2).first()
 
@@ -128,7 +127,6 @@ def api_compare(s1, s2):
 @login_required
 def export_archive(semester_name):
     """导出归档数据为Excel"""
-    import json
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from io import BytesIO
@@ -172,7 +170,6 @@ def export_archive(semester_name):
     wb.save(output)
     output.seek(0)
 
-    from flask import send_file
     return send_file(
         output,
         as_attachment=True,
@@ -182,44 +179,75 @@ def export_archive(semester_name):
 
 
 def _collect_semester_data(semester_name):
-    """收集学期数据（快照）"""
-    from sqlalchemy import func
+    """收集学期数据（快照）— 根据 semester_name 推算日期范围进行过滤"""
+    # 从 semester_name (如 "2025-2026-1") 推算学期起止日期
+    parts = semester_name.split("-")
+    if len(parts) == 3:
+        start_year, end_year, term = int(parts[0]), int(parts[1]), int(parts[2])
+        if term == 1:
+            start_date = f"{start_year}-09-01"
+            end_date = f"{end_year}-01-31"
+        else:
+            start_date = f"{start_year}-02-01"
+            end_date = f"{end_year}-07-31"
+    else:
+        start_date = None
+        end_date = None
+
     summary = {}
 
     # 学生总数
     summary["student_count"] = Student.query.count()
 
     # 班级数
-    from models import Class
     summary["class_count"] = Class.query.count()
 
     # 违纪统计
-    disc_stats = {}
-    disc_total = DisciplineRecord.query.count()
-    disc_active = DisciplineRecord.query.filter_by(status="active").count()
-    disc_resolved = DisciplineRecord.query.filter_by(status="resolved").count()
-    disc_stats["total"] = disc_total
-    disc_stats["active"] = disc_active
-    disc_stats["resolved"] = disc_resolved
-    summary["discipline_stats"] = disc_stats
+    disc_query = DisciplineRecord.query
+    if start_date:
+        disc_query = disc_query.filter(DisciplineRecord.created_at >= start_date)
+    if end_date:
+        disc_query = disc_query.filter(DisciplineRecord.created_at <= end_date + " 23:59:59")
+    disc_total = disc_query.count()
+    disc_active = disc_query.filter_by(status="active").count()
+    disc_resolved = disc_query.filter_by(status="resolved").count()
+    summary["discipline_stats"] = {"total": disc_total, "active": disc_active, "resolved": disc_resolved}
 
     # 成绩统计
-    score_stats = {}
-    avg_score = db.session.query(func.avg(Score.score)).scalar() or 0
-    score_stats["average"] = float(avg_score)
-    summary["score_stats"] = score_stats
+    score_query = db.session.query(func.avg(Score.score))
+    if start_date:
+        score_query = score_query.filter(Score.created_at >= start_date)
+    if end_date:
+        score_query = score_query.filter(Score.created_at <= end_date + " 23:59:59")
+    avg_score = score_query.scalar() or 0
+    summary["score_stats"] = {"average": float(avg_score)}
 
-    # 活动统计
-    activity_stats = {}
-    activity_stats["total"] = Activity.query.count()
-    activity_stats["total_participants"] = db.session.query(func.count(Activity.participants)).scalar() or 0
-    summary["activity_stats"] = activity_stats
+    # 活动统计 — 通过 ActivityRegistration 统计参与人数
+    act_query = Activity.query
+    if start_date:
+        act_query = act_query.filter(Activity.start_time >= start_date)
+    if end_date:
+        act_query = act_query.filter(Activity.start_time <= end_date + " 23:59:59")
+    activity_count = act_query.count()
+    participant_count = db.session.query(func.count(ActivityRegistration.id))
+    if start_date:
+        participant_count = participant_count.filter(ActivityRegistration.registered_at >= start_date)
+    if end_date:
+        participant_count = participant_count.filter(ActivityRegistration.registered_at <= end_date + " 23:59:59")
+    summary["activity_stats"] = {
+        "total": activity_count,
+        "total_participants": int(participant_count.scalar() or 0),
+    }
 
     # 消息统计
-    message_stats = {}
-    message_stats["total"] = Message.query.count()
-    message_stats["unread"] = Message.query.filter_by(is_read=False).count()
-    summary["message_stats"] = message_stats
+    msg_query = Message.query
+    if start_date:
+        msg_query = msg_query.filter(Message.created_at >= start_date)
+    if end_date:
+        msg_query = msg_query.filter(Message.created_at <= end_date + " 23:59:59")
+    msg_total = msg_query.count()
+    msg_unread = msg_query.filter_by(is_read=False).count()
+    summary["message_stats"] = {"total": msg_total, "unread": msg_unread}
 
     return summary
 

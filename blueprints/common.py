@@ -5,6 +5,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from models import db, Message, Announcement, User, Student, Class
 from decorators import login_required
 from datetime import date, datetime
+from utils import get_local_now
 from utils.db_utils import safe_commit
 
 common_bp = Blueprint('common', __name__)
@@ -156,7 +157,7 @@ def send_notification(to_user_id, title, content, from_user_id=None):
         title=title,
         content=content,
         is_read=False,
-        created_at=datetime.utcnow()
+        created_at=get_local_now()
     )
     db.session.add(msg)
     safe_commit()

@@ -6,6 +6,7 @@ import json
 from sqlalchemy import func, text
 
 from decorators import login_required, require_role
+from utils import get_local_now
 from models import db, User, Student, Class, Grade, DisciplineRecord, RoutineScore, Task, WingsScore, HomeVisit, Notice, NoticeReceipt, Score, Exam, MentalHealthAssessment, RiskRecord, Attendance, Subject
 
 bigscreen_bp = Blueprint("bigscreen", __name__, url_prefix="/bigscreen")
@@ -37,7 +38,7 @@ def data():
     total_teachers = User.query.filter(User.role.in_(["class_teacher", "teacher", "grade_leader"])).count()
 
     # 违纪统计 (近30天)
-    since = datetime.utcnow() - timedelta(days=30)
+    since = get_local_now() - timedelta(days=30)
     discipline_count = DisciplineRecord.query.filter(DisciplineRecord.created_at >= since).count()
 
     # 各等级违纪数
@@ -98,7 +99,7 @@ def data():
     # ==================== Phase 4 - 刀 1: 数据供给侧清洗与战略扩容 ====================
     # 1. 动态获取最新扫描日期，确保度量衡对齐最新批次
     latest_scan = RiskRecord.query.order_by(RiskRecord.scan_date.desc()).first()
-    target_scan_date = latest_scan.scan_date if latest_scan else datetime.utcnow().date()
+    target_scan_date = latest_scan.scan_date if latest_scan else get_local_now().date()
 
     # 2. 角色安全守卫与年级边界隔离 (RiskRecord 自带 grade_id，无需穿透 Student)
     risk_query = RiskRecord.query.filter(RiskRecord.scan_date == target_scan_date)
@@ -200,7 +201,7 @@ def data():
     att_rate = round(att_present / att_total * 100, 1) if att_total > 0 else 0
 
     # 7天趋势 - 优化: 3条批量GROUP BY替代28条逐日查询
-    days = [(datetime.utcnow() - timedelta(days=i)).date() for i in range(6, -1, -1)]
+    days = [(get_local_now() - timedelta(days=i)).date() for i in range(6, -1, -1)]
     d0, d6 = days[0], days[-1]
 
     disc_trend_map = dict(db.session.query(
@@ -593,7 +594,8 @@ def export_pdf():
     from reportlab.pdfbase.ttfonts import TTFont
     from io import BytesIO
     import os
-    
+    from flask import current_app
+
     # 注册中文字体
     font_path = os.path.join(current_app.root_path, '..', 'static', 'fonts', 'simhei.ttf')
     if os.path.exists(font_path):
@@ -613,7 +615,7 @@ def export_pdf():
     
     # 日期
     c.setFont(font_name, 12)
-    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M')
+    now = get_local_now().strftime('%Y-%m-%d %H:%M')
     c.drawString(2*cm, height - 4*cm, f"生成时间: {now}")
     
     # 获取数据
@@ -634,7 +636,7 @@ def export_pdf():
     y -= 0.8*cm
     
     # 违纪统计
-    since = datetime.utcnow() - timedelta(days=30)
+    since = get_local_now() - timedelta(days=30)
     disc_count = DisciplineRecord.query.filter(DisciplineRecord.created_at >= since).count()
     c.drawString(3*cm, y, f"近30天违纪: {disc_count} 人次")
     y -= 1.5*cm
@@ -692,7 +694,7 @@ def export_excel():
     ws1['A1'].font = Font(size=16, bold=True)
     row += 1
     
-    ws1[f'A{row}'] = f"生成时间: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+    ws1[f'A{row}'] = f"生成时间: {get_local_now().strftime('%Y-%m-%d %H:%M')}"
     row += 2
     
     ws1[f'A{row}'] = "指标"
@@ -703,7 +705,7 @@ def export_excel():
     
     total_students = Student.query.filter_by(is_active=True).count()
     total_classes = Class.query.filter_by(is_active=True).count()
-    since = datetime.utcnow() - timedelta(days=30)
+    since = get_local_now() - timedelta(days=30)
     disc_count = DisciplineRecord.query.filter(DisciplineRecord.created_at >= since).count()
     
     ws1[f'A{row}'] = "在校学生"

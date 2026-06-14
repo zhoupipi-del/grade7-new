@@ -5,6 +5,7 @@ from flask import Blueprint, render_template, jsonify, request, session, current
 from decorators import login_required, require_role
 from models import db, Student, Score, DisciplineRecord, Attendance, PsychSurvey, QualityScore, Exam, MentalHealthAssessment, RiskRecord, Class
 from decorators import require_role
+from utils import get_local_now
 from datetime import date, datetime, timedelta
 from sqlalchemy import text, func
 import random
@@ -128,8 +129,8 @@ def api_growth_prediction(sid):
         score_trend_desc = "稳定"
     
     # 2. 违纪频率预测
-    since_30 = datetime.utcnow() - timedelta(days=30)
-    since_60 = datetime.utcnow() - timedelta(days=60)
+    since_30 = get_local_now() - timedelta(days=30)
+    since_60 = get_local_now() - timedelta(days=60)
     recent_disc = DisciplineRecord.query.filter(
         DisciplineRecord.student_id == sid,
         DisciplineRecord.created_at >= since_30
@@ -226,14 +227,14 @@ def api_similar_students(sid):
         avg_score = float(avg_score_q) if avg_score_q else 75.0
         
         # 违纪次数（近90天）
-        since = datetime.utcnow() - timedelta(days=90)
+        since = get_local_now() - timedelta(days=90)
         disc_count = DisciplineRecord.query.filter(
             DisciplineRecord.student_id == s.id,
             DisciplineRecord.created_at >= since
         ).count()
         
         # 出勤率（近30天）
-        since30 = datetime.utcnow() - timedelta(days=30)
+        since30 = get_local_now() - timedelta(days=30)
         att_records = Attendance.query.filter(
             Attendance.student_id == s.id,
             Attendance.record_date >= since30

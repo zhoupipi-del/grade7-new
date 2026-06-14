@@ -4,6 +4,7 @@ from models import db, User, ROLES
 from decorators import login_required, require_role
 from blueprints.audit_log import audit_log
 from datetime import datetime
+from utils import get_local_now
 from utils.db_utils import safe_commit
 
 auth_bp = Blueprint("auth", __name__)
@@ -24,7 +25,7 @@ def login_page():
             session["grade_id"] = user.grade_id
             session["class_id"] = user.class_id
             session["bound_student_id"] = user.bound_student_id
-            user.last_login = datetime.utcnow()
+            user.last_login = get_local_now()
             safe_commit()
             next_url = request.args.get("next") or url_for("index")
             return redirect(next_url)

@@ -3,35 +3,10 @@
 提供全局搜索页面和 API
 """
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
-from functools import wraps
 from models import Student, User, Class, Grade, db
+from decorators import login_required, require_role
 
 search_bp = Blueprint("search", __name__)  # url_prefix 由 blueprint_registry.py 统一管理
-
-
-# ── 辅助函数 ──
-def login_required(f):
-    """登录检查装饰器"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not session.get("logged_in"):
-            return redirect(url_for("auth.login_page"))
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-def require_role(*allowed_roles):
-    """角色检查装饰器"""
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            if not session.get("logged_in"):
-                return redirect(url_for("auth.login_page"))
-            if session.get("role") not in allowed_roles:
-                return jsonify({"error": "权限不足"}), 403
-            return f(*args, **kwargs)
-        return decorated_function
-    return decorator
 
 
 # ── 路由 ──
@@ -110,7 +85,7 @@ def perform_search(q, type_, limit=20):
             Student.name.contains(q)
         ).limit(limit)
 
-        for s in query:
+        for s in query.all():
             class_name = s.class_.name if s.class_ else "未分配"
             results.append({
                 "id": s.id,

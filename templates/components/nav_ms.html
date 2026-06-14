@@ -77,7 +77,7 @@
         </a>
         <ul class="dropdown-menu">
             <li><a class="dropdown-item" href="{{ url_for('ai_analysis.index') }}"><i class="bi bi-robot"></i> AI行为预警</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('ai_analysis.dashboard') }}"><i class="bi bi-grid-3x3-gap-fill"></i> 统一仪表盘</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('ai_analysis.dashboard') }}"><i class="bi bi-archive"></i> 全景德育总账</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="{{ url_for('mental_health.index') }}"><i class="bi bi-heart-pulse"></i> 心理健康评估</a></li>
             <li><a class="dropdown-item" href="{{ url_for('communication.index') }}"><i class="bi bi-chat-dots"></i> 家校沟通追踪</a></li>
@@ -112,9 +112,7 @@
             <li><a class="dropdown-item" href="{{ url_for('survey.psych_list') }}"><i class="bi bi-heart-pulse"></i> 心理筛查 (MSSMHS)</a></li>
             <li><a class="dropdown-item" href="{{ url_for('survey.psych_stats') }}"><i class="bi bi-bar-chart"></i> 心理筛查统计</a></li>
             <li><hr class="dropdown-divider"></li>
-            <li><a class="dropdown-item" href="{{ url_for('survey.parent_survey') }}"><i class="bi bi-people"></i> 家长问卷 (PCE)</a></li>
-            <li><hr class="dropdown-divider"></li>
-            <li><a class="dropdown-item" href="{{ url_for('survey.survey_analysis') }}"><i class="bi bi-pie-chart"></i> 综合分析</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('survey.survey_analysis') }}"><i class="bi bi-radar"></i> 心理多维分析</a></li>
         </ul>
     </li>
     <li class="nav-item">

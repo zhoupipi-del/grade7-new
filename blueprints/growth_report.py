@@ -3,12 +3,11 @@
 整合6个维度：学业表现、行为规范、出勤状态、心理健康、综合素质、活动参与
 """
 
-import os
 import json as json_mod
-from datetime import datetime, timedelta, date
+from datetime import timedelta, date
 from collections import defaultdict
 
-from flask import Blueprint, render_template, jsonify, request, session, current_app, flash, redirect, url_for, send_file
+from flask import Blueprint, render_template, jsonify, request, session, current_app, flash, redirect, url_for
 from decorators import login_required, require_role
 from models import (
     db, Student, Score, Exam, 
@@ -17,16 +16,7 @@ from models import (
     Activity, ActivityRegistration,
     Class, Grade, LeaveRequest
 )
-from sqlalchemy import text
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-import openpyxl
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from io import BytesIO
+from sqlalchemy import text, func
 
 growth_bp = Blueprint("growth", __name__, template_folder="../templates")
 
@@ -183,10 +173,14 @@ def _get_activity_stats(sid, start_date, end_date):
         ActivityRegistration.registered_at >= start_date,
         ActivityRegistration.registered_at <= end_date + timedelta(days=1),
     ).all()
-    
+
+    # 批量预加载活动（消除 Activity.query.get N+1）
+    act_ids = list({p.activity_id for p in participations})
+    act_map = {a.id: a for a in Activity.query.filter(Activity.id.in_(act_ids)).all()} if act_ids else {}
+
     stats = {"total": len(participations), "activities": []}
     for p in participations:
-        activity = Activity.query.get(p.activity_id)
+        activity = act_map.get(p.activity_id)
         if activity:
             stats["activities"].append({
                 "name": activity.name,
@@ -194,7 +188,7 @@ def _get_activity_stats(sid, start_date, end_date):
                 "date": activity.start_time.strftime("%Y-%m-%d") if activity.start_time else "",
                 "status": p.status,
             })
-    
+
     return stats
 
 
@@ -321,24 +315,44 @@ def report_list():
         students = []
         page_title = "成长报告"
     
-    # 为每个学生生成报告摘要
+    # 为每个学生生成报告摘要（批量预加载消除 N+1）
+    student_ids = [s.id for s in students if s]
+
+    # 批量统计违纪
+    disc_map = dict(db.session.query(
+        DisciplineRecord.student_id, func.count(DisciplineRecord.id)
+    ).filter(
+        DisciplineRecord.student_id.in_(student_ids),
+        DisciplineRecord.created_at >= start_date,
+    ).group_by(DisciplineRecord.student_id).all()) if student_ids else {}
+
+    # 批量统计出勤问题
+    att_map = dict(db.session.query(
+        Attendance.student_id, func.count(Attendance.id)
+    ).filter(
+        Attendance.student_id.in_(student_ids),
+        Attendance.record_date >= start_date,
+        Attendance.status.in_(["absent", "late"]),
+    ).group_by(Attendance.student_id).all()) if student_ids else {}
+
+    # 批量预加载班级
+    stu_class_map = {}
+    if student_ids:
+        cls_ids = list({s.class_id for s in students if s and s.class_id})
+        if cls_ids:
+            cls_map = {c.id: c for c in Class.query.filter(Class.id.in_(cls_ids)).all()}
+            for s in students:
+                if s and s.class_id:
+                    stu_class_map[s.id] = cls_map.get(s.class_id)
+
     reports = []
     for stu in students:
         if not stu:
             continue
-        
-        # 快速统计（避免复杂查询）
-        discipline_count = DisciplineRecord.query.filter(
-            DisciplineRecord.student_id == stu.id,
-            DisciplineRecord.created_at >= start_date,
-        ).count()
-        
-        attendance_issues = Attendance.query.filter(
-            Attendance.student_id == stu.id,
-            Attendance.record_date >= start_date,
-            Attendance.status.in_(["absent", "late"]),
-        ).count()
-        
+
+        discipline_count = disc_map.get(stu.id, 0)
+        attendance_issues = att_map.get(stu.id, 0)
+
         # 计算综合评分
         report_data = {
             "grade_trend": _calc_grade_trend(stu.id, None)[0],
@@ -349,11 +363,11 @@ def report_list():
             "activity": {"total": 0},
         }
         overall_score, details = _calculate_overall_score(report_data)
-        
+
         reports.append({
             "student_id": stu.id,
             "student_name": stu.name,
-            "class_name": stu.class_,
+            "class_name": stu_class_map.get(stu.id).name if stu_class_map.get(stu.id) else "",
             "overall_score": overall_score,
             "risk_level": "high" if overall_score < 40 else ("medium" if overall_score < 70 else "low"),
             "details": details,

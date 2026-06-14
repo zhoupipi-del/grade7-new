@@ -14,6 +14,7 @@ from models import (
     MentalHealthAssessment, PsychSurvey,
     EndTermComment, TeacherNote,
 )
+from utils import get_local_now
 from decorators import login_required, require_role
 
 student_profile_bp = Blueprint("student_profile", __name__)
@@ -317,7 +318,7 @@ def process_risk(sid, rid):
 
     risk.is_processed = True
     risk.processed_by = session.get("user_id")
-    risk.processed_at = datetime.utcnow()
+    risk.processed_at = get_local_now()
     risk.process_note = request.form.get("note", "")
     risk.disposal_action = action
     db.session.commit()
@@ -449,7 +450,7 @@ def _build_timeline(sid, disciplines, leaves, risks, visits, assessments):
 
     for v in visits[:10]:
         items.append({
-            "date": v.created_at or datetime.utcnow(),
+            "date": v.created_at or get_local_now(),
             "type": "home_visit",
             "icon": "home",
             "color": "success",

@@ -2,7 +2,7 @@
 import os
 import json
 from datetime import datetime, date, timedelta
-from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file, jsonify, session
 from models import db, Report, Student, DisciplineRecord, Score, Activity, Message, Attendance, Grade, Class
 from decorators import login_required, require_role
 from utils.db_utils import safe_commit
@@ -51,7 +51,7 @@ def generate_report():
             semester=semester,
             grade_id=grade_id if grade_id else None,
             class_id=class_id if class_id else None,
-            generated_by_id=current_user.id,
+            generated_by_id=session.get("user_id"),
         )
         db.session.add(report)
         safe_commit()
@@ -394,7 +394,7 @@ def _generate_excel(report, data):
         ws1['A3'] = "报表类型"; ws1['B3'] = report.report_type
         ws1['A4'] = "学期"; ws1['B4'] = report.semester or "默认"
         ws1['A5'] = "生成时间"; ws1['B5'] = report.generated_at.strftime("%Y-%m-%d %H:%M:%S")
-        ws1['A6'] = "生成人"; ws1['B6'] = current_user.display_name
+        ws1['A6'] = "生成人"; ws1['B6'] = session.get("display_name", "")
 
         # ── Sheet 2: 违纪统计 ──
         if "discipline_stats" in data and data["discipline_stats"]:

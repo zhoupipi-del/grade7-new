@@ -7,6 +7,7 @@ from models import Message
 from blueprints.discipline_utils import check_escalation, send_discipline_notifications, send_appeal_notifications, deduct_quality_score
 from decorators import login_required, require_role, scope_query, require_permission
 from utils.db_utils import safe_commit
+from utils import get_local_now
 from datetime import date, datetime
 from sqlalchemy import func
 
@@ -125,7 +126,7 @@ def task_detail(tid):
 def close_task(tid):
     task = Task.query.get_or_404(tid)
     task.status = "closed"
-    task.finished_at = datetime.utcnow()
+    task.finished_at = get_local_now()
     safe_commit()
     flash("任务已关闭", "success")
     return redirect(url_for("ms.task_list"))
@@ -271,7 +272,7 @@ def discipline_stats():
 def discipline_resolve(rid):
     record = DisciplineRecord.query.get_or_404(rid)
     record.status = "resolved"
-    record.resolved_at = datetime.utcnow()
+    record.resolved_at = get_local_now()
     safe_commit()
     flash("已标记为已解决", "success")
     return redirect(url_for("ms.discipline_list"))
@@ -324,7 +325,7 @@ def appeal_review(aid):
             record = appeal.discipline
             if record:
                 record.status = "resolved"
-                record.resolved_at = datetime.utcnow()
+                record.resolved_at = get_local_now()
             flash("申诉已通过，原违纪记录已撤销", "success")
         elif action == "reject":
             appeal.status = "rejected"
@@ -339,7 +340,7 @@ def appeal_review(aid):
 
         appeal.review_comment = review_comment or ("同意申诉" if action == "approve" else "申诉理由不成立")
         appeal.reviewed_by = session.get("user_id")
-        appeal.reviewed_at = datetime.utcnow()
+        appeal.reviewed_at = get_local_now()
         safe_commit()
 
         send_appeal_notifications(appeal, appeal.student, appeal.discipline)

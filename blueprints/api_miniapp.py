@@ -11,6 +11,7 @@ from models import (db, User, Student, Class, DisciplineRecord, Attendance,
                     EndTermComment)
 from jwt_utils import create_token, verify_token, refresh_token as _refresh_token
 from utils.db_utils import safe_commit
+from utils import get_local_now
 from blueprints.common import notify_parent
 
 miniapp_bp = Blueprint("miniapp", __name__)
@@ -61,7 +62,7 @@ def auth_login():
         return jsonify({"code": 401, "msg": "用户名或密码错误"}), 401
 
     # 更新最后登录时间
-    user.last_login = datetime.utcnow()
+    user.last_login = get_local_now()
     safe_commit()
 
     token = create_token(
@@ -515,7 +516,7 @@ def parent_feedback():
     related_id = data.get("related_id")
 
     if not content:
-        return jsonify({"code": 401, "msg": "反馈内容不能为空"})
+        return jsonify({"code": 400, "msg": "反馈内容不能为空"}), 400
 
     type_labels = {
         "discipline": "纪律申诉",
@@ -602,7 +603,7 @@ def teacher_approve_leave():
     if action == "approve":
         leave.status = "class_approved"
         leave.class_approved_by = miniapp_user["user_id"]
-        leave.class_approved_at = datetime.utcnow()
+        leave.class_approved_at = get_local_now()
     else:
         leave.status = "rejected"
 

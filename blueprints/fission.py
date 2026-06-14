@@ -5,6 +5,8 @@ Chain Fission Trace Engine Blueprint
 from flask import Blueprint, jsonify, render_template, request, session, current_app
 from functools import wraps
 
+from utils import get_local_now
+
 bp = Blueprint("fission", __name__, template_folder="../templates")
 
 
@@ -37,7 +39,7 @@ def trace_super_source():
 
     class_id = request.args.get("class_id", type=int)
     days = request.args.get("days", 30, type=int)
-    end_date = datetime.utcnow()
+    end_date = get_local_now()
     start_date = end_date - timedelta(days=days)
 
     try:

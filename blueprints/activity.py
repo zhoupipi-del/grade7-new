@@ -6,6 +6,7 @@ from decorators import login_required, require_role
 from datetime import datetime, date
 import json
 from utils.db_utils import safe_commit
+from utils import get_local_now
 from blueprints.common import notify_parent
 
 activity_bp = Blueprint("activity", __name__, url_prefix="/activity")
@@ -190,7 +191,7 @@ def edit(aid):
         activity.start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
         activity.end_date = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
         activity.target_classes = json.dumps([int(c) for c in target_classes])
-        activity.updated_at = datetime.utcnow()
+        activity.updated_at = get_local_now()
 
         safe_commit()
         flash(f"活动「{activity.title}」已更新", "success")
@@ -329,7 +330,7 @@ def publish(aid):
 
     old_status = activity.status
     activity.status = "published"
-    activity.updated_at = datetime.utcnow()
+    activity.updated_at = get_local_now()
     safe_commit()
 
     # 发布时通知目标学生家长
@@ -369,7 +370,7 @@ def complete(aid):
         flash("只有进行中的活动可以结束", "warning")
         return redirect(url_for("activity.detail", aid=aid))
     activity.status = "completed"
-    activity.updated_at = datetime.utcnow()
+    activity.updated_at = get_local_now()
     safe_commit()
 
     # ── 活动完成后，自动计入综合素质评价 ──
@@ -389,7 +390,7 @@ def cancel_activity(aid):
         flash("已完成或已取消的活动无法再次取消", "warning")
         return redirect(url_for("activity.detail", aid=aid))
     activity.status = "cancelled"
-    activity.updated_at = datetime.utcnow()
+    activity.updated_at = get_local_now()
     safe_commit()
     flash(f"活动「{activity.title}」已取消", "success")
     return redirect(url_for("activity.detail", aid=aid))
@@ -495,7 +496,7 @@ def register_student(aid):
         if existing.status == "cancelled":
             existing.status = "registered"
             existing.note = note
-            existing.registered_at = datetime.utcnow()
+            existing.registered_at = get_local_now()
             safe_commit()
             return jsonify({"code": 0, "msg": "重新报名成功"})
         return jsonify({"code": 1, "msg": "该学生已报名"}), 400
@@ -607,7 +608,7 @@ def batch_register(aid):
                     count += 1
             elif existing.status == "cancelled":
                 existing.status = "registered"
-                existing.registered_at = datetime.utcnow()
+                existing.registered_at = get_local_now()
                 count += 1
 
         safe_commit()
@@ -677,7 +678,7 @@ def signin(aid):
         ).first()
         if existing:
             existing.status = status_val
-            existing.signin_time = datetime.utcnow()
+            existing.signin_time = get_local_now()
             existing.note = note
         else:
             signin = ActivitySignin(
@@ -757,7 +758,7 @@ def signin_batch(aid):
         ).first()
         if existing:
             existing.status = status_val
-            existing.signin_time = datetime.utcnow()
+            existing.signin_time = get_local_now()
         else:
             signin = ActivitySignin(
                 activity_id=aid,
@@ -968,7 +969,7 @@ def student_register(aid):
     student = Student.query.get(student_id)
     if existing and existing.status == "cancelled":
         existing.status = "registered"
-        existing.registered_at = datetime.utcnow()
+        existing.registered_at = get_local_now()
     else:
         reg = ActivityRegistration(
             activity_id=aid,
@@ -1021,7 +1022,7 @@ ACTIVITY_DIMENSION_MAP = {
 
 def _current_semester():
     """获取当前学期"""
-    now = datetime.utcnow()
+    now = get_local_now()
     y = now.year
     m = now.month
     if m >= 9:

@@ -20,6 +20,7 @@ from sqlalchemy import func
 from feature_extractor import FeatureExtractor
 from models import db, Student, Class as ClassModel, InterventionRecord
 from utils.db_utils import safe_commit
+from utils import get_local_now
 
 bp = Blueprint("ai_inference", __name__, url_prefix="/ai-api")
 
@@ -731,7 +732,7 @@ def _run_posterior_tracking(student_id: int, current_risk: float):
         else:
             rec.effect_rating = "无变化"
 
-        rec.updated_at = datetime.utcnow()
+        rec.updated_at = get_local_now()
         updated_count += 1
         print(
             f"[后验追踪] 学生{rec.student.name}: "
@@ -925,7 +926,7 @@ def update_followup(int_id):
     rec.effect_rating = data.get("effect_rating", "")
     rec.follow_up_notes = data.get("follow_up_notes", "")
     rec.follow_up_done = True
-    rec.updated_at = datetime.utcnow()
+    rec.updated_at = get_local_now()
     safe_commit()
 
     delta = rec.risk_delta

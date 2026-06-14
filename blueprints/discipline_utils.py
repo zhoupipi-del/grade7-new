@@ -1,6 +1,7 @@
 """纪律管理共享辅助函数"""
 from models import db, DisciplineRecord, DisciplineAppeal, User, Message, Student, QualityIndicator, QualityScore
 from blueprints.common import notify_parent, notify_class_teacher, send_notification
+from utils import get_local_now
 from datetime import datetime
 
 
@@ -168,7 +169,7 @@ def deduct_quality_score(record, student, created_by):
             return
 
         # 当前学期
-        now = datetime.utcnow()
+        now = get_local_now()
         month = now.month
         if month >= 9:
             semester = f"{now.year}-{now.year + 1}-1"

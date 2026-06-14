@@ -6,6 +6,7 @@ import openpyxl
 
 from decorators import login_required, require_role
 from models import db, Student, DisciplineRecord, RoutineScore, Task, WingsScore, HomeVisit, EndTermComment, Class, Grade, User, Score, Exam, Subject, Attendance
+from sqlalchemy.orm import joinedload
 
 export_summary_bp = Blueprint("export_summary", __name__, url_prefix="/export-summary")
 
@@ -122,7 +123,7 @@ def _export_students(wb, grade_id=None):
     q = Student.query.filter_by(is_active=True).order_by(Student.class_id, Student.student_no)
     if grade_id:
         q = q.filter_by(grade_id=grade_id)
-    for s in q.all():
+    for s in q.options(joinedload(Student.class_)).all():
         ws.append([s.student_no, s.name, s.gender,
                    s.class_.name if s.class_ else "",
                    s.ethnicity, s.parent1_name or "", s.parent1_phone or "", s.tags])
@@ -132,7 +133,9 @@ def _export_discipline(wb, grade_id=None):
     """导出违纪记录到独立Sheet"""
     ws = wb.create_sheet(title="违纪记录")
     ws.append(["日期", "学生姓名", "班级", "违纪类别", "等级", "描述", "登记人"])
-    q = DisciplineRecord.query.order_by(DisciplineRecord.created_at.desc())
+    q = DisciplineRecord.query.options(
+        joinedload(DisciplineRecord.student).joinedload(Student.class_)
+    ).order_by(DisciplineRecord.created_at.desc())
     if grade_id:
         q = q.filter_by(grade_id=grade_id)
     for d in q.all():
@@ -146,7 +149,7 @@ def _export_routine(wb, grade_id=None):
     """导出常规评分到独立Sheet"""
     ws = wb.create_sheet(title="常规评分")
     ws.append(["日期", "班级", "类别", "分数", "备注", "检查人"])
-    q = RoutineScore.query.order_by(RoutineScore.record_date.desc())
+    q = RoutineScore.query.options(joinedload(RoutineScore.class_)).order_by(RoutineScore.record_date.desc())
     if grade_id:
         q = q.filter_by(grade_id=grade_id)
     for r in q.all():
@@ -175,9 +178,16 @@ def _export_wings(wb, grade_id=None):
     q = WingsScore.query.order_by(WingsScore.created_at.desc())
     if grade_id:
         q = q.join(Student).filter(Student.grade_id == grade_id)
-    for w in q.all():
-        ws.append([w.student.name if w.student else "",
-                   w.student.class_.name if w.student and w.student.class_ else "",
+    rows = q.all()
+    # 批量预加载学生（含班级）避免 N+1
+    stu_ids = list({w.student_id for w in rows})
+    stu_map = {s.id: s for s in Student.query.options(
+        joinedload(Student.class_)
+    ).filter(Student.id.in_(stu_ids)).all()} if stu_ids else {}
+    for w in rows:
+        s = stu_map.get(w.student_id)
+        ws.append([s.name if s else "",
+                   s.class_.name if s and s.class_ else "",
                    w.dimension, w.score, w.scorer_type, str(w.scorer_id),
                    w.created_at.strftime("%Y-%m-%d %H:%M") if w.created_at else ""])
 
@@ -186,7 +196,9 @@ def _export_visits(wb, grade_id=None):
     """导出家访记录到独立Sheet"""
     ws = wb.create_sheet(title="家访记录")
     ws.append(["日期", "学生姓名", "班级", "家访方式", "教师", "内容", "家长反馈"])
-    q = HomeVisit.query.order_by(HomeVisit.visit_date.desc())
+    q = HomeVisit.query.options(
+        joinedload(HomeVisit.student).joinedload(Student.class_)
+    ).order_by(HomeVisit.visit_date.desc())
     if grade_id:
         q = q.filter_by(grade_id=grade_id)
     for v in q.all():
@@ -200,7 +212,9 @@ def _export_comments(wb, grade_id=None):
     """导出期末评语到独立Sheet"""
     ws = wb.create_sheet(title="期末评语")
     ws.append(["学生姓名", "班级", "学期", "综合评语", "优点", "待改进", "状态"])
-    q = EndTermComment.query.order_by(EndTermComment.updated_at.desc())
+    q = EndTermComment.query.options(
+        joinedload(EndTermComment.student).joinedload(Student.class_)
+    ).order_by(EndTermComment.updated_at.desc())
     if grade_id:
         q = q.filter_by(grade_id=grade_id)
     for c in q.all():
@@ -213,7 +227,11 @@ def _export_scores(wb, grade_id=None):
     """导出成绩汇总到独立Sheet"""
     ws = wb.create_sheet(title="成绩汇总")
     ws.append(["考试名称", "考试日期", "学生姓名", "班级", "科目", "分数", "班级排名", "年级排名"])
-    q = Score.query.join(Exam).order_by(Exam.exam_date.desc(), Score.student_id, Score.subject_id)
+    q = Score.query.options(
+        joinedload(Score.exam),
+        joinedload(Score.student).joinedload(Student.class_),
+        joinedload(Score.subject),
+    ).join(Exam).order_by(Exam.exam_date.desc(), Score.student_id, Score.subject_id)
     if grade_id:
         q = q.filter(Score.grade_id == grade_id)
     for s in q.all():
@@ -229,7 +247,9 @@ def _export_attendance(wb, grade_id=None):
     """导出考勤汇总到独立Sheet"""
     ws = wb.create_sheet(title="考勤汇总")
     ws.append(["日期", "学生姓名", "班级", "状态", "备注"])
-    q = Attendance.query.order_by(Attendance.record_date.desc())
+    q = Attendance.query.options(
+        joinedload(Attendance.student).joinedload(Student.class_)
+    ).order_by(Attendance.record_date.desc())
     if grade_id:
         q = q.filter_by(grade_id=grade_id)
     status_labels = {"present": "出勤", "late": "迟到", "early": "早退", "absent": "缺勤", "leave": "请假"}

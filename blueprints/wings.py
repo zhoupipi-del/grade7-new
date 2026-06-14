@@ -4,6 +4,7 @@ from models import db, Student, Class, WingsScore, Grade
 from decorators import login_required, scope_query
 from datetime import datetime
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 from utils.db_utils import safe_commit
 
 # 声呐事件总线（评分实时广播）
@@ -54,21 +55,36 @@ def _student_totals(class_id=None, grade_id=None, limit=None):
         q = q.limit(limit)
     rows = q.all()
 
+    if not rows:
+        return []
+
+    # 批量预加载学生（消除 Student.query.get N+1）
+    student_ids = [r.student_id for r in rows]
+    student_map = {s.id: s for s in Student.query.options(
+        joinedload(Student.class_)
+    ).filter(Student.id.in_(student_ids)).all()}
+
+    # 批量预计算各维度均分（一次性 GROUP BY，消除 5N 次查询）
+    dim_q = db.session.query(
+        WingsScore.student_id,
+        WingsScore.dimension,
+        func.avg(WingsScore.score).label("avg"),
+    )
+    for f in filters:
+        dim_q = dim_q.filter(f)
+    dim_q = dim_q.filter(WingsScore.student_id.in_(student_ids))
+    dim_q = dim_q.group_by(WingsScore.student_id, WingsScore.dimension)
+    dim_rows = dim_q.all()
+    dim_map = {}
+    for dr in dim_rows:
+        dim_map.setdefault(dr.student_id, {})[dr.dimension] = round(float(dr.avg), 1) if dr.avg else 0
+
     results = []
     for row in rows:
-        student = Student.query.get(row.student_id)
+        student = student_map.get(row.student_id)
         if not student:
             continue
-        dims = {}
-        for d in DIMENSIONS:
-            dq = db.session.query(func.avg(WingsScore.score)).filter(
-                WingsScore.student_id == row.student_id,
-                WingsScore.dimension == d,
-            )
-            for f in filters:
-                dq = dq.filter(f)
-            avg = dq.scalar()
-            dims[d] = round(float(avg), 1) if avg else 0
+        dims = dim_map.get(row.student_id, {})
         results.append((student, dims, round(float(row.total_avg), 1)))
     return results
 
@@ -100,6 +116,13 @@ def dashboard():
     if base_filter is not None:
         recent_q = recent_q.filter(base_filter)
     recent_scores = recent_q.limit(20).all()
+    # 批量预加载 recent_scores 的学生（模板中访问 s.student.name 会触发懒加载）
+    if recent_scores:
+        rs_sids = list({s.student_id for s in recent_scores})
+        rs_stu_map = {s.id: s for s in Student.query.filter(Student.id.in_(rs_sids)).all()}
+        # 将预加载的学生附加到对象上，模板可直接访问
+        for s in recent_scores:
+            s._student = rs_stu_map.get(s.student_id)
 
     # 维度分布数据（供图表）
     dim_dist = {d: dim_avgs.get(d, 0) for d in DIMENSIONS}
@@ -189,28 +212,44 @@ def class_ranking():
                                grades=grades, grade_filter=None, dim_filter=dimension,
                                rankings=[], overall=[])
 
-    # 按班级聚合各维度均分
+    # 按班级聚合各维度均分（批量查询，消除 7C 次 N+1）
     classes = Class.query.filter_by(grade_id=grade_id, is_active=True).all()
-    rankings = {}  # {class_name: {dim: avg}}
+    class_ids = [c.id for c in classes]
+    class_map = {c.id: c for c in classes}
+
+    # 一次性查所有班级所有维度的均分
+    dim_rows = db.session.query(
+        WingsScore.class_id,
+        WingsScore.dimension,
+        func.avg(WingsScore.score).label("avg"),
+    ).filter(WingsScore.class_id.in_(class_ids)).group_by(
+        WingsScore.class_id, WingsScore.dimension
+    ).all()
+    class_dim_avgs = {}
+    for dr in dim_rows:
+        class_dim_avgs.setdefault(dr.class_id, {})[dr.dimension] = round(float(dr.avg), 1) if dr.avg else 0
+
+    # 一次性查所有班级总均分和计数
+    total_rows = db.session.query(
+        WingsScore.class_id,
+        func.avg(WingsScore.score).label("avg"),
+        func.count(WingsScore.id).label("cnt"),
+    ).filter(WingsScore.class_id.in_(class_ids)).group_by(WingsScore.class_id).all()
+    total_map = {r.class_id: {"avg": round(float(r.avg), 1) if r.avg else 0, "count": r.cnt} for r in total_rows}
+
+    # 组装 rankings
+    rankings = {}
     for c in classes:
-        rankings[c.name] = {}
-        for d in DIMENSIONS:
-            avg = db.session.query(func.avg(WingsScore.score)).filter(
-                WingsScore.class_id == c.id,
-                WingsScore.dimension == d,
-            ).scalar()
-            rankings[c.name][d] = round(float(avg), 1) if avg else 0
+        rankings[c.name] = class_dim_avgs.get(c.id, {})
 
     # 总均分排名
     overall = []
     for c in classes:
-        avg = db.session.query(func.avg(WingsScore.score)).filter(
-            WingsScore.class_id == c.id,
-        ).scalar()
+        info = total_map.get(c.id, {"avg": 0, "count": 0})
         overall.append({
             "name": c.name,
-            "avg": round(float(avg), 1) if avg else 0,
-            "count": WingsScore.query.filter_by(class_id=c.id).count(),
+            "avg": info["avg"],
+            "count": info["count"],
         })
     overall.sort(key=lambda x: x["avg"], reverse=True)
 
@@ -236,33 +275,40 @@ def medals():
     ]
 
     results = {}
+    all_winner_ids = []
+    medal_rows_map = {}  # {medal_key: [(student_id, avg)]}
     for mt in medal_types:
         if mt["dim"]:
-            # 单维度Top5
             q = db.session.query(
                 WingsScore.student_id,
                 func.avg(WingsScore.score).label("avg"),
             ).filter(WingsScore.dimension == mt["dim"])
             if grade_id:
                 q = q.filter(WingsScore.grade_id == grade_id)
-            rows = q.group_by(WingsScore.student_id).order_by(
-                func.avg(WingsScore.score).desc()
-            ).limit(5).all()
         else:
-            # 全能Top5
             q = db.session.query(
                 WingsScore.student_id,
                 func.avg(WingsScore.score).label("avg"),
             )
             if grade_id:
                 q = q.filter(WingsScore.grade_id == grade_id)
-            rows = q.group_by(WingsScore.student_id).order_by(
-                func.avg(WingsScore.score).desc()
-            ).limit(5).all()
+        rows = q.group_by(WingsScore.student_id).order_by(
+            func.avg(WingsScore.score).desc()
+        ).limit(5).all()
+        medal_rows_map[mt["key"]] = rows
+        all_winner_ids.extend(r.student_id for r in rows)
 
+    # 批量预加载获奖学生（含班级）
+    winner_map = {}
+    if all_winner_ids:
+        winner_map = {s.id: s for s in Student.query.options(
+            joinedload(Student.class_)
+        ).filter(Student.id.in_(all_winner_ids)).all()}
+
+    for mt in medal_types:
         winners = []
-        for row in rows:
-            student = Student.query.get(row.student_id)
+        for row in medal_rows_map[mt["key"]]:
+            student = winner_map.get(row.student_id)
             if student:
                 winners.append({
                     "name": student.name,
@@ -289,20 +335,27 @@ def portfolio():
     if class_id:
         filters.append(Student.class_id == class_id)
 
-    students_page = Student.query.filter(*filters).order_by(
+    students_page = Student.query.filter(*filters).options(
+        joinedload(Student.class_)
+    ).order_by(
         Student.grade_id, Student.class_id, Student.student_no
     ).paginate(page=page, per_page=30)
 
-    # 查每个学生的总分
+    # 批量查询每个学生的总分和计数（消除 2*30 次 N+1）
+    page_sids = [s.id for s in students_page.items]
+    stats_rows = db.session.query(
+        WingsScore.student_id,
+        func.avg(WingsScore.score).label("avg"),
+        func.count(WingsScore.id).label("cnt"),
+    ).filter(WingsScore.student_id.in_(page_sids)).group_by(WingsScore.student_id).all()
+    stats_map = {r.student_id: (float(r.avg), r.cnt) for r in stats_rows}
+
     student_summaries = []
     for s in students_page.items:
-        avg = db.session.query(func.avg(WingsScore.score)).filter(
-            WingsScore.student_id == s.id
-        ).scalar()
-        count = WingsScore.query.filter_by(student_id=s.id).count()
+        avg, count = stats_map.get(s.id, (0, 0))
         student_summaries.append({
             "student": s,
-            "avg": round(float(avg), 1) if avg else 0,
+            "avg": round(avg, 1) if avg else 0,
             "count": count,
         })
 

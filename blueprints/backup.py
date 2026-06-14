@@ -42,10 +42,10 @@ def _get_db_info():
     info = _parse_db_url(db_url)
     if info:
         try:
-            tables = db.session.execute(
+            tables = int(db.session.execute(
                 text("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = :s"),
                 {"s": info["database"]},
-            ).scalar()
+            ).scalar() or 0)
             total_rows = db.session.execute(
                 text(
                     "SELECT SUM(table_rows) FROM information_schema.tables "
@@ -64,9 +64,9 @@ def _get_db_info():
                 "engine": "MySQL",
                 "database": info["database"],
                 "host": info["host"],
-                "table_count": tables or 0,
+                "table_count": tables,
                 "total_records": int(total_rows or 0),
-                "db_size_mb": db_size or 0,
+                "db_size_mb": float(db_size or 0),
             }
         except Exception:
             return {
@@ -83,7 +83,7 @@ def _get_db_info():
     if db_path and not db_path.startswith("sqlite"):
         try:
             size_mb = os.path.getsize(db_path) / 1024 / 1024
-            tables = db.session.execute(text("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")).scalar()
+            tables = int(db.session.execute(text("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")).scalar() or 0)
             return {
                 "engine": "SQLite",
                 "database": os.path.basename(db_path),

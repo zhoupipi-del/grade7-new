@@ -6,6 +6,7 @@ from models import db, Student, Class, Grade, EndTermComment, User, \
 from decorators import login_required, require_role
 import time
 from datetime import datetime
+from utils import get_local_now
 from utils.db_utils import safe_commit
 from blueprints.audit_log import audit_log
 from sqlalchemy import func
@@ -67,7 +68,7 @@ def _call_llm_api(system_prompt, user_content):
 
 
 def _current_semester():
-    now = datetime.utcnow()
+    now = get_local_now()
     y = now.year
     m = now.month
     if m >= 9:
