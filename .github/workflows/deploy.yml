@@ -26,7 +26,7 @@ jobs:
             sleep 3
             echo "--- health check ---"
             STATUS=$(systemctl is-active grade7-new)
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5001/health || echo "000")
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5001/login || echo "000")
             echo "Service: $STATUS | Health: $HTTP_CODE"
             if [ "$STATUS" = "active" ] && [ "$HTTP_CODE" = "200" ]; then
               echo "=== DEPLOY SUCCESS ==="
