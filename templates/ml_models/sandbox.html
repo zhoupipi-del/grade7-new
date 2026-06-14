@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>德育沙盘推演舱 - 梨江中学德育管理平台</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    <style>
+        :root {
+            --primary: #4e73df;
+            --success: #1cc88a;
+            --danger: #e74a3b;
+            --warning: #f6c23e;
+            --info: #36b9cc;
+            --light: #f8f9fc;
+            --dark: #5a5c69;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .sandbox-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 0 0 20px 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .sandbox-header h1 {
+            font-weight: 700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .sandbox-header .subtitle {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+        
+        .student-selector {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin-bottom: 2rem;
+        }
+        
+        .intervention-card {
+            background: white;
+            border: 2px solid #e3e6f0;
+            border-radius: 12px;
+            padding: 1.25rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .intervention-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            border-color: var(--primary);
+        }
+        
+        .intervention-card.selected {
+            border-color: var(--success);
+            background: linear-gradient(135deg, #f8fff9 0%, #e8f5e9 100%);
+        }
+        
+        .intervention-card .card-icon {
+            font-size: 2rem;
+            margin-bottom: 0.75rem;
+            display: block;
+        }
+        
+        .intervention-card .form-check-input {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            width: 1.2em;
+            height: 1.2em;
+            cursor: pointer;
+        }
+        
+        .intervention-card .card-title {
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 0.5rem;
+            color: var(--dark);
+        }
+        
+        .intervention-card .card-desc {
+            font-size: 0.8rem;
+            color: #858796;
+            line-height: 1.4;
+        }
+        
+        .risk-curve-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin-bottom: 2rem;
+            min-height: 400px;
+        }
+        
+        .ai-report-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            margin-bottom: 2rem;
+        }
+        
+        .ai-report-content {
+            background: #f8f9fc;
+            border-left: 4px solid var(--primary);
+            padding: 1rem;
+            border-radius: 8px;
+            line-height: 1.8;
+            font-size: 0.95rem;
+        }
+        
+        .risk-badge {
+            display: inline-block;
+            padding: 0.35em 0.65em;
+            font-size: 0.75em;
+            font-weight: 700;
+            line-height: 1;
+            text-align: center;
+            white-space: nowrap;
+            vertical-align: baseline;
+            border-radius: 0.375rem;
+        }
+        
+        .risk-badge.high {
+            background: #e74a3b;
+            color: white;
+        }
+        
+        .risk-badge.medium {
+            background: #f6c23e;
+            color: #333;
+        }
+        
+        .risk-badge.low {
+            background: #1cc88a;
+            color: white;
+        }
+        
+        .feature-change-item {
+            background: #f8f9fc;
+            border-radius: 8px;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .feature-change-item .delta {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+        
+        .feature-change-item .delta.positive {
+            color: var(--success);
+        }
+        
+        .feature-change-item .delta.negative {
+            color: var(--danger);
+        }
+        
+        .btn-deduce {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-deduce:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+            color: white;
+        }
+        
+        .btn-deduce:disabled {
+            background: #858796;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        
+        .loading-spinner {
+            background: white;
+            padding: 2rem 3rem;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.3);
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.25rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        
+        .stat-card .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+        
+        .stat-card .stat-label {
+            font-size: 0.85rem;
+            color: #858796;
+        }
+    </style>
+</head>
+<body>
+    <!-- 页面独立运行，不继承 base.html -->
+    
+    <!-- 🌌 沙盘推演舱头部 -->
+    <div class="sandbox-header">
+        <div class="container-fluid">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1><i class="fas fa-compass"></i> 德育沙盘推演舱</h1>
+                    <p class="subtitle mb-0">
+                        <i class="fas fa-magic"></i> 
+                        What-If 模拟器 — 预设干预措施，推演未来德育轨迹
+                    </p>
+                </div>
+                <div class="col-md-4 text-end">
+                    <span class="badge bg-light text-dark" style="font-size: 0.9rem; padding: 0.5rem 1rem;">
+                        <i class="fas fa-brain"></i> XGBoost + DeepSeek 双引擎
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="container-fluid">
+        <!-- 学生选择器 -->
+        <div class="student-selector">
+            <div class="row align-items-center">
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">选择班级</label>
+                    <select class="form-select" id="classSelect" onchange="loadStudents()">
+                        <option value="">-- 请选择班级 --</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">选择学生</label>
+                    <select class="form-select" id="studentSelect">
+                        <option value="">-- 请先选择班级 --</option>
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button class="btn btn-deduce w-100" onclick="startDeduction()" id="deduceBtn" disabled>
+                        <i class="fas fa-play-circle"></i> 开始推演
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 推演结果区域（默认隐藏） -->
+        <div id="resultSection" style="display: none;">
+            <!-- 风险统计卡片 -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-value text-danger" id="origRisk">--</div>
+                        <div class="stat-label">原始风险概率</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-value text-success" id="simRisk">--</div>
+                        <div class="stat-label">推演风险概率</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-value text-primary" id="riskDrop">--</div>
+                        <div class="stat-label">风险降幅</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-value" id="riskLevelBadge">--</div>
+                        <div class="stat-label">推演后风险等级</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <!-- 左侧：风险曲线 -->
+                <div class="col-md-8">
+                    <div class="risk-curve-container">
+                        <h5 class="fw-bold mb-3">
+                            <i class="fas fa-chart-line text-primary"></i> 风险轨迹推演曲线
+                        </h5>
+                        <div id="riskCurveChart" style="width: 100%; height: 400px;"></div>
+                        <div class="mt-3">
+                            <span class="badge bg-danger me-2">
+                                <i class="fas fa-minus"></i> 原始轨迹（无干预）
+                            </span>
+                            <span class="badge" style="background: #1cc88a;">
+                                <i class="fas fa-minus"></i> 推演轨迹（干预后）
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <!-- 特征变化 -->
+                    <div class="ai-report-container">
+                        <h5 class="fw-bold mb-3">
+                            <i class="fas fa-sliders-h text-warning"></i> 特征向量变化
+                        </h5>
+                        <div id="featureChanges">
+                            <!-- 动态填充 -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 右侧：干预战术卡片 -->
+                <div class="col-md-4">
+                    <div class="risk-curve-container">
+                        <h5 class="fw-bold mb-3">
+                            <i class="fas fa-tactical"></i> 干预战术卡片
+                        </h5>
+                        <p class="text-muted small mb-3">勾选干预措施，点击"开始推演"查看效果</p>
+                        
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <div class="intervention-card" onclick="toggleIntervention(this, 'class_mate_buddy')">
+                                    <input class="form-check-input" type="checkbox" value="class_mate_buddy" id="check1">
+                                    <div class="card-icon text-primary">
+                                        <i class="fas fa-user-friends"></i>
+                                    </div>
+                                    <div class="card-title">班干部一对一结对子</div>
+                                    <div class="card-desc">人际交往特征增强，同伴影响力提升</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-12">
+                                <div class="intervention-card" onclick="toggleIntervention(this, 'home_visit')">
+                                    <input class="form-check-input" type="checkbox" value="home_visit" id="check2">
+                                    <div class="card-icon text-success">
+                                        <i class="fas fa-home"></i>
+                                    </div>
+                                    <div class="card-title">家校面谈</div>
+                                    <div class="card-desc">家庭监督权重提升，家校合力形成</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-12">
+                                <div class="intervention-card" onclick="toggleIntervention(this, 'seat_adjust')">
+                                    <input class="form-check-input" type="checkbox" value="seat_adjust" id="check3">
+                                    <div class="card-icon text-warning">
+                                        <i class="fas fa-chair"></i>
+                                    </div>
+                                    <div class="card-title">调整座位到第一排</div>
+                                    <div class="card-desc">课堂违纪概率下降，注意力集中度提升</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-12">
+                                <div class="intervention-card" onclick="toggleIntervention(this, 'psych_icebreak')">
+                                    <input class="form-check-input" type="checkbox" value="psych_icebreak" id="check4">
+                                    <div class="card-icon text-danger">
+                                        <i class="fas fa-brain"></i>
+                                    </div>
+                                    <div class="card-title">专职心理老师破冰谈话</div>
+                                    <div class="card-desc">心理高危因子熔断，情绪状态重置</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-12">
+                                <div class="intervention-card" onclick="toggleIntervention(this, 'award_incentive')">
+                                    <input class="form-check-input" type="checkbox" value="award_incentive" id="check5">
+                                    <div class="card-icon text-info">
+                                        <i class="fas fa-award"></i>
+                                    </div>
+                                    <div class="card-title">奖励激励（小红花/称号）</div>
+                                    <div class="card-desc">正向强化，自我效能感提升</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-12">
+                                <div class="intervention-card" onclick="toggleIntervention(this, 'sports_engagement')">
+                                    <input class="form-check-input" type="checkbox" value="sports_engagement" id="check6">
+                                    <div class="card-icon text-primary">
+                                        <i class="fas fa-futbol"></i>
+                                    </div>
+                                    <div class="card-title">体育破冰（安排体育活动）</div>
+                                    <div class="card-desc">体能释放，团队协作能力培养</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-12">
+                                <div class="intervention-card" onclick="toggleIntervention(this, 'study_group')">
+                                    <input class="form-check-input" type="checkbox" value="study_group" id="check7">
+                                    <div class="card-icon text-success">
+                                        <i class="fas fa-book-open"></i>
+                                    </div>
+                                    <div class="card-title">学习小组捆绑</div>
+                                    <div class="card-desc">学业互助，归属感增强</div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-12">
+                                <div class="intervention-card" onclick="toggleIntervention(this, 'parent_contract')">
+                                    <input class="form-check-input" type="checkbox" value="parent_contract" id="check8">
+                                    <div class="card-icon text-warning">
+                                        <i class="fas fa-file-signature"></i>
+                                    </div>
+                                    <div class="card-title">家校契约（行为合约）</div>
+                                    <div class="card-desc">契约约束，责任意识培养</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- AI 战术推演报告 -->
+            <div class="ai-report-container">
+                <h5 class="fw-bold mb-3">
+                    <i class="fas fa-robot text-primary"></i> DeepSeek 战术推演报告
+                </h5>
+                <div class="ai-report-content" id="aiReportContent">
+                    <p class="text-muted">推演完成后，AI 将在此生成专业的干预战术报告...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+            <p class="mt-3 mb-0 fw-bold">沙盘推演中...</p>
+            <p class="text-muted small">XGBoost 特征篡改 + DeepSeek 战术分析</p>
+        </div>
+    </div>
+    
+    <script src="https://cdn.bootcdn.net/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <!-- JS: raw block removed for standalone preview -->
+    <script>
+        // ── 全局变量 ──
+        let selectedInterventions = [];
+        let riskChart = null;
+        
+        // ── 页面加载初始化 ──
+        document.addEventListener('DOMContentLoaded', function() {
+            loadClasses();
+        });
+        
+        // ── 加载班级列表 ──
+        function loadClasses() {
+            fetch('/ml/api/classes')
+                .then(res => res.json())
+                .then(data => {
+                    const select = document.getElementById('classSelect');
+                    data.classes.forEach(c => {
+                        const opt = document.createElement('option');
+                        opt.value = c.id;
+                        opt.textContent = c.name;
+                        select.appendChild(opt);
+                    });
+                });
+        }
+        
+        // ── 加载学生列表 ──
+        function loadStudents() {
+            const classId = document.getElementById('classSelect').value;
+            const studentSelect = document.getElementById('studentSelect');
+            
+            studentSelect.innerHTML = '<option value="">-- 请选择学生 --</option>';
+            
+            if (!classId) {
+                document.getElementById('deduceBtn').disabled = true;
+                return;
+            }
+            
+            fetch(`/ml/api/students?class_id=${classId}`)
+                .then(res => res.json())
+                .then(data => {
+                    data.students.forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s.id;
+                        opt.textContent = s.name;
+                        studentSelect.appendChild(opt);
+                    });
+                });
+        }
+        
+        // ── 学生选择变化 ──
+        document.getElementById('studentSelect').addEventListener('change', function() {
+            const btn = document.getElementById('deduceBtn');
+            btn.disabled = !this.value || selectedInterventions.length === 0;
+        });
+        
+        // ── 切换干预措施 ──
+        function toggleIntervention(card, interventionId) {
+            const checkbox = card.querySelector('input[type="checkbox"]');
+            checkbox.checked = !checkbox.checked;
+            
+            if (checkbox.checked) {
+                card.classList.add('selected');
+                if (!selectedInterventions.includes(interventionId)) {
+                    selectedInterventions.push(interventionId);
+                }
+            } else {
+                card.classList.remove('selected');
+                selectedInterventions = selectedInterventions.filter(i => i !== interventionId);
+            }
+            
+            // 更新按钮状态
+            const btn = document.getElementById('deduceBtn');
+            btn.disabled = !document.getElementById('studentSelect').value || selectedInterventions.length === 0;
+        }
+        
+        // ── 开始推演 ──
+        function startDeduction() {
+            const studentId = document.getElementById('studentSelect').value;
+            
+            if (!studentId) {
+                alert('请先选择学生');
+                return;
+            }
+            
+            if (selectedInterventions.length === 0) {
+                alert('请至少选择一种干预措施');
+                return;
+            }
+            
+            // 显示 loading
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            
+            // 调用 API
+            fetch('/ml/api/sandbox-deduce', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    student_id: parseInt(studentId),
+                    interventions: selectedInterventions,
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('loadingOverlay').style.display = 'none';
+                
+                if (data.code !== 0) {
+                    alert('推演失败：' + data.msg);
+                    return;
+                }
+                
+                // 显示结果区域
+                document.getElementById('resultSection').style.display = 'block';
+                
+                // 更新统计卡片
+                document.getElementById('origRisk').textContent = (data.original_risk * 100).toFixed(1) + '%';
+                document.getElementById('simRisk').textContent = (data.simulated_risk * 100).toFixed(1) + '%';
+                document.getElementById('riskDrop').textContent = data.risk_drop_pct + '%';
+                
+                const badge = document.getElementById('riskLevelBadge');
+                badge.textContent = data.sim_risk_level === 'high' ? '高风险' : (data.sim_risk_level === 'medium' ? '中风险' : '低风险');
+                badge.className = 'stat-value risk-badge ' + data.sim_risk_level;
+                
+                // 绘制风险曲线
+                renderRiskCurve(data.original_curve, data.simulated_curve);
+                
+                // 显示特征变化
+                renderFeatureChanges(data.feature_changes);
+                
+                // 显示 AI 报告
+                document.getElementById('aiReportContent').innerHTML = '<pre style="white-space: pre-wrap; font-family: inherit;">' + data.ai_report + '</pre>';
+                
+                // 滚动到结果区域
+                document.getElementById('resultSection').scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
+            })
+            .catch(err => {
+                document.getElementById('loadingOverlay').style.display = 'none';
+                alert('推演失败：' + err.message);
+            });
+        }
+        
+        // ── 绘制风险曲线 ──
+        function renderRiskCurve(origCurve, simCurve) {
+            const chartDom = document.getElementById('riskCurveChart');
+            
+            if (riskChart) {
+                riskChart.dispose();
+            }
+            
+            riskChart = echarts.init(chartDom);
+            
+            const days = [];
+            for (let i = 0; i <= 30; i++) {
+                days.push('第' + i + '天');
+            }
+            
+            const option = {
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        let res = params[0].axisValue + '<br/>';
+                        params.forEach(p => {
+                            res += p.marker + p.seriesName + ': ' + (p.value * 100).toFixed(1) + '%<br/>';
+                        });
+                        return res;
+                    }
+                },
+                legend: {
+                    data: ['原始轨迹（无干预）', '推演轨迹（干预后）'],
+                    top: 10,
+                },
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '3%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    boundaryGap: false,
+                    data: days,
+                    axisLabel: {
+                        interval: 4,
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    max: 1,
+                    min: 0,
+                    axisLabel: {
+                        formatter: function(val) {
+                            return (val * 100).toFixed(0) + '%';
+                        }
+                    }
+                },
+                series: [
+                    {
+                        name: '原始轨迹（无干预）',
+                        type: 'line',
+                        data: origCurve,
+                        itemStyle: {
+                            color: '#e74a3b'
+                        },
+                        lineStyle: {
+                            width: 3,
+                            type: 'solid',
+                        },
+                        symbol: 'circle',
+                        symbolSize: 4,
+                    },
+                    {
+                        name: '推演轨迹（干预后）',
+                        type: 'line',
+                        data: simCurve,
+                        itemStyle: {
+                            color: '#1cc88a'
+                        },
+                        lineStyle: {
+                            width: 3,
+                            type: 'dashed',
+                        },
+                        symbol: 'diamond',
+                        symbolSize: 6,
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                {offset: 0, color: 'rgba(28, 200, 138, 0.3)'},
+                                {offset: 1, color: 'rgba(28, 200, 138, 0.05)'}
+                            ])
+                        }
+                    }
+                ]
+            };
+            
+            riskChart.setOption(option);
+            
+            // 窗口大小变化时重绘
+            window.addEventListener('resize', function() {
+                riskChart.resize();
+            });
+        }
+        
+        // ── 渲染特征变化 ──
+        function renderFeatureChanges(changes) {
+            const container = document.getElementById('featureChanges');
+            
+            if (!changes || Object.keys(changes).length === 0) {
+                container.innerHTML = '<p class="text-muted">无特征变化</p>';
+                return;
+            }
+            
+            let html = '';
+            const featureNames = {
+                'math_slope': '数学成绩趋势',
+                'math_avg': '数学平均成绩',
+                'quality_score': '综合素质评分',
+                'risk_density': '近期预警频次',
+                'attendance_rate': '出勤率',
+                'discipline_factor': '违纪因子',
+            };
+            
+            for (const [key, val] of Object.entries(changes)) {
+                const isPositive = val.delta > 0;
+                const sign = isPositive ? '+' : '';
+                html += `
+                    <div class="feature-change-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>${featureNames[key] || key}</strong>
+                                <br>
+                                <small class="text-muted">${val.original} → ${val.simulated}</small>
+                            </div>
+                            <div class="delta ${isPositive ? 'positive' : 'negative'}">
+                                ${sign}${val.delta}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
+        }
+    </script>
+</body>
+</html>

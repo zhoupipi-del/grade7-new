@@ -5,11 +5,37 @@
     <div class="row mb-4">
         <div class="col">
             <h2><i class="bi bi-cpu"></i> ML数学模型演示</h2>
-            <p class="text-muted">基于Python Scikit-Learn的教育数据挖掘模型</p>
+            <p class="text-muted">基于Python Scikit-Learn的教育数据挖掘模型 — 点击"演示"按钮进入交互式预测界面</p>
         </div>
     </div>
-
+    
     <div class="row">
+        <!-- ★ 德育沙盘推演舱 — 置顶Banner -->
+        <div class="col-12 mb-4">
+            <div class="card border-0 shadow-lg h-100" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 16px; overflow: hidden;">
+                <div class="card-body text-white p-4">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h4 class="mb-2"><i class="bi bi-stars me-2"></i>德育沙盘推演舱</h4>
+                            <p class="mb-2" style="opacity:0.9">What-If 干预模拟引擎 — 在不碰真实数据的前提下，推演8种德育干预措施对高风险学生的量化影响</p>
+                            <ul class="small mb-3" style="opacity:0.85; list-style:none; padding:0">
+                                <li class="me-4 d-inline-block"><i class="bi bi-lightning-charge-fill me-1"></i>XGBoost特征向量篡改</li>
+                                <li class="me-4 d-inline-block"><i class="bi bi-graph-up me-1"></i>30天风险衰减曲线</li>
+                                <li class="me-4 d-inline-block"><i class="bi bi-robot me-1"></i>DeepSeek战术推演报告</li>
+                                <li class="d-inline-block"><i class="bi bi-card-checklist me-1"></i>8种干预自由组合</li>
+                            </ul>
+                            <a href="{{ url_for('ml_models.sandbox') }}" class="btn btn-light btn-lg px-4 py-2 fw-bold" style="border-radius:10px; color:#764ba2; box-shadow:0 4px 15px rgba(0,0,0,0.2)">
+                                <i class="bi bi-rocket-takeoff me-2"></i>进入推演舱
+                            </a>
+                        </div>
+                        <div class="col-md-4 text-center d-none d-md-block" style="opacity:0.15">
+                            <i class="bi bi-diagram-3" style="font-size:120px;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- 模型1：成绩预测 -->
         <div class="col-md-4 mb-3">
             <div class="card border-0 shadow-sm h-100">
@@ -113,8 +139,8 @@
                     </ul>
                 </div>
                 <div class="card-footer bg-white border-0">
-                    <a href="{{ url_for('ai_analysis.risk_score') }}" class="btn btn-success w-100">
-                        <i class="bi bi-play-circle"></i> 演示
+                    <a href="{{ url_for('ai_analysis.dashboard') }}" class="btn btn-success w-100">
+                        <i class="bi bi-play-circle"></i> 查看总账
                     </a>
                 </div>
             </div>
