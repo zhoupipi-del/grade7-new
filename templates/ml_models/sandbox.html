@@ -473,7 +473,7 @@
     </div>
     
     <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
-    <!-- JS: raw block removed for standalone preview -->
+    {% raw %}
     <script>
         // ── 全局变量 ──
         let selectedInterventions = [];
@@ -760,5 +760,6 @@
             container.innerHTML = html;
         }
     </script>
+    {% endraw %}
 </body>
 </html>
