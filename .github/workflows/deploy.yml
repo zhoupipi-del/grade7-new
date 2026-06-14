@@ -22,6 +22,8 @@ jobs:
             cd /opt/grade7-new
             echo "--- git pull ---"
             git pull origin main
+            echo "--- sync dependencies ---"
+            /opt/grade7-new/venv/bin/pip install -r requirements.txt -q
             echo "--- restart service ---"
             systemctl restart grade7-new
             echo "--- waiting for boot (37 blueprints + preload) ---"
