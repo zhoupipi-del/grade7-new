@@ -289,6 +289,106 @@
             </div>
         </div>
         
+        <!-- 干预战术卡片区域（始终可见） -->
+        <div class="intervention-section mb-4">
+            <div class="risk-curve-container">
+                <h5 class="fw-bold mb-3">
+                    <i class="fas fa-tactical"></i> 干预战术卡片
+                </h5>
+                <p class="text-muted small mb-3">勾选干预措施，点击"开始推演"查看效果</p>
+                
+                <div class="row g-3">
+                    <div class="col-md-3 col-sm-6">
+                        <div class="intervention-card" onclick="toggleIntervention(this, 'class_mate_buddy')">
+                            <input class="form-check-input" type="checkbox" value="class_mate_buddy" id="check1">
+                            <div class="card-icon text-primary">
+                                <i class="fas fa-user-friends"></i>
+                            </div>
+                            <div class="card-title">班干部一对一结对子</div>
+                            <div class="card-desc">人际交往特征增强，同伴影响力提升</div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-3 col-sm-6">
+                        <div class="intervention-card" onclick="toggleIntervention(this, 'home_visit')">
+                            <input class="form-check-input" type="checkbox" value="home_visit" id="check2">
+                            <div class="card-icon text-success">
+                                <i class="fas fa-home"></i>
+                            </div>
+                            <div class="card-title">家校面谈</div>
+                            <div class="card-desc">家庭监督权重提升，家校合力形成</div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-3 col-sm-6">
+                        <div class="intervention-card" onclick="toggleIntervention(this, 'seat_adjust')">
+                            <input class="form-check-input" type="checkbox" value="seat_adjust" id="check3">
+                            <div class="card-icon text-warning">
+                                <i class="fas fa-chair"></i>
+                            </div>
+                            <div class="card-title">调整座位到第一排</div>
+                            <div class="card-desc">课堂违纪概率下降，注意力集中度提升</div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-3 col-sm-6">
+                        <div class="intervention-card" onclick="toggleIntervention(this, 'psych_icebreak')">
+                            <input class="form-check-input" type="checkbox" value="psych_icebreak" id="check4">
+                            <div class="card-icon text-danger">
+                                <i class="fas fa-brain"></i>
+                            </div>
+                            <div class="card-title">专职心理老师破冰谈话</div>
+                            <div class="card-desc">心理高危因子熔断，情绪状态重置</div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-3 col-sm-6">
+                        <div class="intervention-card" onclick="toggleIntervention(this, 'award_incentive')">
+                            <input class="form-check-input" type="checkbox" value="award_incentive" id="check5">
+                            <div class="card-icon text-info">
+                                <i class="fas fa-award"></i>
+                            </div>
+                            <div class="card-title">奖励激励（小红花/称号）</div>
+                            <div class="card-desc">正向强化，自我效能感提升</div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-3 col-sm-6">
+                        <div class="intervention-card" onclick="toggleIntervention(this, 'sports_engagement')">
+                            <input class="form-check-input" type="checkbox" value="sports_engagement" id="check6">
+                            <div class="card-icon text-primary">
+                                <i class="fas fa-futbol"></i>
+                            </div>
+                            <div class="card-title">体育破冰（安排体育活动）</div>
+                            <div class="card-desc">体能释放，团队协作能力培养</div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-3 col-sm-6">
+                        <div class="intervention-card" onclick="toggleIntervention(this, 'study_group')">
+                            <input class="form-check-input" type="checkbox" value="study_group" id="check7">
+                            <div class="card-icon text-success">
+                                <i class="fas fa-book-open"></i>
+                            </div>
+                            <div class="card-title">学习小组捆绑</div>
+                            <div class="card-desc">学业互助，归属感增强</div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-3 col-sm-6">
+                        <div class="intervention-card" onclick="toggleIntervention(this, 'parent_contract')">
+                            <input class="form-check-input" type="checkbox" value="parent_contract" id="check8">
+                            <div class="card-icon text-warning">
+                                <i class="fas fa-file-signature"></i>
+                            </div>
+                            <div class="card-title">家校契约（行为合约）</div>
+                            <div class="card-desc">契约约束，责任意识培养</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <!-- 推演结果区域（默认隐藏） -->
         <div id="resultSection" style="display: none;">
             <!-- 风险统计卡片 -->
@@ -319,8 +419,8 @@
                 </div>
             </div>
             
+            <!-- 风险曲线 + 特征变化（全宽） -->
             <div class="row">
-                <!-- 左侧：风险曲线 -->
                 <div class="col-md-8">
                     <div class="risk-curve-container">
                         <h5 class="fw-bold mb-3">
@@ -338,7 +438,7 @@
                     </div>
                     
                     <!-- 特征变化 -->
-                    <div class="ai-report-container">
+                    <div class="ai-report-container mt-4">
                         <h5 class="fw-bold mb-3">
                             <i class="fas fa-sliders-h text-warning"></i> 特征向量变化
                         </h5>
@@ -348,109 +448,21 @@
                     </div>
                 </div>
                 
-                <!-- 右侧：干预战术卡片 -->
                 <div class="col-md-4">
+                    <!-- 推演应用的干预措施摘要 -->
                     <div class="risk-curve-container">
                         <h5 class="fw-bold mb-3">
-                            <i class="fas fa-tactical"></i> 干预战术卡片
+                            <i class="fas fa-check-circle text-success"></i> 本次应用干预
                         </h5>
-                        <p class="text-muted small mb-3">勾选干预措施，点击"开始推演"查看效果</p>
-                        
-                        <div class="row g-3">
-                            <div class="col-12">
-                                <div class="intervention-card" onclick="toggleIntervention(this, 'class_mate_buddy')">
-                                    <input class="form-check-input" type="checkbox" value="class_mate_buddy" id="check1">
-                                    <div class="card-icon text-primary">
-                                        <i class="fas fa-user-friends"></i>
-                                    </div>
-                                    <div class="card-title">班干部一对一结对子</div>
-                                    <div class="card-desc">人际交往特征增强，同伴影响力提升</div>
-                                </div>
-                            </div>
-                            
-                            <div class="col-12">
-                                <div class="intervention-card" onclick="toggleIntervention(this, 'home_visit')">
-                                    <input class="form-check-input" type="checkbox" value="home_visit" id="check2">
-                                    <div class="card-icon text-success">
-                                        <i class="fas fa-home"></i>
-                                    </div>
-                                    <div class="card-title">家校面谈</div>
-                                    <div class="card-desc">家庭监督权重提升，家校合力形成</div>
-                                </div>
-                            </div>
-                            
-                            <div class="col-12">
-                                <div class="intervention-card" onclick="toggleIntervention(this, 'seat_adjust')">
-                                    <input class="form-check-input" type="checkbox" value="seat_adjust" id="check3">
-                                    <div class="card-icon text-warning">
-                                        <i class="fas fa-chair"></i>
-                                    </div>
-                                    <div class="card-title">调整座位到第一排</div>
-                                    <div class="card-desc">课堂违纪概率下降，注意力集中度提升</div>
-                                </div>
-                            </div>
-                            
-                            <div class="col-12">
-                                <div class="intervention-card" onclick="toggleIntervention(this, 'psych_icebreak')">
-                                    <input class="form-check-input" type="checkbox" value="psych_icebreak" id="check4">
-                                    <div class="card-icon text-danger">
-                                        <i class="fas fa-brain"></i>
-                                    </div>
-                                    <div class="card-title">专职心理老师破冰谈话</div>
-                                    <div class="card-desc">心理高危因子熔断，情绪状态重置</div>
-                                </div>
-                            </div>
-                            
-                            <div class="col-12">
-                                <div class="intervention-card" onclick="toggleIntervention(this, 'award_incentive')">
-                                    <input class="form-check-input" type="checkbox" value="award_incentive" id="check5">
-                                    <div class="card-icon text-info">
-                                        <i class="fas fa-award"></i>
-                                    </div>
-                                    <div class="card-title">奖励激励（小红花/称号）</div>
-                                    <div class="card-desc">正向强化，自我效能感提升</div>
-                                </div>
-                            </div>
-                            
-                            <div class="col-12">
-                                <div class="intervention-card" onclick="toggleIntervention(this, 'sports_engagement')">
-                                    <input class="form-check-input" type="checkbox" value="sports_engagement" id="check6">
-                                    <div class="card-icon text-primary">
-                                        <i class="fas fa-futbol"></i>
-                                    </div>
-                                    <div class="card-title">体育破冰（安排体育活动）</div>
-                                    <div class="card-desc">体能释放，团队协作能力培养</div>
-                                </div>
-                            </div>
-                            
-                            <div class="col-12">
-                                <div class="intervention-card" onclick="toggleIntervention(this, 'study_group')">
-                                    <input class="form-check-input" type="checkbox" value="study_group" id="check7">
-                                    <div class="card-icon text-success">
-                                        <i class="fas fa-book-open"></i>
-                                    </div>
-                                    <div class="card-title">学习小组捆绑</div>
-                                    <div class="card-desc">学业互助，归属感增强</div>
-                                </div>
-                            </div>
-                            
-                            <div class="col-12">
-                                <div class="intervention-card" onclick="toggleIntervention(this, 'parent_contract')">
-                                    <input class="form-check-input" type="checkbox" value="parent_contract" id="check8">
-                                    <div class="card-icon text-warning">
-                                        <i class="fas fa-file-signature"></i>
-                                    </div>
-                                    <div class="card-title">家校契约（行为合约）</div>
-                                    <div class="card-desc">契约约束，责任意识培养</div>
-                                </div>
-                            </div>
+                        <div id="appliedInterventions">
+                            <!-- 动态填充 -->
                         </div>
                     </div>
                 </div>
             </div>
             
             <!-- AI 战术推演报告 -->
-            <div class="ai-report-container">
+            <div class="ai-report-container mt-4">
                 <h5 class="fw-bold mb-3">
                     <i class="fas fa-robot text-primary"></i> DeepSeek 战术推演报告
                 </h5>
@@ -604,6 +616,9 @@
                 // 显示特征变化
                 renderFeatureChanges(data.feature_changes);
                 
+                // 显示本次应用的干预措施
+                renderAppliedInterventions(selectedInterventions);
+                
                 // 显示 AI 报告
                 document.getElementById('aiReportContent').innerHTML = '<pre style="white-space: pre-wrap; font-family: inherit;">' + data.ai_report + '</pre>';
                 
@@ -617,6 +632,34 @@
                 document.getElementById('loadingOverlay').style.display = 'none';
                 alert('推演失败：' + err.message);
             });
+        }
+        
+        // ── 渲染本次应用的干预措施 ──
+        const interventionNames = {
+            'class_mate_buddy': '班干部一对一结对子',
+            'home_visit': '家校面谈',
+            'seat_adjust': '调整座位到第一排',
+            'psych_icebreak': '专职心理老师破冰谈话',
+            'award_incentive': '奖励激励（小红花/称号）',
+            'sports_engagement': '体育破冰（安排体育活动）',
+            'study_group': '学习小组捆绑',
+            'parent_contract': '家校契约（行为合约）',
+        };
+        
+        function renderAppliedInterventions(interventionIds) {
+            const container = document.getElementById('appliedInterventions');
+            if (!interventionIds || interventionIds.length === 0) {
+                container.innerHTML = '<p class="text-muted">无</p>';
+                return;
+            }
+            let html = '<ul class="list-group list-group-flush">';
+            interventionIds.forEach(id => {
+                html += `<li class="list-group-item bg-transparent px-0">
+                    <i class="fas fa-check text-success me-2"></i>${interventionNames[id] || id}
+                </li>`;
+            });
+            html += '</ul>';
+            container.innerHTML = html;
         }
         
         // ── 绘制风险曲线 ──
