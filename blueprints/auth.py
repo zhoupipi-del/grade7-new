@@ -65,7 +65,10 @@ def change_password():
 @auth_bp.route("/accounts")
 @require_role("ms_admin")
 def account_list():
-    users = User.query.order_by(User.role, User.username).all()
+    # 主列表只显示正常账号，排除已软删除的（用户名含 _deleted_）
+    users = User.query.filter(
+        db.not_(User.username.like('%_deleted_%'))
+    ).order_by(User.role, User.username).all()
     return render_template("accounts/list.html", users=users, ROLES=ROLES)
 
 
@@ -126,6 +129,9 @@ def delete_account(uid):
             return jsonify({"error": "不能删除最后一个德育处管理员账号"}), 400
 
     user = User.query.get_or_404(uid)
+    # 幂等性保护：已删除的账号不重复处理
+    if '_deleted_' in user.username:
+        return jsonify({"ok": True, "message": f"账号已被删除，无需重复操作"})
     # 软删除：禁用登录，用户名加后缀避免冲突，清除手机号
     user.is_active = False
     user.username = f"{user.username}_deleted_{user.id}"

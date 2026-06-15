@@ -39,6 +39,10 @@ with app.app_context():
     for u in suspects:
         name = (u.display_name or '').strip()
         if '胡老师' in name or '家长测试' in name:
+            # 幂等性保护：已删除的不重复处理
+            if '_deleted_' in u.username:
+                print(f"  [SKIP] {u.display_name} 已删除（username={u.username}），跳过")
+                continue
             # 确保不是最后一个管理员
             if u.role == 'ms_admin':
                 admin_count = User.query.filter_by(role='ms_admin', is_active=True).count()
