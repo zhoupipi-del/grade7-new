@@ -9,6 +9,8 @@ import os, sys
 from datetime import date, timedelta
 
 os.environ.setdefault('DATABASE_URL', 'mysql+pymysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/grade7_new')
+os.environ.setdefault('SECRET_KEY', 'seed-script-secret-key-must-be-32chars-ok!')
+os.environ.setdefault('JWT_SECRET_KEY', 'seed-script-jwt-secret-key-32chars-ok!')
 sys.path.insert(0, '/opt/grade7-new')
 
 from app import create_app
