@@ -157,6 +157,7 @@
   <!-- ════════ Tab切换: 趋势 / 时间轴 / 数据明细 ════════ -->
   <ul class="nav nav-tabs mb-3" id="profileTab" role="tablist">
     <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-trends">趋势可视化</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-flag">流动红旗</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-timeline">事件时间轴</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-data">数据明细</a></li>
     <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-notes">班主任手记 ({{ notes | length }})</a></li>
@@ -264,7 +265,69 @@
       </div>
     </div>
 
-    <!-- ── Tab 2: 事件时间轴 ── -->
+    <!-- ── Tab 2: 流动红旗历史排名 ── -->
+    <div class="tab-pane fade" id="tab-flag">
+      <div class="row g-3">
+        <div class="col-md-8">
+          <div class="card">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-flag"></i> 流动红旗历史排名</div>
+              {% if flag_rank_history %}
+                <div class="table-responsive">
+                  <table class="table table-sm data-table">
+                    <thead><tr>
+                      <th>周期</th><th>最终得分</th><th>班级排名</th><th>状态</th>
+                    </tr></thead>
+                    <tbody>
+                      {% for fh in flag_rank_history %}
+                        <tr>
+                          <td>{{ fh.period_label }}</td>
+                          <td class="fw-bold">{{ "%.2f"|format(fh.final_score) }}</td>
+                          <td>
+                            {% if fh.rank %}
+                              <span class="fw-bold {% if fh.rank == 1 %}text-danger{% elif fh.rank <= 3 %}text-warning{% else %}text-muted{% endif %}">
+                                No.{{ fh.rank }} / {{ fh.total_classes }}
+                              </span>
+                            {% else %}
+                              <span class="text-muted">—</span>
+                            {% endif %}
+                          </td>
+                          <td>
+                            {% if fh.is_published %}
+                              <span class="badge bg-success-subtle text-success">已发布</span>
+                            {% else %}
+                              <span class="badge bg-warning-subtle text-warning">草稿</span>
+                            {% endif %}
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% else %}
+                <div class="empty-state"><i class="bi bi-flag"></i><p class="mt-2">暂无流动红旗评价记录</p></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="section-title"><i class="bi bi-graph-up"></i> 排名趋势</div>
+              {% if flag_rank_history %}
+                <div style="height:220px">
+                  <canvas id="flagRankChart" role="img" aria-label="流动红旗排名趋势图"></canvas>
+                </div>
+              {% else %}
+                <div class="empty-state"><i class="bi bi-graph-up"></i><p class="mt-2">暂无数据</p></div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab 3: 事件时间轴 ── -->
     <div class="tab-pane fade" id="tab-timeline">
       <div class="card">
         <div class="card-body">
@@ -310,7 +373,7 @@
                   <table class="table table-sm data-table">
                     <thead><tr><th>日期</th><th>类型</th><th>描述</th><th>扣分</th><th>状态</th></tr></thead>
                     <tbody>
-                      {% for d in discipline_all %}
+                      {% for d in discipline_all[:10] %}
                         <tr>
                           <td>{{ d.created_at.strftime('%m-%d') if d.created_at else '' }}</td>
                           <td><span class="badge bg-secondary">{{ d.type }}</span></td>
@@ -319,8 +382,9 @@
                           <td>{{ d.status }}</td>
                         </tr>
                       {% endfor %}
-                    </tbody>
+                </tbody>
                   </table>
+                  {% if discipline_total > 10 %}<div class="text-muted text-center py-1" style="font-size:11px">仅显示最近10条，共{{ discipline_total }}条</div>{% endif %}
                 </div>
               {% else %}
                 <div class="empty-state"><i class="bi bi-check-circle text-success"></i><p class="mt-2 text-success">无违纪记录</p></div>
@@ -555,7 +619,7 @@ function editNote(nid, content, category) {
   new bootstrap.Modal(document.getElementById('editNoteModal')).show();
 }
 
-// ── 成绩趋势 ──
+// ── 成绩趋势（含排名）──
 const trendCtx = document.getElementById('scoreChart');
 if (trendCtx) {
   const trendData = {{ score_trend | tojson | safe }};
@@ -564,22 +628,38 @@ if (trendCtx) {
       type: 'line',
       data: {
         labels: trendData.map(d => d.exam_name),
-        datasets: [{
-          label: '平均分',
-          data: trendData.map(d => d.avg_score),
-          borderColor: '#1a237e',
-          backgroundColor: 'rgba(26,35,126,0.1)',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 4,
-          pointHoverRadius: 6,
-        }]
+        datasets: [
+          {
+            label: '平均分',
+            data: trendData.map(d => d.avg_score),
+            borderColor: '#1a237e',
+            backgroundColor: 'rgba(26,35,126,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            yAxisID: 'y',
+          },
+          {
+            label: '班级排名',
+            data: trendData.map(d => d.rank || null),
+            borderColor: '#ff9800',
+            backgroundColor: 'rgba(255,152,0,0.08)',
+            fill: false,
+            tension: 0.3,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            yAxisID: 'y1',
+            reverse: true,
+          }
+        ]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } },
         scales: {
-          y: { min: 0, max: 100, ticks: { stepSize: 20 } },
+          y: { min: 0, max: 100, ticks: { stepSize: 20 }, title: { display: true, text: '均分', font: { size: 10 } } },
+          y1: { min: 1, reverse: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '排名', font: { size: 10 } }, ticks: { stepSize: 1, font: { size: 9 } } },
           x: { ticks: { maxRotation: 45, font: { size: 10 } } }
         }
       }
@@ -680,5 +760,66 @@ fetch("{{ url_for('student_profile.api_trend', sid=student.id) }}")
       });
     }
   });
+
+// ── 流动红旗排名趋势 ──
+const flagRankData = {{ flag_rank_history | tojson | safe }};
+if (flagRankData && flagRankData.length > 0) {
+  const ctx = document.getElementById('flagRankChart');
+  if (ctx) {
+    const labels = flagRankData.map(d => d.period_label).reverse();
+    const ranks = flagRankData.map(d => d.rank).reverse();
+    const scores = flagRankData.map(d => d.final_score).reverse();
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: '班级排名',
+            data: ranks,
+            borderColor: '#ff9800',
+            backgroundColor: 'rgba(255,152,0,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 7,
+            yAxisID: 'y',
+          },
+          {
+            label: '最终得分',
+            data: scores,
+            borderColor: '#1a237e',
+            backgroundColor: 'rgba(26,35,126,0.08)',
+            fill: false,
+            tension: 0.3,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            yAxisID: 'y1',
+          }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } },
+        scales: {
+          y: {
+            reverse: true,
+            min: 1,
+            ticks: { stepSize: 1, font: { size: 10 } },
+            title: { display: true, text: '排名', font: { size: 10 } }
+          },
+          y1: {
+            min: 0,
+            position: 'right',
+            grid: { drawOnChartArea: false },
+            title: { display: true, text: '得分', font: { size: 10 } },
+            ticks: { font: { size: 10 } }
+          },
+          x: { ticks: { font: { size: 9 }, maxRotation: 45 } }
+        }
+      }
+    });
+  }
+}
 </script>
 {% endblock %}

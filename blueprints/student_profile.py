@@ -102,6 +102,7 @@ def detail(sid):
         ).all()
 
     # 成绩趋势（最近8次考试）- 优化: 一次批量查询取代逐考试查询
+    # 同时计算每次考试的班级排名
     recent_exams = Exam.query.order_by(Exam.exam_date.desc()).limit(8).all()
     exam_ids = [e.id for e in recent_exams]
     all_trend_scores = Score.query.filter(
@@ -112,15 +113,34 @@ def detail(sid):
     for s in all_trend_scores:
         scores_by_exam.setdefault(s.exam_id, []).append(s)
 
+    # 批量查询每次考试的班级排名
     score_trend = []
     for exam in reversed(recent_exams):
         scores = scores_by_exam.get(exam.id, [])
         if scores:
             avg_score = round(sum(s.score for s in scores) / len(scores), 1)
+            # 计算班级排名：获取该班级该次考试所有学生的总分，找排名
+            from models import Student as S
+            class_stu_ids = [s.id for s in Student.query.filter_by(
+                class_id=student.class_id, is_active=True
+            ).all()]
+            class_scores = db.session.query(
+                Score.student_id,
+                func.avg(Score.score).label('avg_score')
+            ).filter(
+                Score.exam_id == exam.id,
+                Score.student_id.in_(class_stu_ids)
+            ).group_by(Score.student_id).order_by(func.avg(Score.score).desc()).all()
+            rank = None
+            for idx, (stu_id, _) in enumerate(class_scores, 1):
+                if stu_id == sid:
+                    rank = idx
+                    break
             score_trend.append({
                 "exam_name": exam.name,
                 "exam_date": exam.exam_date.strftime("%m/%d") if exam.exam_date else "",
                 "avg_score": avg_score,
+                "rank": rank,
                 "subject_count": len(scores),
             })
 
@@ -184,6 +204,33 @@ def detail(sid):
         student_id=sid
     ).order_by(MentalHealthAssessment.created_at.desc()).limit(5).all()
 
+    # ── 8.5 流动红旗历史排名 ──
+    flag_history = FlagEvaluation.query.filter_by(
+        class_id=student.class_id
+    ).order_by(FlagEvaluation.created_at.desc()).limit(10).all()
+    # 计算该生所在班级每次的排名
+    flag_rank_history = []
+    for ev in reversed(flag_history):
+        # 获取同年级同周期所有班级排名
+        same_period = FlagEvaluation.query.filter_by(
+            period_type=ev.period_type,
+            period_label=ev.period_label,
+            grade_id=ev.grade_id,
+            status="published"
+        ).order_by(FlagEvaluation.final_score.desc()).all()
+        rank = None
+        for idx, fev in enumerate(same_period, 1):
+            if fev.class_id == student.class_id:
+                rank = idx
+                break
+        flag_rank_history.append({
+            "period_label": ev.period_label,
+            "final_score": ev.final_score,
+            "rank": rank,
+            "total_classes": len(same_period),
+            "is_published": ev.status == "published"
+        })
+
     # ── 9. 家访记录 ──
     home_visits = HomeVisit.query.filter_by(
         student_id=sid
@@ -222,6 +269,7 @@ def detail(sid):
         risk_latest=risk_latest, risk_level=risk_level,
         risk_warnings=risk_warnings, risk_history=risk_history_json,
         psych_latest=psych_latest, mh_assessments=mh_assessments,
+        flag_rank_history=flag_rank_history,
         home_visits=home_visits, comments=comments,
         notes=notes, timeline=timeline,
         today=today, role=role,
