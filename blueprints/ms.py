@@ -5,6 +5,7 @@ from models import DisciplineRecord, DisciplineAppeal, RoutineScore, ProblemStud
 from models import Attendance, LeaveRequest
 from models import Message
 from blueprints.discipline_utils import check_escalation, send_discipline_notifications, send_appeal_notifications, deduct_quality_score
+from blueprints.audit_log import audit_log
 from decorators import login_required, require_role, scope_query, require_permission
 from utils.db_utils import safe_commit
 from utils import get_local_now
@@ -1155,3 +1156,253 @@ def attendance_overview():
                            students_map=students_map,
                            grade_filter=grade_id, class_filter=class_id,
                            start_date=start_date, end_date=end_date)
+
+
+# ── 学生管理（德育处全局视图） ──
+@ms_bp.route("/students")
+@require_role("ms_admin")
+def student_manage():
+    """学生列表 - 支持按年级、班级、姓名/学号搜索"""
+    grade_id = request.args.get("grade_id", type=int)
+    class_id = request.args.get("class_id", type=int)
+    q = request.args.get("q", "").strip()
+    gender = request.args.get("gender", "")
+    tag = request.args.get("tag", "").strip()
+    page = request.args.get("page", 1, type=int)
+
+    query = Student.query.filter_by(is_active=True)
+
+    if grade_id:
+        query = query.filter_by(grade_id=grade_id)
+    if class_id:
+        query = query.filter_by(class_id=class_id)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            (Student.name.like(like)) | (Student.student_no.like(like))
+        )
+    if gender:
+        query = query.filter_by(gender=gender)
+    if tag:
+        like_tag = f"%{tag}%"
+        query = query.filter(Student.tags.like(like_tag))
+
+    query = query.order_by(Student.grade_id, Student.class_id, Student.student_no)
+    pagination = query.paginate(page=page, per_page=50, error_out=False)
+
+    grades = Grade.query.filter_by(is_active=True).order_by(Grade.sort_order).all()
+    classes = Class.query.filter_by(is_active=True).order_by(Class.grade_id, Class.name).all()
+
+    return render_template("ms/student_manage.html",
+                           students=pagination.items, pagination=pagination,
+                           grades=grades, classes=classes,
+                           grade_filter=grade_id, class_filter=class_id,
+                           q=q, gender=gender, tag=tag)
+
+
+@ms_bp.route("/students/create", methods=["GET", "POST"])
+@require_role("ms_admin")
+@audit_log("add_student", "Student")
+def student_create():
+    """添加单个学生"""
+    classes = Class.query.filter_by(is_active=True).order_by(Class.grade_id, Class.name).all()
+    grades = Grade.query.filter_by(is_active=True).order_by(Grade.sort_order).all()
+
+    if request.method == "POST":
+        class_id = int(request.form["class_id"])
+        cls = Class.query.get_or_404(class_id)
+        grade_id = cls.grade_id
+
+        s = Student(
+            name=request.form["name"],
+            student_no=request.form["student_no"],
+            class_id=class_id,
+            grade_id=grade_id,
+            gender=request.form.get("gender", "男"),
+            id_card=request.form.get("id_card", ""),
+            national_id=request.form.get("national_id", ""),
+            ethnicity=request.form.get("ethnicity", "汉族"),
+            birth_date=datetime.strptime(request.form["birth_date"], "%Y-%m-%d").date() if request.form.get("birth_date") else None,
+            address=request.form.get("address", ""),
+            parent1_name=request.form.get("parent1_name", ""),
+            parent1_phone=request.form.get("parent1_phone", ""),
+            parent1_relation=request.form.get("parent1_relation", ""),
+            parent2_name=request.form.get("parent2_name", ""),
+            parent2_phone=request.form.get("parent2_phone", ""),
+            parent2_relation=request.form.get("parent2_relation", ""),
+            primary_school=request.form.get("primary_school", ""),
+            tags=request.form.get("tags", ""),
+        )
+        db.session.add(s)
+        safe_commit()
+        flash("学生已添加", "success")
+        return redirect(url_for("ms.student_manage"))
+
+    return render_template("ms/student_form.html", student=None, action="create",
+                           classes=classes, grades=grades)
+
+
+@ms_bp.route("/students/<int:sid>/edit", methods=["GET", "POST"])
+@require_role("ms_admin")
+@audit_log("edit_student", "Student")
+def student_edit(sid):
+    """编辑学生"""
+    student = Student.query.get_or_404(sid)
+    classes = Class.query.filter_by(is_active=True).order_by(Class.grade_id, Class.name).all()
+    grades = Grade.query.filter_by(is_active=True).order_by(Grade.sort_order).all()
+
+    if request.method == "POST":
+        class_id = int(request.form["class_id"])
+        cls = Class.query.get_or_404(class_id)
+        student.name = request.form["name"]
+        student.student_no = request.form["student_no"]
+        student.class_id = class_id
+        student.grade_id = cls.grade_id
+        student.gender = request.form.get("gender", "男")
+        student.id_card = request.form.get("id_card", "")
+        student.national_id = request.form.get("national_id", "")
+        student.ethnicity = request.form.get("ethnicity", "汉族")
+        student.birth_date = datetime.strptime(request.form["birth_date"], "%Y-%m-%d").date() if request.form.get("birth_date") else None
+        student.address = request.form.get("address", "")
+        student.parent1_name = request.form.get("parent1_name", "")
+        student.parent1_phone = request.form.get("parent1_phone", "")
+        student.parent1_relation = request.form.get("parent1_relation", "")
+        student.parent2_name = request.form.get("parent2_name", "")
+        student.parent2_phone = request.form.get("parent2_phone", "")
+        student.parent2_relation = request.form.get("parent2_relation", "")
+        student.primary_school = request.form.get("primary_school", "")
+        student.tags = request.form.get("tags", "")
+        safe_commit()
+        flash("学生信息已更新", "success")
+        return redirect(url_for("ms.student_manage"))
+
+    return render_template("ms/student_form.html", student=student, action="edit",
+                           classes=classes, grades=grades)
+
+
+@ms_bp.route("/students/<int:sid>/delete", methods=["POST"])
+@require_role("ms_admin")
+@audit_log("delete_student", "Student")
+def student_delete(sid):
+    """软删除学生"""
+    student = Student.query.get_or_404(sid)
+    student.is_active = False
+    safe_commit()
+    flash("学生已删除", "success")
+    return redirect(url_for("ms.student_manage"))
+
+
+@ms_bp.route("/students/import", methods=["POST"])
+@require_role("ms_admin")
+def student_import():
+    """Excel批量导入学生"""
+    from io import BytesIO
+    from openpyxl import load_workbook
+
+    f = request.files.get("file")
+    if not f or not f.filename:
+        flash("请选择文件", "danger")
+        return redirect(url_for("ms.student_manage"))
+
+    class_id = request.form.get("class_id", type=int)
+    if not class_id:
+        flash("请选择班级", "danger")
+        return redirect(url_for("ms.student_manage"))
+
+    cls = Class.query.get_or_404(class_id)
+    grade_id = cls.grade_id
+
+    wb = load_workbook(BytesIO(f.read()))
+    ws = wb.active
+
+    count = 0
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row[0]:
+            continue
+        no = str(row[0]).strip()
+        name = str(row[1]).strip() if row[1] else ""
+        if not name:
+            continue
+        if Student.query.filter_by(student_no=no).first():
+            continue  # 跳过重复学号
+        s = Student(
+            student_no=no,
+            name=name,
+            class_id=class_id,
+            grade_id=grade_id,
+            gender=str(row[2]).strip() if row[2] else "男",
+            id_card=str(row[3]).strip() if row[3] else "",
+            national_id=str(row[4]).strip() if row[4] else "",
+            parent1_name=str(row[5]).strip() if row[5] else "",
+            parent1_phone=str(row[6]).strip() if row[6] else "",
+        )
+        db.session.add(s)
+        count += 1
+
+    safe_commit()
+    flash(f"成功导入 {count} 名学生", "success")
+    return redirect(url_for("ms.student_manage"))
+
+
+@ms_bp.route("/students/template")
+@require_role("ms_admin")
+def student_template():
+    """下载Excel导入模板"""
+    from openpyxl import Workbook
+    from io import BytesIO
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "学生导入模板"
+    ws.append(["学号*", "姓名*", "性别", "身份证号", "全国学籍号", "家长1姓名", "家长1电话"])
+    ws.append(["2024001", "张三", "男", "430XXXXXXX", "GXXXXXXXX", "张三父", "13800000000"])
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    from flask import send_file
+    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True, download_name="student_template.xlsx")
+
+
+@ms_bp.route("/students/export")
+@require_role("ms_admin")
+def student_export():
+    """导出学生到Excel"""
+    from openpyxl import Workbook
+    from io import BytesIO
+
+    grade_id = request.args.get("grade_id", type=int)
+    class_id = request.args.get("class_id", type=int)
+
+    query = Student.query.filter_by(is_active=True)
+    if grade_id:
+        query = query.filter_by(grade_id=grade_id)
+    if class_id:
+        query = query.filter_by(class_id=class_id)
+
+    students = query.order_by(Student.grade_id, Student.class_id, Student.student_no).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "学生名册"
+    ws.append(["年级", "班级", "学号", "姓名", "性别", "家长1", "电话1", "家长2", "电话2", "标签"])
+
+    for s in students:
+        cls = Class.query.get(s.class_id)
+        grade = Grade.query.get(s.grade_id)
+        ws.append([
+            grade.name if grade else "",
+            cls.name if cls else "",
+            s.student_no, s.name, s.gender,
+            s.parent1_name, s.parent1_phone,
+            s.parent2_name, s.parent2_phone,
+            s.tags
+        ])
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    from flask import send_file
+    return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True, download_name="students_export.xlsx")

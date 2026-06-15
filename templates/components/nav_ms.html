@@ -37,6 +37,11 @@
         </ul>
     </li>
     <li class="nav-item">
+        <a class="nav-link {% if request.path.startswith('/ms/students') %}active{% endif %}" href="{{ url_for('ms.student_manage') }}">
+            <i class="bi bi-person-lines-fill"></i> 学生管理
+        </a>
+    </li>
+    <li class="nav-item">
         <a class="nav-link {% if request.path.startswith('/wings') %}active{% endif %}" href="{{ url_for('wings.dashboard') }}">
             <i class="bi bi-star"></i> 五翼评价
         </a>
