@@ -363,16 +363,23 @@ def appeal_review(aid):
 @require_role("ms_admin")
 def routine_overview():
     grade_id = request.args.get("grade_id", type=int)
+    page = request.args.get("page", 1, type=int)
+    category = request.args.get("category", type=str)
+    per_page = 50
+
     scores = RoutineScore.query
     if grade_id:
         scores = scores.filter_by(grade_id=grade_id)
-    scores = scores.order_by(RoutineScore.record_date.desc()).limit(100).all()
+    if category:
+        scores = scores.filter_by(category=category)
+    scores = scores.order_by(RoutineScore.record_date.desc()).paginate(page=page, per_page=per_page, error_out=False)
     grades = Grade.query.all()
     classes = Class.query.filter_by(is_active=True).all()
     classes_by_id = {c.id: c for c in classes}
     return render_template("ms/routine.html", scores=scores, grades=grades,
                            classes=classes, classes_by_id=classes_by_id,
-                           today=date.today(), grade_filter=grade_id)
+                           today=date.today(), grade_filter=grade_id,
+                           category_filter=category)
 
 
 @ms_bp.route("/routine/add", methods=["POST"])
