@@ -195,9 +195,6 @@ def train_on_real_data():
         # ⑨ 按风险分排序，打印 Top 10 高危学生
         high_mask = y == 1
         if high_mask.any():
-            high_rows = [all_matrix[i] for i in range(len(all_matrix)) if high_mask[i]]
-            high_rows.sort(key=lambda r: risk_scores[np.where(np.array([all_matrix[j]['student_id'] for j in range(len(all_matrix))]) == r['student_id'])[0][0] if True else 0, reverse=True)
-            # 简化：直接用 all_matrix 的索引
             high_indices = np.where(high_mask)[0]
             sorted_high = sorted(high_indices, key=lambda i: risk_scores[i], reverse=True)
             print(f"\n  Top 10 高危学生:")
