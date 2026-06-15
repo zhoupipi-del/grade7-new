@@ -101,15 +101,10 @@ def info(msg):
 
 
 def create_test_app():
-    """创建最小化 Flask app 用于测试"""
-    app = Flask(__name__)
-    app.config.from_object(Config)
-    # 确保环境变量覆盖 config（systemd 场景）
-    db_url = os.environ.get("DATABASE_URL", "")
-    if db_url:
-        app.config["SQLALCHEMY_DATABASE_URI"] = db_url
+    """使用项目自身的 create_app()，包含全部蓝图和路由"""
+    from app import create_app
+    app = create_app()
     app.config["TESTING"] = True
-    db.init_app(app)
     return app
 
 
