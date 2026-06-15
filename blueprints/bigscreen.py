@@ -213,12 +213,12 @@ def data():
     ).group_by(func.date(DisciplineRecord.created_at)).all())
 
     rout_trend_map = dict(db.session.query(
-        func.date(RoutineScore.created_at),
-        func.count(RoutineScore.id)
+        RoutineScore.record_date,
+        func.avg(RoutineScore.score)
     ).filter(
-        func.date(RoutineScore.created_at) >= d0,
-        func.date(RoutineScore.created_at) <= d6
-    ).group_by(func.date(RoutineScore.created_at)).all())
+        RoutineScore.record_date >= d0,
+        RoutineScore.record_date <= d6
+    ).group_by(RoutineScore.record_date).all())
 
     att_trend_raw = db.session.query(
         Attendance.record_date,

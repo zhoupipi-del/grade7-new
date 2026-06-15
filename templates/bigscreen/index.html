@@ -673,8 +673,8 @@ function renderTrend(trend) {
           borderWidth: 2,
         },
         {
-          label: '常规评分',
-          data: trend.map(t => t.routine),
+          label: '常规均分',
+          data: trend.map(t => Math.round(t.routine * 10) / 10),
           borderColor: '#00d4ff',
           backgroundColor: 'rgba(0,212,255,0.1)',
           fill: true,
@@ -682,6 +682,7 @@ function renderTrend(trend) {
           pointRadius: 4,
           pointHoverRadius: 7,
           pointBackgroundColor: '#00d4ff',
+          yAxisID: 'y1',
           borderWidth: 2,
         },
         {
@@ -722,7 +723,7 @@ function renderTrend(trend) {
           min: 80, 
           max: 100, 
           position: 'right', 
-          title: { display: true, text: '出勤率', color: '#4ecdc4' } 
+          title: { display: true, text: '出勤率 / 常规均分', color: '#4ecdc4' } 
         }
       },
       plugins: {
