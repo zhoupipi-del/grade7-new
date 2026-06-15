@@ -1,3 +1,8 @@
+{% extends "base.html" %}
+
+{% block title %}评价草稿审核{% endblock %}
+
+{% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h4 class="mb-0"><i class="bi bi-pencil-square text-warning me-2"></i>评价草稿审核</h4>
   <div class="d-flex gap-2 align-items-center flex-wrap">
@@ -135,3 +140,5 @@ document.getElementById('periodType').addEventListener('change', function() {
 
 document.getElementById('periodLabel').addEventListener('change', loadDrafts);
 </script>
+
+{% endblock %}
