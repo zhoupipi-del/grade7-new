@@ -100,7 +100,7 @@ def predict(student_id):
     # ① 加载模型
     pipeline, metadata = _load_model()
     classifier = pipeline.named_steps['classifier']
-    passed_features = metadata["passed_features"]  # 通过 VarianceThreshold 的特征
+    passed_features = metadata.get("passed_features", metadata.get("feature_names", []))
 
     # ② 获取学生信息 + 特征向量
     student = Student.query.get_or_404(student_id)
@@ -108,6 +108,15 @@ def predict(student_id):
     result = fe.get_student_vector(student_id)
 
     features = result["features"]  # [math_slope, math_avg, ...]
+
+    # 维度适配：FeatureExtractor 输出维度可能与管道期望维度不同
+    n_expected = classifier.n_features_in_
+    if len(features) != n_expected:
+        # 截断或补零对齐
+        if len(features) > n_expected:
+            features = features[:n_expected]
+        else:
+            features = features + [0.0] * (n_expected - len(features))
 
     # ③ 推理
     X = [features]
@@ -126,8 +135,10 @@ def predict(student_id):
     # ⑤ 双轨归因
     # ── top_factors: 用 feature_importances_ 锁定前 2 大贡献指标 ──
     importances = classifier.feature_importances_
+    # 确保 importances 和 passed_features 长度一致
+    n_factors = min(len(importances), len(passed_features))
     top2_idx = sorted(
-        range(len(importances)),
+        range(n_factors),
         key=lambda i: importances[i],
         reverse=True
     )[:2]

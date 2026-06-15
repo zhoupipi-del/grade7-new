@@ -38,13 +38,13 @@ def heal_with_real_framework():
         clf = GradientBoostingClassifier(n_estimators=3, max_depth=2)
         clf_name = "GradientBoosting"
 
-    # 模拟 4 特征虚拟数据集
-    X_dummy = np.random.rand(20, 4)
+    # 模拟 6 维特征虚拟数据集（匹配 FeatureExtractor 输出维度）
+    X_dummy = np.random.rand(20, 6)
     y_dummy = np.random.randint(0, 2, 20)
 
     real_pipeline = Pipeline([
         ('scaler', StandardScaler()),
-        ('clf', clf)
+        ('classifier', clf)
     ])
     real_pipeline.fit(X_dummy, y_dummy)
     print(f"[OK] {clf_name} 管道拟合完毕")
@@ -53,11 +53,17 @@ def heal_with_real_framework():
         pickle.dump(real_pipeline, f)
     print(f"[OK] 模型文件: {PIPELINE_PATH}")
 
+    # FeatureExtractor 实际输出的 6 维特征名（必须与 ai_inference.py 一致）
+    passed_features = [
+        "math_slope", "math_avg", "quality_score",
+        "risk_density", "attendance_rate", "discipline_factor"
+    ]
+
     metadata = {
         "model_type": f"{clf_name}-Pipeline",
         "version": "2026.06.15.V2",
-        "feature_names": ["classroom_risk_index", "mental_alert_flag",
-                          "wings_drop_rate", "leave_frequency"],
+        "feature_names": passed_features,
+        "passed_features": passed_features,
         "target_labels": ["正常/安全", "高危/预警"],
         "mean_accuracy": 0.95
     }
