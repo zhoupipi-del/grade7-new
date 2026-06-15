@@ -68,8 +68,8 @@ with app.app_context():
 
             score = max(70, min(100, class_score + offset))
 
-            # created_at 设在当天 9:00~10:00（模拟稍晚的评分）
-            minute_offset = random.randint(0, 60)
+            # created_at 设在当天 9:00~9:59（模拟稍晚的评分）
+            minute_offset = random.randint(0, 59)
             created_at = datetime.combine(record_date, datetime.min.time().replace(hour=9, minute=minute_offset))
 
             batch.append(RoutineScore(
