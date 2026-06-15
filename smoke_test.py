@@ -124,7 +124,7 @@ def test_database_connection(app):
     with app.app_context():
         try:
             db.session.execute(db.text("SELECT 1"))
-            check("数据库连接正常")
+            check("数据库连接正常", True)
         except Exception as e:
             check("数据库连接", False, f"错误: {e}")
 
@@ -306,11 +306,10 @@ def test_exam_data(app):
             exam_subjects = set(
                 s.subject_id for s in Score.query.filter_by(exam_id=exam.id).distinct().with_entities(Score.subject_id).all()
             )
-            exam_subjects_flat = [x[0] for x in exam_subjects]
             missing_subjects = [
-                sub.name for sub in all_subjects if sub.id not in exam_subjects_flat
+                sub.name for sub in all_subjects if sub.id not in exam_subjects
             ]
-            if len(exam_subjects_flat) < len(all_subjects):
+            if len(exam_subjects) < len(all_subjects):
                 warn(f"考试 '{exam.name}' 缺少科目", f"缺少: {missing_subjects}")
 
 
