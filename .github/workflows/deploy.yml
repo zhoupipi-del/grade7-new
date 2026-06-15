@@ -20,13 +20,19 @@ jobs:
           script: |
             set -e
             cd /opt/grade7-new
-            echo "--- git pull ---"
-            git pull origin main
+            echo "--- forcing sync with remote ---"
+            git fetch origin main
+            git reset --hard origin/main
+            git clean -fd
+            echo "--- synced to ---"
+            git log --oneline -1
             echo "--- sync dependencies ---"
             /opt/grade7-new/venv/bin/pip install -r requirements.txt -q
-            echo "--- restart service ---"
-            systemctl restart grade7-new
-            echo "--- waiting for boot (37 blueprints + preload) ---"
+            echo "--- restart service (stop + start for preload) ---"
+            systemctl stop grade7-new
+            sleep 2
+            systemctl start grade7-new
+            echo "--- waiting for boot (30+ blueprints + preload) ---"
             for i in $(seq 1 12); do
               sleep 5
               HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5001/login 2>/dev/null || echo "000")
