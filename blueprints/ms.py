@@ -602,7 +602,31 @@ def generate_evaluation():
         grade_avg = sum(grade_scores) / len(grade_scores) if grade_scores else None
         ms_avg = sum(ms_scores) / len(ms_scores) if ms_scores else None
 
-        weights, final = _calc_flag_weights(self_avg, grade_avg, ms_avg)
+        weights, base = _calc_flag_weights(self_avg, grade_avg, ms_avg)
+
+        # ── 违纪+考勤合流扣分 ──
+        # 1. 违纪扣分（周期内该班级所有违纪记录的points总和 × 0.1）
+        discipline_points = db.session.query(
+            func.sum(DisciplineRecord.points)
+        ).filter(
+            DisciplineRecord.class_id == cls.id,
+            DisciplineRecord.created_at >= start_date,
+            DisciplineRecord.created_at <= end_date
+        ).scalar() or 0.0
+
+        # 2. 考勤异常扣分（迟到/缺勤/早退/请假 次数 × 0.05）
+        attendance_exceptions = Attendance.query.filter(
+            Attendance.class_id == cls.id,
+            Attendance.status.in_(["late", "absent", "early", "leave"]),
+            Attendance.record_date >= start_date,
+            Attendance.record_date <= end_date
+        ).count()
+
+        discipline_deduction = round(discipline_points * 0.1, 2)
+        attendance_deduction = round(attendance_exceptions * 0.05, 2)
+
+        final = round(base - discipline_deduction - attendance_deduction, 2)
+        final = max(0.0, final)  # 防止扣成负数
 
         ev = FlagEvaluation(
             period_type=period_type,
@@ -615,6 +639,11 @@ def generate_evaluation():
             self_weight=weights[0],
             grade_weight=weights[1],
             ms_weight=weights[2],
+            base_score=base,
+            discipline_points=discipline_points,
+            discipline_deduction=discipline_deduction,
+            attendance_exceptions=attendance_exceptions,
+            attendance_deduction=attendance_deduction,
             final_score=final,
             status="draft",
         )

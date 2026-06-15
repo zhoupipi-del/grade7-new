@@ -1084,7 +1084,18 @@ class FlagEvaluation(db.Model):
     grade_weight = db.Column(db.Float, nullable=False, default=0.3)
     ms_weight = db.Column(db.Float, nullable=False, default=0.5)
 
-    final_score = db.Column(db.Float, nullable=False)      # 加权最终得分
+    # 加权底分（扣分前）
+    base_score = db.Column(db.Float, nullable=True)
+
+    # 违纪扣分
+    discipline_points = db.Column(db.Float, nullable=True)      # 违纪扣分总额
+    discipline_deduction = db.Column(db.Float, nullable=True)  # 违纪扣分 = points * 0.1
+
+    # 考勤异常扣分
+    attendance_exceptions = db.Column(db.Integer, nullable=True) # 考勤异常次数
+    attendance_deduction = db.Column(db.Float, nullable=True)   # 考勤扣分 = exceptions * 0.05
+
+    final_score = db.Column(db.Float, nullable=False)      # 加权最终得分（已扣）
     rank = db.Column(db.Integer, nullable=True)            # 同年级内排名（发布时计算）
     status = db.Column(db.String(10), nullable=False, default="draft", index=True)  # draft / published
 

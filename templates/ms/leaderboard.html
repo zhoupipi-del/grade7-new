@@ -97,6 +97,48 @@
             </div>
           </div>
 
+          <!-- 扣分详情（违纪+考勤合流） -->
+          {% if ev.base_score or ev.discipline_deduction or ev.attendance_deduction %}
+          <hr class="my-2">
+          <div class="text-start small">
+            <div class="fw-bold text-muted mb-1">德育全景扣分穿透</div>
+
+            <!-- 加权底分 -->
+            <div class="row mb-1">
+              <div class="col-5 text-muted">🔵 加权底分</div>
+              <div class="col-7 text-end">{{ "%.1f"|format(ev.base_score) if ev.base_score else "%.1f"|format(ev.final_score) }}</div>
+            </div>
+
+            <!-- 违纪扣分 -->
+            {% if ev.discipline_deduction and ev.discipline_deduction > 0 %}
+            <div class="row mb-1">
+              <div class="col-5 text-danger">🚨 违纪对冲</div>
+              <div class="col-7 text-end text-danger">
+                -{{ "%.1f"|format(ev.discipline_deduction) }}
+                <span class="text-muted">(共 {{ "%.0f"|format(ev.discipline_points) }} 分)</span>
+              </div>
+            </div>
+            {% endif %}
+
+            <!-- 考勤异常扣分 -->
+            {% if ev.attendance_deduction and ev.attendance_deduction > 0 %}
+            <div class="row mb-1">
+              <div class="col-5 text-warning">⏰ 考勤熔断</div>
+              <div class="col-7 text-end text-warning">
+                -{{ "%.1f"|format(ev.attendance_deduction) }}
+                <span class="text-muted">({{ ev.attendance_exceptions }} 次)</span>
+              </div>
+            </div>
+            {% endif %}
+
+            <!-- 最终得分 -->
+            <div class="row mb-1 pt-1 border-top">
+              <div class="col-5 fw-bold">最终得分</div>
+              <div class="col-7 text-end fw-bold text-primary">{{ "%.1f"|format(ev.final_score) }}</div>
+            </div>
+          </div>
+          {% endif %}
+
           {% if ev.rank == 1 %}
           <span class="badge bg-danger mt-2"><i class="bi bi-star-fill"></i> 流动红旗</span>
           {% elif ev.rank == 2 %}

@@ -48,7 +48,10 @@
               <th class="text-center">年级组均分</th>
               <th class="text-center">德育处均分</th>
               <th class="text-center">实际权重</th>
-              <th class="text-center">加权得分</th>
+              <th class="text-center">底分</th>
+              <th class="text-center">违纪扣</th>
+              <th class="text-center">考勤扣</th>
+              <th class="text-center">最终得分</th>
               <th class="text-center">数据来源</th>
             </tr>
           </thead>
@@ -64,6 +67,9 @@
                 {{ "%.0f%%"|format(ev.grade_weight * 100) }} /
                 {{ "%.0f%%"|format(ev.ms_weight * 100) }}
               </td>
+              <td class="text-center">{{ "%.1f"|format(ev.base_score) if ev.base_score else "%.1f"|format(ev.final_score) }}</td>
+              <td class="text-center text-danger">{{ "-%.1f"|format(ev.discipline_deduction) if ev.discipline_deduction and ev.discipline_deduction > 0 else '-' }}</td>
+              <td class="text-center text-warning">{{ "-%.1f"|format(ev.attendance_deduction) if ev.attendance_deduction and ev.attendance_deduction > 0 else '-' }}</td>
               <td class="text-center fw-bold text-primary fs-5">{{ "%.2f"|format(ev.final_score) }}</td>
               <td class="text-center small">
                 {% if ev.self_score %}<span class="badge bg-primary-subtle text-primary">自评</span>{% endif %}
