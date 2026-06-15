@@ -1,72 +1,216 @@
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h4 class="mb-0"><i class="bi bi-flag-fill text-danger me-2"></i>班级流动红旗</h4>
-  <form method="GET" class="d-flex gap-2">
-    <select name="grade_id" class="form-select form-select-sm" style="width:160px;" onchange="this.form.submit()">
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <select id="periodType" class="form-select form-select-sm" style="width:100px;">
+      <option value="week" {% if period_type == 'week' %}selected{% endif %}>周评</option>
+      <option value="month" {% if period_type == 'month' %}selected{% endif %}>月评</option>
+      <option value="term" {% if period_type == 'term' %}selected{% endif %}>期末总评</option>
+    </select>
+    <select id="periodLabel" class="form-select form-select-sm" style="width:220px;">
+      {% if period_labels.get(period_type) %}
+      {% for p in period_labels[period_type] %}
+      <option value="{{ p.value }}" {% if period_label == p.value %}selected{% endif %}>{{ p.label }}</option>
+      {% endfor %}
+      {% endif %}
+    </select>
+    <select id="gradeFilter" class="form-select form-select-sm" style="width:140px;" onchange="loadEvals()">
       <option value="">全部年级</option>
       {% for g in grades %}
       <option value="{{ g.id }}" {% if grade_filter == g.id %}selected{% endif %}>{{ g.name }}</option>
       {% endfor %}
     </select>
-  </form>
+    <a href="{{ url_for('ms.view_drafts') }}" class="btn btn-outline-warning btn-sm">
+      <i class="bi bi-pencil-square me-1"></i>查看草稿
+    </a>
+  </div>
 </div>
 
-{% if leaderboard_data %}
-<div class="row g-3">
-  {% set medals = {1: "🥇", 2: "🥈", 3: "🥉"} %}
-  {% for item in leaderboard_data %}
-  <div class="col-md-3">
-    <div class="card {% if item.rank <= 3 %}border-warning{% endif %} h-100">
-      <div class="card-body text-center">
-        {% if item.rank <= 3 %}
-        <div class="display-3 mb-1">{{ medals[item.rank] }}</div>
-        {% else %}
-        <div class="fs-3 fw-bold text-muted mb-1">#{{ item.rank }}</div>
-        {% endif %}
-        <h5 class="card-title mb-1">{{ item.class_name }}</h5>
-        <div class="fs-3 fw-bold text-primary">{{ item.total }}</div>
-        <div class="text-muted small">总得分（{{ item.count }}次评分）</div>
-        {% if item.rank == 1 %}
-        <span class="badge bg-danger mt-2"><i class="bi bi-star-fill"></i> 流动红旗</span>
-        {% elif item.rank == 2 %}
-        <span class="badge bg-secondary mt-2">第二名</span>
-        {% elif item.rank == 3 %}
-        <span class="badge bg-warning text-dark mt-2">第三名</span>
-        {% endif %}
+<!-- 生成按钮区 -->
+<div class="card mb-3 border-info">
+  <div class="card-body py-2">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div class="text-muted small">
+        <i class="bi bi-info-circle me-1"></i>
+        流动红旗评分 = 班主任自评均分 x 0.2 + 年级组评级均分 x 0.3 + 德育处评级均分 x 0.5
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary btn-sm" onclick="generateEval()">
+          <i class="bi bi-calculator me-1"></i>生成评价
+        </button>
       </div>
     </div>
   </div>
-  {% endfor %}
 </div>
 
-<hr class="my-4">
+<!-- 权重说明 -->
+<div class="alert alert-light small py-2 mb-3">
+  <strong>评分维度说明：</strong>
+  <span class="me-3"><i class="bi bi-person-badge text-primary"></i> 班主任自评 (权重 20%)</span>
+  <span class="me-3"><i class="bi bi-people text-success"></i> 年级组评级 (权重 30%)</span>
+  <span><i class="bi bi-building text-danger"></i> 德育处评级 (权重 50%)</span>
+  <br class="mt-1">
+  <span class="text-muted">某维度无数据时，其余维度按比例瓜分该权重。期末总评产生第一、二、三名排名。</span>
+</div>
 
-<!-- 排名进度条 -->
-<h5 class="mb-3"><i class="bi bi-bar-chart me-2"></i>得分排行</h5>
-{% set max_score = leaderboard_data[0].total if leaderboard_data else 1 %}
-{% for item in leaderboard_data %}
-<div class="mb-2">
-  <div class="d-flex justify-content-between mb-1">
-    <small>
-      {% if item.rank <= 3 %}{{ medals[item.rank] }}{% else %}#{{ item.rank }}{% endif %}
-      {{ item.class_name }}
-    </small>
-    <small class="fw-bold">{{ item.total }}分</small>
-  </div>
-  <div class="progress" style="height: 24px;">
-    <div class="progress-bar {% if item.rank == 1 %}bg-danger{% elif item.rank == 2 %}bg-warning text-dark{% elif item.rank == 3 %}bg-info text-dark{% else %}bg-primary{% endif %}"
-         style="width: {{ (item.total / max_score * 100)|round|int if max_score > 0 else 0 }}%">
-      {% if item.rank <= 3 %}{{ item.total }}分{% endif %}
+{% if evals_by_grade %}
+{% for gid, evals in evals_by_grade.items() %}
+<div class="mb-4">
+  <h5 class="border-bottom pb-2 mb-3">
+    <i class="bi bi-diagram-3 me-2"></i>{{ evals[0].grade.name if evals[0].grade else '年级' + gid|string }} — 排名榜
+  </h5>
+  <div class="row g-3">
+    {% set medals = {1: "🥇", 2: "🥈", 3: "🥉" } %}
+    {% for ev in evals %}
+    <div class="col-md-3 col-sm-6">
+      <div class="card {% if ev.rank and ev.rank <= 3 %}border-warning shadow-sm{% else %}h-100{% endif %} h-100">
+        <div class="card-body text-center">
+          {% if ev.rank and ev.rank <= 3 %}
+          <div class="display-4 mb-1">{{ medals[ev.rank] }}</div>
+          {% elif ev.rank %}
+          <div class="fs-3 fw-bold text-muted mb-1">#{{ ev.rank }}</div>
+          {% endif %}
+          <h6 class="card-title mb-1">{{ ev.class_.name if ev.class_ else '班级' }}</h6>
+          <div class="fs-2 fw-bold text-primary">{{ "%.1f"|format(ev.final_score) }}</div>
+          <div class="text-muted small mb-2">加权最终得分</div>
+
+          <!-- 三维度分解 -->
+          <div class="text-start small">
+            <div class="row mb-1">
+              <div class="col-5 text-muted">班主任</div>
+              <div class="col-3 text-end">{{ "%.1f"|format(ev.self_score) if ev.self_score else '-' }}</div>
+              <div class="col-4 text-end text-muted">x{{ "%.0f%%"|format(ev.self_weight * 100) }}</div>
+            </div>
+            <div class="row mb-1">
+              <div class="col-5 text-muted">年级组</div>
+              <div class="col-3 text-end">{{ "%.1f"|format(ev.grade_score) if ev.grade_score else '-' }}</div>
+              <div class="col-4 text-end text-muted">x{{ "%.0f%%"|format(ev.grade_weight * 100) }}</div>
+            </div>
+            <div class="row mb-1">
+              <div class="col-5 text-muted">德育处</div>
+              <div class="col-3 text-end">{{ "%.1f"|format(ev.ms_score) if ev.ms_score else '-' }}</div>
+              <div class="col-4 text-end text-muted">x{{ "%.0f%%"|format(ev.ms_weight * 100) }}</div>
+            </div>
+          </div>
+
+          {% if ev.rank == 1 %}
+          <span class="badge bg-danger mt-2"><i class="bi bi-star-fill"></i> 流动红旗</span>
+          {% elif ev.rank == 2 %}
+          <span class="badge bg-secondary mt-2">第二名</span>
+          {% elif ev.rank == 3 %}
+          <span class="badge bg-warning text-dark mt-2">第三名</span>
+          {% endif %}
+        </div>
+      </div>
     </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- 得分进度条 -->
+<div class="card mt-2">
+  <div class="card-body">
+    <h6 class="mb-3"><i class="bi bi-bar-chart me-2"></i>得分排行</h6>
+    {% set max_score = evals[0].final_score if evals else 1 %}
+    {% for ev in evals %}
+    <div class="mb-2">
+      <div class="d-flex justify-content-between mb-1">
+        <small>
+          {% if ev.rank and ev.rank <= 3 %}{{ medals[ev.rank] }}{% else %}#{{ ev.rank or '-' }}{% endif %}
+          {{ ev.class_.name if ev.class_ else '班级' }}
+        </small>
+        <small class="fw-bold">{{ "%.1f"|format(ev.final_score) }}分</small>
+      </div>
+      <div class="progress" style="height: 22px;">
+        <div class="progress-bar {% if ev.rank == 1 %}bg-danger{% elif ev.rank == 2 %}bg-warning text-dark{% elif ev.rank == 3 %}bg-info text-dark{% else %}bg-primary{% endif %}"
+             style="width: {{ (ev.final_score / max_score * 100)|round|int if max_score > 0 else 0 }}%">
+          {% if ev.rank and ev.rank <= 3 %}{{ "%.1f"|format(ev.final_score) }}分{% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
   </div>
 </div>
 {% endfor %}
+
+{% elif period_label %}
+<div class="text-center py-5">
+  <i class="bi bi-trophy display-1 text-muted"></i>
+  <p class="text-muted mt-3">该周期尚未发布评价结果</p>
+  <p class="text-muted small">请先点击「生成评价」创建草稿，审核后发布</p>
+</div>
+
 {% else %}
 <div class="text-center py-5">
   <i class="bi bi-trophy display-1 text-muted"></i>
-  <p class="text-muted mt-3">暂无评分数据</p>
-  <p class="text-muted small">请先在「常规评分」中录入班级评分数据</p>
-  <a href="{{ url_for('ms.routine_overview') }}" class="btn btn-primary mt-2">
-    <i class="bi bi-plus-circle me-1"></i> 前往录入
-  </a>
+  <p class="text-muted mt-3">请选择评价周期查看排名</p>
 </div>
 {% endif %}
+
+<script>
+function loadEvals() {
+  const periodType = document.getElementById('periodType').value;
+  const periodLabel = document.getElementById('periodLabel').value;
+  const gradeId = document.getElementById('gradeFilter').value;
+  let url = "{{ url_for('ms.leaderboard') }}" +
+            "?period_type=" + encodeURIComponent(periodType) +
+            "&period_label=" + encodeURIComponent(periodLabel) +
+            "&grade_id=" + encodeURIComponent(gradeId);
+  window.location.href = url;
+}
+
+document.getElementById('periodType').addEventListener('change', function() {
+  const val = this.value;
+  // 刷新期间下拉
+  fetch("{{ url_for('ms.api_periods') }}")
+    .then(r => r.json())
+    .then(data => {
+      const sel = document.getElementById('periodLabel');
+      sel.innerHTML = '';
+      (data[val] || []).forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.value;
+        opt.textContent = p.label;
+        sel.appendChild(opt);
+      });
+      loadEvals();
+    });
+});
+
+document.getElementById('periodLabel').addEventListener('change', loadEvals);
+
+function generateEval() {
+  const periodType = document.getElementById('periodType').value;
+  const periodLabel = document.getElementById('periodLabel').value;
+  const gradeId = document.getElementById('gradeFilter').value;
+  if (!periodLabel) {
+    showToast('请先选择评价周期', 'warning');
+    return;
+  }
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = "{{ url_for('ms.generate_evaluation') }}";
+
+  const fields = {period_type: periodType, period_label: periodLabel, grade_id: gradeId};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = k;
+      input.value = v;
+      form.appendChild(input);
+    }
+  }
+  document.body.appendChild(form);
+  form.submit();
+}
+
+function showToast(msg, type) {
+  const toast = document.createElement('div');
+  toast.className = 'position-fixed top-0 end-0 p-3';
+  toast.style.zIndex = '9999';
+  toast.innerHTML = '<div class="alert alert-' + (type || 'info') + ' alert-dismissible fade show" role="alert">' +
+    msg + '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+</script>

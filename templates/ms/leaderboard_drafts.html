@@ -1,0 +1,137 @@
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-pencil-square text-warning me-2"></i>评价草稿审核</h4>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <select id="periodType" class="form-select form-select-sm" style="width:100px;">
+      <option value="week" {% if period_type == 'week' %}selected{% endif %}>周评</option>
+      <option value="month" {% if period_type == 'month' %}selected{% endif %}>月评</option>
+      <option value="term" {% if period_type == 'term' %}selected{% endif %}>期末总评</option>
+    </select>
+    <select id="periodLabel" class="form-select form-select-sm" style="width:220px;">
+      {% if period_labels.get(period_type) %}
+      {% for p in period_labels[period_type] %}
+      <option value="{{ p.value }}" {% if period_label == p.value %}selected{% endif %}>{{ p.label }}</option>
+      {% endfor %}
+      {% endif %}
+    </select>
+    <select id="gradeFilter" class="form-select form-select-sm" style="width:140px;" onchange="loadDrafts()">
+      <option value="">全部年级</option>
+      {% for g in grades %}
+      <option value="{{ g.id }}" {% if grade_filter == g.id %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
+    <a href="{{ url_for('ms.leaderboard') }}" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>返回排名
+    </a>
+  </div>
+</div>
+
+{% if evals_by_grade %}
+<!-- 草稿表格 -->
+{% for gid, evals in evals_by_grade.items() %}
+<div class="mb-4">
+  <h5 class="border-bottom pb-2 mb-3">
+    <i class="bi bi-diagram-3 me-2"></i>{{ evals[0].grade.name if evals[0].grade else '年级' + gid|string }}
+  </h5>
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>班级</th>
+              <th class="text-center">班主任均分</th>
+              <th class="text-center">年级组均分</th>
+              <th class="text-center">德育处均分</th>
+              <th class="text-center">实际权重</th>
+              <th class="text-center">加权得分</th>
+              <th class="text-center">数据来源</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ev in evals %}
+            <tr>
+              <td class="fw-bold">{{ ev.class_.name if ev.class_ else '-' }}</td>
+              <td class="text-center">{{ "%.1f"|format(ev.self_score) if ev.self_score else '<span class="text-muted">-</span>' }}</td>
+              <td class="text-center">{{ "%.1f"|format(ev.grade_score) if ev.grade_score else '<span class="text-muted">-</span>' }}</td>
+              <td class="text-center">{{ "%.1f"|format(ev.ms_score) if ev.ms_score else '<span class="text-muted">-</span>' }}</td>
+              <td class="text-center small">
+                {{ "%.0f%%"|format(ev.self_weight * 100) }} /
+                {{ "%.0f%%"|format(ev.grade_weight * 100) }} /
+                {{ "%.0f%%"|format(ev.ms_weight * 100) }}
+              </td>
+              <td class="text-center fw-bold text-primary fs-5">{{ "%.2f"|format(ev.final_score) }}</td>
+              <td class="text-center small">
+                {% if ev.self_score %}<span class="badge bg-primary-subtle text-primary">自评</span>{% endif %}
+                {% if ev.grade_score %}<span class="badge bg-success-subtle text-success">年级</span>{% endif %}
+                {% if ev.ms_score %}<span class="badge bg-danger-subtle text-danger">德育处</span>{% endif %}
+                {% if not ev.self_score and not ev.grade_score and not ev.ms_score %}
+                <span class="text-muted">无数据</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<!-- 发布按钮 -->
+<div class="text-center mt-3 mb-4">
+  <form method="POST" action="{{ url_for('ms.publish_evaluation') }}">
+    <input type="hidden" name="period_type" value="{{ period_type }}">
+    <input type="hidden" name="period_label" value="{{ period_label }}">
+    {% if grade_filter %}
+    <input type="hidden" name="grade_id" value="{{ grade_filter }}">
+    {% endif %}
+    <button type="submit" class="btn btn-success btn-lg px-4" onclick="return confirm('确认发布？发布后将计算排名并展示给所有用户。')">
+      <i class="bi bi-check-circle me-2"></i>确认发布
+    </button>
+    <span class="text-muted ms-3">共 {{ evals_by_grade|sum('value|length') if evals_by_grade else 0 }} 个班级待发布</span>
+  </form>
+</div>
+
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-journal-check display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无待审核草稿</p>
+  <p class="text-muted small">请先在流动红旗页面点击「生成评价」</p>
+  <a href="{{ url_for('ms.leaderboard') }}" class="btn btn-primary mt-2">
+    <i class="bi bi-arrow-left me-1"></i>前往生成
+  </a>
+</div>
+{% endif %}
+
+<script>
+function loadDrafts() {
+  const periodType = document.getElementById('periodType').value;
+  const periodLabel = document.getElementById('periodLabel').value;
+  const gradeId = document.getElementById('gradeFilter').value;
+  let url = "{{ url_for('ms.view_drafts') }}" +
+            "?period_type=" + encodeURIComponent(periodType) +
+            "&period_label=" + encodeURIComponent(periodLabel) +
+            "&grade_id=" + encodeURIComponent(gradeId);
+  window.location.href = url;
+}
+
+document.getElementById('periodType').addEventListener('change', function() {
+  const val = this.value;
+  fetch("{{ url_for('ms.api_periods') }}")
+    .then(r => r.json())
+    .then(data => {
+      const sel = document.getElementById('periodLabel');
+      sel.innerHTML = '';
+      (data[val] || []).forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.value;
+        opt.textContent = p.label;
+        sel.appendChild(opt);
+      });
+      loadDrafts();
+    });
+});
+
+document.getElementById('periodLabel').addEventListener('change', loadDrafts);
+</script>

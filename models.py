@@ -203,8 +203,11 @@ class RoutineScore(db.Model):
     score = db.Column(db.Integer, nullable=False)
     note = db.Column(db.Text, nullable=True)
     inspector = db.Column(db.String(64), nullable=True)
+    scorer_type = db.Column(db.String(20), nullable=False, default="class_teacher", index=True)  # class_teacher / grade_leader / ms_admin
     record_date = db.Column(db.Date, default=date.today, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    class_ = db.relationship("Class", lazy="joined")
 
 
 # ── 考勤 ──
@@ -1054,3 +1057,39 @@ class InterventionRecord(db.Model):
             "notes_snippet": (self.notes or "")[:80],
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+# ── 流动红旗评价汇总 ──
+class FlagEvaluation(db.Model):
+    """周评/月评/期末总评 — 三维度加权汇总"""
+    __tablename__ = "flag_evaluations"
+    __table_args__ = (
+        UniqueConstraint("period_type", "period_label", "grade_id", "class_id",
+                         name="uq_flag_eval_period_grade_class"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    period_type = db.Column(db.String(10), nullable=False, index=True)   # week / month / term
+    period_label = db.Column(db.String(60), nullable=False)               # "第12周" / "2026年3月" / "2025-2026第二学期"
+    grade_id = db.Column(db.Integer, db.ForeignKey("grades.id"), nullable=False, index=True)
+    class_id = db.Column(db.Integer, db.ForeignKey("classes.id"), nullable=False, index=True)
+
+    # 三维度均分（NULL = 该维度无数据）
+    self_score = db.Column(db.Float, nullable=True)       # 班主任自评均分
+    grade_score = db.Column(db.Float, nullable=True)      # 年级组评级均分
+    ms_score = db.Column(db.Float, nullable=True)          # 德育处评级均分
+
+    # 实际使用的权重（某维度无数据时自动重新分配）
+    self_weight = db.Column(db.Float, nullable=False, default=0.2)
+    grade_weight = db.Column(db.Float, nullable=False, default=0.3)
+    ms_weight = db.Column(db.Float, nullable=False, default=0.5)
+
+    final_score = db.Column(db.Float, nullable=False)      # 加权最终得分
+    rank = db.Column(db.Integer, nullable=True)            # 同年级内排名（发布时计算）
+    status = db.Column(db.String(10), nullable=False, default="draft", index=True)  # draft / published
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    published_at = db.Column(db.DateTime, nullable=True)
+
+    class_ = db.relationship("Class", lazy="joined")
+    grade = db.relationship("Grade", lazy="joined")

@@ -359,6 +359,7 @@ def add_routine():
         score=request.form.get("score", 0, type=int),
         note=request.form.get("note", ""),
         inspector=session.get("display_name", ""),
+        scorer_type="grade_leader",
         record_date=date.fromisoformat(record_date) if record_date else date.today(),
     )
     db.session.add(score)

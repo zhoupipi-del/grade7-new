@@ -1,14 +1,14 @@
 """德育处工作台 — 规则配置/任务下发/问题学生建档/全校总览"""
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session
 from models import db, Student, Class, Grade, User, Task, TaskFeedback
-from models import DisciplineRecord, DisciplineAppeal, RoutineScore, ProblemStudent, ProblemTrack, ROLES, Subject
+from models import DisciplineRecord, DisciplineAppeal, RoutineScore, ProblemStudent, ProblemTrack, ROLES, Subject, FlagEvaluation
 from models import Attendance, LeaveRequest
 from models import Message
 from blueprints.discipline_utils import check_escalation, send_discipline_notifications, send_appeal_notifications, deduct_quality_score
 from decorators import login_required, require_role, scope_query, require_permission
 from utils.db_utils import safe_commit
 from utils import get_local_now
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from sqlalchemy import func
 
 ms_bp = Blueprint("ms", __name__)
@@ -398,6 +398,7 @@ def add_routine():
         score=request.form.get("score", 0, type=int),
         note=request.form.get("note", ""),
         inspector=request.form.get("inspector", session.get("display_name", "")),
+        scorer_type="ms_admin",
         record_date=date.fromisoformat(record_date) if record_date else date.today(),
     )
     db.session.add(score)
@@ -416,35 +417,319 @@ def delete_routine(sid):
     return redirect(url_for("ms.routine_overview"))
 
 
-# ── 班级流动红旗 ──
+# ── 班级流动红旗（三维度加权评价）──
+
+def _calc_flag_weights(self_score, grade_score, ms_score):
+    """
+    根据三维度数据是否可用，计算实际权重。
+    标准权重: 班主任0.2 + 年级组0.3 + 德育处0.5
+    某维度缺失时，其余维度按比例瓜分该权重。
+    """
+    BASE_W = [0.2, 0.3, 0.5]
+    scores = [self_score, grade_score, ms_score]
+    available = [s is not None for s in scores]
+
+    if not any(available):
+        return BASE_W, 0.0
+
+    if all(available):
+        return BASE_W, (self_score * 0.2 + grade_score * 0.3 + ms_score * 0.5)
+
+    # 缺失维度权重按比例重分配
+    missing_weight = sum(w for w, a in zip(BASE_W, available) if not a)
+    avail_indices = [i for i, a in enumerate(available) if a]
+    avail_total_w = sum(BASE_W[i] for i in avail_indices)
+
+    weights = list(BASE_W)
+    for i in avail_indices:
+        weights[i] = BASE_W[i] + missing_weight * (BASE_W[i] / avail_total_w)
+    for i in range(3):
+        if not available[i]:
+            weights[i] = 0.0
+
+    final = sum(s * w for s, w in zip(scores, weights) if s is not None)
+    return weights, round(final, 2)
+
+
 @ms_bp.route("/leaderboard")
 @require_role("ms_admin")
 def leaderboard():
+    """流动红旗评价 — 支持 Tab 切换周评/月评/期末"""
     grade_id = request.args.get("grade_id", type=int)
+    period_type = request.args.get("period_type", "week")
+    period_label = request.args.get("period_label", "")
+
     grades = Grade.query.all()
-    # 按班级汇总常规评分排名
-    q = db.session.query(
-        RoutineScore.class_id, Class.name,
-        func.sum(RoutineScore.score).label("total"),
-        func.count(RoutineScore.id).label("cnt")
-    ).join(Class, RoutineScore.class_id == Class.id)
+
+    # 计算可选的期间列表
+    now = get_local_now()
+    period_labels = _build_period_labels(now)
+
+    # 如果没选期间，默认选第一个
+    if not period_label and period_labels.get(period_type):
+        period_label = period_labels[period_type][0]["value"]
+
+    # 查询已发布的评价记录
+    q = FlagEvaluation.query.filter_by(
+        period_type=period_type,
+        status="published"
+    )
     if grade_id:
-        q = q.filter(RoutineScore.grade_id == grade_id)
-    q = q.group_by(RoutineScore.class_id, Class.name).order_by(func.sum(RoutineScore.score).desc())
-    rankings = q.all()
-    leaderboard_data = []
-    for i, r in enumerate(rankings):
-        leaderboard_data.append({
-            "rank": i + 1,
-            "class_id": r[0],
-            "class_name": r[1],
-            "total": r[2] or 0,
-            "count": r[3],
-        })
+        q = q.filter_by(grade_id=grade_id)
+    if period_label:
+        q = q.filter_by(period_label=period_label)
+
+    evals = q.order_by(FlagEvaluation.rank.asc()).all()
+    # 按年级分组
+    evals_by_grade = {}
+    for ev in evals:
+        evals_by_grade.setdefault(ev.grade_id, []).append(ev)
+
     return render_template("ms/leaderboard.html",
-                           grades=grades,
-                           grade_filter=grade_id,
-                           leaderboard_data=leaderboard_data)
+                           grades=grades, grade_filter=grade_id,
+                           period_type=period_type, period_label=period_label,
+                           period_labels=period_labels,
+                           evals_by_grade=evals_by_grade)
+
+
+def _build_period_labels(now):
+    """生成当前可用的周/月/期末期间列表"""
+    import calendar
+
+    # 周列表：最近8周（按周一）
+    week_labels = []
+    # 找到本周一
+    weekday = now.weekday()
+    this_monday = now.date() - timedelta(days=weekday)
+    for i in range(7, -1, -1):
+        mon = this_monday - timedelta(weeks=i)
+        sun = mon + timedelta(days=6)
+        week_num = mon.isocalendar()[1]
+        week_labels.append({
+            "value": mon.isoformat(),
+            "label": f"第{week_num}周 ({mon.strftime('%m/%d')}~{sun.strftime('%m/%d')})",
+            "start": mon,
+            "end": sun,
+        })
+
+    # 月列表：最近6个月（纯标准库实现）
+    month_labels = []
+    for i in range(5, -1, -1):
+        # 用整数月份算术代替 dateutil
+        y, m = now.year, now.month
+        m = m - i
+        while m <= 0:
+            m += 12
+            y -= 1
+        d = date(y, m, 1)
+        _, last_day = calendar.monthrange(d.year, d.month)
+        month_labels.append({
+            "value": d.isoformat(),
+            "label": f"{d.year}年{d.month}月",
+            "start": d,
+            "end": date(d.year, d.month, last_day),
+        })
+
+    # 期末标签
+    term_labels = [{"value": "2025-2026-2", "label": "2025-2026学年第二学期"}]
+
+    return {
+        "week": week_labels,
+        "month": month_labels,
+        "term": term_labels,
+    }
+
+
+@ms_bp.route("/leaderboard/generate", methods=["POST"])
+@require_role("ms_admin")
+def generate_evaluation():
+    """生成评价草稿 — 根据选定期间和年级，计算三维度加权得分"""
+    grade_id = request.form.get("grade_id", type=int)
+    period_type = request.form.get("period_type")
+    period_label = request.form.get("period_label")
+
+    if not period_type or not period_label:
+        flash("请选择评价周期", "danger")
+        return redirect(url_for("ms.leaderboard"))
+
+    # 解析期间日期范围
+    start_date, end_date = _parse_period_range(period_type, period_label)
+    if not start_date or not end_date:
+        flash("无法解析评价周期", "danger")
+        return redirect(url_for("ms.leaderboard"))
+
+    # 获取目标班级列表
+    if grade_id:
+        classes = Class.query.filter_by(grade_id=grade_id, is_active=True).all()
+        grades = Grade.query.filter_by(id=grade_id).all()
+    else:
+        classes = Class.query.filter_by(is_active=True).all()
+        grades = Grade.query.all()
+
+    if not classes:
+        flash("没有找到班级", "danger")
+        return redirect(url_for("ms.leaderboard"))
+
+    # 批量查询该期间内所有常规评分（按 scorer_type 分组）
+    all_scores = RoutineScore.query.filter(
+        RoutineScore.record_date >= start_date,
+        RoutineScore.record_date <= end_date,
+        RoutineScore.class_id.in_([c.id for c in classes])
+    ).all()
+
+    # 按班级+scorer_type聚合均分
+    from collections import defaultdict
+    agg = defaultdict(lambda: defaultdict(list))
+    for s in all_scores:
+        agg[s.class_id][s.scorer_type].append(s.score)
+
+    # 删除该期间的旧草稿
+    FlagEvaluation.query.filter_by(
+        period_type=period_type, period_label=period_label, status="draft"
+    ).filter(
+        FlagEvaluation.class_id.in_([c.id for c in classes])
+    ).delete(synchronize_session="fetch")
+    safe_commit()
+
+    # 生成新草稿
+    created = 0
+    for cls in classes:
+        self_scores = agg.get(cls.id, {}).get("class_teacher", [])
+        grade_scores = agg.get(cls.id, {}).get("grade_leader", [])
+        ms_scores = agg.get(cls.id, {}).get("ms_admin", [])
+
+        self_avg = sum(self_scores) / len(self_scores) if self_scores else None
+        grade_avg = sum(grade_scores) / len(grade_scores) if grade_scores else None
+        ms_avg = sum(ms_scores) / len(ms_scores) if ms_scores else None
+
+        weights, final = _calc_flag_weights(self_avg, grade_avg, ms_avg)
+
+        ev = FlagEvaluation(
+            period_type=period_type,
+            period_label=period_label,
+            grade_id=cls.grade_id,
+            class_id=cls.id,
+            self_score=self_avg,
+            grade_score=grade_avg,
+            ms_score=ms_avg,
+            self_weight=weights[0],
+            grade_weight=weights[1],
+            ms_weight=weights[2],
+            final_score=final,
+            status="draft",
+        )
+        db.session.add(ev)
+        created += 1
+
+    safe_commit()
+    flash(f"已生成 {created} 个班级的评价草稿，请审核后发布", "success")
+
+    return redirect(url_for("ms.leaderboard", period_type=period_type, period_label=period_label,
+                             grade_id=grade_id))
+
+
+@ms_bp.route("/leaderboard/publish", methods=["POST"])
+@require_role("ms_admin")
+def publish_evaluation():
+    """发布评价 — 计算排名并标记为已发布"""
+    grade_id = request.form.get("grade_id", type=int)
+    period_type = request.form.get("period_type")
+    period_label = request.form.get("period_label")
+
+    if not period_type or not period_label:
+        flash("请选择评价周期", "danger")
+        return redirect(url_for("ms.leaderboard"))
+
+    # 查找草稿
+    q = FlagEvaluation.query.filter_by(
+        period_type=period_type, period_label=period_label, status="draft"
+    )
+    if grade_id:
+        q = q.filter_by(grade_id=grade_id)
+
+    drafts = q.all()
+    if not drafts:
+        flash("没有找到待发布的草稿", "danger")
+        return redirect(url_for("ms.leaderboard"))
+
+    # 按年级分组计算排名
+    from itertools import groupby
+    drafts.sort(key=lambda x: (x.grade_id, -x.final_score))
+    for g_id, group in groupby(drafts, key=lambda x: x.grade_id):
+        group_list = list(group)
+        for rank, ev in enumerate(group_list, 1):
+            ev.rank = rank
+            ev.status = "published"
+            ev.published_at = get_local_now()
+
+    safe_commit()
+    flash(f"已发布 {len(drafts)} 个班级的评价结果", "success")
+    return redirect(url_for("ms.leaderboard", period_type=period_type, period_label=period_label,
+                             grade_id=grade_id))
+
+
+@ms_bp.route("/leaderboard/drafts")
+@require_role("ms_admin")
+def view_drafts():
+    """查看待发布的草稿"""
+    grade_id = request.args.get("grade_id", type=int)
+    period_type = request.args.get("period_type", "week")
+    period_label = request.args.get("period_label", "")
+
+    grades = Grade.query.all()
+    period_labels = _build_period_labels(get_local_now())
+
+    if not period_label and period_labels.get(period_type):
+        period_label = period_labels[period_type][0]["value"]
+
+    q = FlagEvaluation.query.filter_by(
+        period_type=period_type, period_label=period_label, status="draft"
+    )
+    if grade_id:
+        q = q.filter_by(grade_id=grade_id)
+
+    drafts = q.order_by(FlagEvaluation.final_score.desc()).all()
+    evals_by_grade = {}
+    for ev in drafts:
+        evals_by_grade.setdefault(ev.grade_id, []).append(ev)
+
+    return render_template("ms/leaderboard_drafts.html",
+                           grades=grades, grade_filter=grade_id,
+                           period_type=period_type, period_label=period_label,
+                           period_labels=period_labels,
+                           evals_by_grade=evals_by_grade)
+
+
+@ms_bp.route("/leaderboard/api/periods")
+@require_role("ms_admin")
+def api_periods():
+    """返回可选期间列表（AJAX用）"""
+    return jsonify(_build_period_labels(get_local_now()))
+
+
+def _parse_period_range(period_type, period_label):
+    """解析期间标签为日期范围 (start_date, end_date)"""
+    import calendar
+    try:
+        if period_type == "term":
+            # 期末评价覆盖整个学期，返回一个极宽范围
+            return date(2026, 2, 16), date(2026, 7, 10)
+
+        elif period_type == "week":
+            # period_label 是周一的 ISO 日期
+            start = date.fromisoformat(period_label)
+            end = start + timedelta(days=6)
+            return start, end
+
+        elif period_type == "month":
+            # period_label 是月初的 ISO 日期
+            start = date.fromisoformat(period_label)
+            import calendar
+            _, last_day = calendar.monthrange(start.year, start.month)
+            end = date(start.year, start.month, last_day)
+            return start, end
+    except (ValueError, TypeError):
+        return None, None
 
 
 # ── 问题学生管理 — 全校建档 ──
