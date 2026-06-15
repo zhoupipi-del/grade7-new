@@ -1606,14 +1606,15 @@ function populateRiskModal(data) {
   if (data.evidence && Object.keys(data.evidence).length > 0) {
     Object.entries(data.evidence).forEach(([key, val]) => {
       const displayKey = getEvidenceLabel(key);
-      const isBad = String(val).includes('超标') || String(val).includes('下降') || String(val).includes('偏低');
+      const isBad = String(val).includes('超标') || String(val).includes('下降') || String(val).includes('偏低') || String(val).includes('严重') || String(val).includes('低于');
+      const isGood = String(val).includes('上升') || String(val).includes('良好');
       evidenceEl.innerHTML += '<div style="font-size:11px; padding:4px 6px; background:rgba(255,255,255,0.04); border-radius:4px;">' +
         '<span style="color:#7a9ab4;">' + displayKey + ':</span> ' +
-        '<span style="color:' + (isBad ? '#ff6b6b' : '#4ecdc4') + '; font-weight:600;">' + val + '</span>' +
+        '<span style="color:' + (isBad ? '#ff6b6b' : isGood ? '#4ecdc4' : '#ffa726') + '; font-weight:600;">' + val + '</span>' +
       '</div>';
     });
   } else {
-    evidenceEl.innerHTML = '<span style="font-size:11px; color:#5a7a94;">暂无异常证据</span>';
+    evidenceEl.innerHTML = '<span style="font-size:11px; color:#4ecdc4;">各项指标正常，暂无异常偏离</span>';
   }
 
   // ── 调用 AI 智能推荐引擎 ──
