@@ -846,3 +846,117 @@ def _notify_attendance_anomalies(absent_ids, late_ids, record_date, from_user_id
         content = f"学生 {stu.name} 于 {date_str} 被记录为迟到。请提醒孩子按时到校。"
         # 通知家长
         notify_parent(stu, title, content, from_user_id=from_user_id)
+
+
+# ── 常规评分自评（流动红旗数据源） ──
+@class_bp.route("/routine", methods=["GET", "POST"])
+def routine_score():
+    """班主任常规评分自评录入"""
+    class_id = session.get("class_id")
+    grade_id = session.get("grade_id")
+    if not class_id:
+        flash("请先选择班级", "warning")
+        return redirect(url_for("class.dashboard"))
+    
+    if request.method == "POST":
+        # 批量保存评分
+        record_date_str = request.form.get("record_date", "")
+        try:
+            record_date = date.fromisoformat(record_date_str) if record_date_str else get_local_now().date()
+        except ValueError:
+            record_date = get_local_now().date()
+        
+        categories = ["卫生", "纪律", "两操", "礼仪", "自习"]
+        saved = 0
+        for cat in categories:
+            score_val = request.form.get(f"score_{cat}", "")
+            if not score_val:
+                continue
+            try:
+                score = int(score_val)
+            except ValueError:
+                continue
+            if score < 0 or score > 100:
+                flash(f"{cat} 分数必须在 0-100 之间", "warning")
+                continue
+            
+            # 检查是否已存在同日期同类别同评分人记录
+            existing = RoutineScore.query.filter_by(
+                class_id=class_id,
+                category=cat,
+                scorer_type="class_teacher",
+                record_date=record_date
+            ).first()
+            if existing:
+                existing.score = score
+                existing.note = request.form.get(f"note_{cat}", "")
+                existing.inspector = session.get("display_name", "")
+            else:
+                db.session.add(RoutineScore(
+                    class_id=class_id,
+                    grade_id=grade_id,
+                    category=cat,
+                    score=score,
+                    note=request.form.get(f"note_{cat}", ""),
+                    inspector=session.get("display_name", ""),
+                    scorer_type="class_teacher",
+                    record_date=record_date,
+                ))
+            saved += 1
+        
+        if saved > 0:
+            safe_commit()
+            flash(f"已保存 {saved} 项常规评分", "success")
+        else:
+            flash("未检测到有效的评分数据", "warning")
+        return redirect(url_for("class.routine_score"))
+    
+    # GET: 显示本班历史评分 + 录入表单
+    from models import RoutineScore
+    page = request.args.get("page", 1, type=int)
+    records = RoutineScore.query.filter_by(
+        class_id=class_id,
+        scorer_type="class_teacher"
+    ).order_by(RoutineScore.record_date.desc()).paginate(page=page, per_page=20)
+    
+    # 获取最近一次评分日期（用于表单默认值）
+    last_record = RoutineScore.query.filter_by(
+        class_id=class_id,
+        scorer_type="class_teacher"
+    ).order_by(RoutineScore.record_date.desc()).first()
+    default_date = last_record.record_date.isoformat() if last_record else get_local_now().date().isoformat()
+    
+    # 按日期分组，方便展示
+    from collections import OrderedDict
+    records_by_date = OrderedDict()
+    all_records = RoutineScore.query.filter_by(
+        class_id=class_id,
+        scorer_type="class_teacher"
+    ).order_by(RoutineScore.record_date.desc()).limit(100).all()
+    for r in all_records:
+        d = r.record_date.isoformat()
+        if d not in records_by_date:
+            records_by_date[d] = {}
+        records_by_date[d][r.category] = r
+    
+    return render_template("class_/routine.html", 
+                           records=records, 
+                           records_by_date=records_by_date,
+                           default_date=default_date,
+                           categories=["卫生", "纪律", "两操", "礼仪", "自习"])
+
+
+@class_bp.route("/routine/<int:rid>/delete", methods=["POST"])
+def delete_routine_score(rid):
+    """删除常规评分记录"""
+    record = RoutineScore.query.get_or_404(rid)
+    if record.class_id != session.get("class_id") and session.get("role") != "ms_admin":
+        flash("无权操作", "danger")
+        return redirect(url_for("class.routine_score"))
+    if record.scorer_type != "class_teacher":
+        flash("只能删除班主任自评记录", "warning")
+        return redirect(url_for("class.routine_score"))
+    db.session.delete(record)
+    safe_commit()
+    flash("评分记录已删除", "success")
+    return redirect(url_for("class.routine_score"))

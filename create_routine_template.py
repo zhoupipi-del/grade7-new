@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""补丁脚本：创建班主任常规自评模板 (避免Jinja2 }} 被吞)"""
+
+TEMPLATE_PATH = r"c:\Users\Administrator\WorkBuddy\2026-05-26-20-55-49\grade7-new\templates\class_\routine.html"
+
+content = """{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <h2><i class="bi bi-clipboard-check"></i> 常规评分自评</h2>
+            <p class="text-muted">流动红旗评比数据来源 — 请按实录入本班各项常规评分</p>
+        </div>
+    </div>
+
+    <!-- 录入表单 -->
+    <div class="row mb-4">
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-pencil-square"></i> 录入评分</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('class.routine_score') }}">
+                        <div class="mb-3">
+                            <label class="form-label">评分日期</label>
+                            <input type="date" name="record_date" class="form-control" 
+                                   value="{{ default_date }}" required>
+                        </div>
+                        
+                        {% for cat in categories %}
+                        <div class="row mb-2 align-items-center">
+                            <label class="col-sm-3 col-form-label">{{ cat }}</label>
+                            <div class="col-sm-5">
+                                <input type="number" name="score_{{ cat }}" class="form-control" 
+                                       placeholder="0-100分" min="0" max="100"
+                                       value="{{ records_by_date.get(default_date, {}).get(cat, {}).score if records_by_date.get(default_date) else '' }}">
+                            </div>
+                            <div class="col-sm-4">
+                                <input type="text" name="note_{{ cat }}" class="form-control" 
+                                       placeholder="备注（可选）">
+                            </div>
+                        </div>
+                        {% endfor %}
+                        
+                        <div class="mt-3">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-check-circle"></i> 保存评分
+                            </button>
+                            <a href="{{ url_for('class.routine_score') }}" class="btn btn-secondary">重置</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-info-circle"></i> 评分说明</h5>
+                </div>
+                <div class="card-body">
+                    <h6>评分维度（满分100分）</h6>
+                    <ul>
+                        <li><strong>卫生</strong>：教室卫生、保洁情况</li>
+                        <li><strong>纪律</strong>：课堂纪律、课间秩序</li>
+                        <li><strong>两操</strong>：早操、眼保健操出勤与质量</li>
+                        <li><strong>礼仪</strong>：着装规范、礼貌行为</li>
+                        <li><strong>自习</strong>：自习课纪律与效率</li>
+                    </ul>
+                    <hr>
+                    <h6>流动红旗加权规则</h6>
+                    <p class="mb-1">最终得分 = 班主任自评×0.2 + 年级组评级×0.3 + 德育处评级×0.5</p>
+                    <small class="text-muted">缺失维度将自动按比例重新分配权重</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 历史记录 -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-clock-history"></i> 历史评分记录</h5>
+                </div>
+                <div class="card-body">
+                    {% if records_by_date %}
+                    <div class="accordion" id="historyAccordion">
+                        {% for date_str, scores in records_by_date.items() %}
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="heading{{ loop.index }}">
+                                <button class="accordion-button {% if not loop.first %}collapsed{% endif %}" type="button" 
+                                        data-bs-toggle="collapse" data-bs-target="#collapse{{ loop.index }}">
+                                    <strong>{{ date_str }}</strong>
+                                    <span class="ms-3">
+                                        {% for cat, rec in scores.items() %}
+                                        <span class="badge bg-info me-1">{{ cat }}: {{ rec.score }}</span>
+                                        {% endfor %}
+                                    </span>
+                                </button>
+                            </h2>
+                            <div id="collapse{{ loop.index }}" 
+                                 class="accordion-collapse collapse {% if loop.first %}show{% endif %}"
+                                 data-bs-parent="#historyAccordion">
+                                <div class="accordion-body">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>维度</th>
+                                                <th>分数</th>
+                                                <th>备注</th>
+                                                <th>录入人</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for cat, rec in scores.items() %}
+                                            <tr>
+                                                <td><span class="badge bg-primary">{{ cat }}</span></td>
+                                                <td><strong>{{ rec.score }}</strong></td>
+                                                <td>{{ rec.note or '-' }}</td>
+                                                <td>{{ rec.inspector or '-' }}</td>
+                                                <td>
+                                                    <form method="POST" 
+                                                          action="{{ url_for('class.delete_routine_score', rid=rec.id) }}"
+                                                          style="display:inline;"
+                                                          onsubmit="return confirm('确认删除此评分记录？');">
+                                                        <button type="submit" class="btn btn-sm btn-danger">
+                                                            <i class="bi bi-trash"></i>
+                                                        </button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 暂无评分记录，请在上方表单录入。
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+"""
+
+with open(TEMPLATE_PATH, "w", encoding="utf-8") as f:
+    f.write(content)
+
+print(f"[OK] 模板已创建: {TEMPLATE_PATH}")
+print(f"[INFO] 文件大小: {len(content)} 字节")
