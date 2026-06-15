@@ -12,22 +12,55 @@ from collections import defaultdict
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 # ── 加载环境变量 ──
-def _load_dotenv():
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if not os.path.isfile(env_path):
-        return
-    with open(env_path, encoding="utf-8") as f:
+def _load_env_from_systemd(service_name="grade7-new"):
+    """从 systemd service 文件读取 Environment= 变量"""
+    service_path = f"/etc/systemd/system/{service_name}.service"
+    if not os.path.isfile(service_path):
+        return False
+    loaded = False
+    with open(service_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
+            if not line.startswith("Environment="):
                 continue
-            key, val = line.split("=", 1)
-            key = key.strip()
-            val = val.strip().strip("'\"").strip("'").strip('"')
+            # Environment="KEY=val" or Environment="KEY=val with spaces"
+            kv = line[len("Environment="):].strip()
+            if kv.startswith('"') and kv.endswith('"'):
+                kv = kv[1:-1]
+            if "=" not in kv:
+                continue
+            key, val = kv.split("=", 1)
+            key, val = key.strip(), val.strip()
             if key and key not in os.environ:
                 os.environ[key] = val
+                loaded = True
+    return loaded
 
+def _load_dotenv():
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if os.path.isfile(env_path):
+        with open(env_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                key = key.strip()
+                val = val.strip().strip("'\"").strip("'").strip('"')
+                if key and key not in os.environ:
+                    os.environ[key] = val
+        return True
+    return False
+
+# 优先 .env，缺失则从 systemd 服务文件补充
 _load_dotenv()
+if not os.environ.get("DATABASE_URL"):
+    _load_env_from_systemd()
+    # 调试输出
+    if os.environ.get("DATABASE_URL"):
+        print(f"[INFO] 从 systemd 服务文件加载了 DATABASE_URL")
+    else:
+        print(f"[{FAIL}] 无法找到 DATABASE_URL，请检查 .env 或 systemd 服务文件")
 
 from flask import Flask
 from config import Config
@@ -71,6 +104,10 @@ def create_test_app():
     """创建最小化 Flask app 用于测试"""
     app = Flask(__name__)
     app.config.from_object(Config)
+    # 确保环境变量覆盖 config（systemd 场景）
+    db_url = os.environ.get("DATABASE_URL", "")
+    if db_url:
+        app.config["SQLALCHEMY_DATABASE_URI"] = db_url
     app.config["TESTING"] = True
     db.init_app(app)
     return app
