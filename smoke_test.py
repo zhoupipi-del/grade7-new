@@ -661,6 +661,11 @@ def test_ml_pipeline(app):
     with app.app_context():
         # 检查模型文件
         import joblib
+        # 确保自定义类在命名空间中（兼容 pickle 反序列化）
+        try:
+            import ml_pipeline_mock
+        except ImportError:
+            pass
         model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
         pipeline_path = os.path.join(model_dir, "wings_xgb_pipeline.pkl")
         metadata_path = os.path.join(model_dir, "pipeline_metadata.pkl")
