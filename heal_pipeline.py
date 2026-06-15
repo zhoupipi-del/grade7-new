@@ -6,43 +6,17 @@ ML 模型管道热自愈脚本 — 生成 Mock 高保真德育预测管道
 在服务器上运行: /opt/grade7-new/venv/bin/python /opt/grade7-new/heal_pipeline.py
 """
 import os
+import sys
 import pickle
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ml_pipeline_mock import MockDeYuPipeline
 
 MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 PIPELINE_PATH = os.path.join(MODELS_DIR, "wings_xgb_pipeline.pkl")
 METADATA_PATH = os.path.join(MODELS_DIR, "pipeline_metadata.pkl")
 
 os.makedirs(MODELS_DIR, exist_ok=True)
-
-
-class MockDeYuPipeline:
-    """
-    高保真德育数学模型管道
-    模拟真实 XGBoost 的 predict_proba 行为，对沙盘推演舱的特征微调做出确定性数学响应
-    """
-    def __init__(self):
-        self.weights = {
-            "classroom_risk_index": 0.35,
-            "mental_alert_flag": 0.30,
-            "wings_drop_rate": 0.20,
-            "leave_frequency": 0.15
-        }
-
-    def predict_proba(self, feature_dict):
-        """
-        输入特征字典，输出 [安全概率, 风险概率]
-        兼容 sklearn 的 predict_proba 接口
-        """
-        risk_score = 0.15
-        for key, weight in self.weights.items():
-            risk_score += feature_dict.get(key, 0) * weight
-        risk_score = max(0.02, min(0.98, risk_score))
-        return [[1.0 - risk_score, risk_score]]
-
-    def predict(self, feature_dict):
-        """返回类别标签: 0=安全, 1=预警"""
-        proba = self.predict_proba(feature_dict)
-        return [1 if p[1] > 0.5 else 0 for p in proba]
 
 
 def heal():
