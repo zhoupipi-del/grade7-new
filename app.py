@@ -55,16 +55,6 @@ def create_app():
     # ── 一键注册所有蓝图 ──
     register_all(app)
 
-    # ── 健康检查（无需登录）──
-    @app.route("/health")
-    def health():
-        from sqlalchemy import text
-        try:
-            db.session.execute(text("SELECT 1"))
-            return {"status": "ok", "db": "connected"}, 200
-        except Exception as e:
-            return {"status": "error", "db": str(e)}, 500
-
     # ── Jinja 全局变量 ──
     @app.context_processor
     def inject_globals():
