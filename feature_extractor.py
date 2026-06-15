@@ -21,7 +21,8 @@
 
 import csv
 from collections import defaultdict
-from datetime import datetime, timedelta, date
+from datetime import timedelta, date
+from utils import get_local_now
 from models import (
     db, Student, Exam, Score, Subject,
     RiskRecord, DisciplineRecord, Attendance,
@@ -221,7 +222,7 @@ class FeatureExtractor:
 
         返回: {student_id: {"density": 5, "level": 1}}
         """
-        cutoff = datetime.utcnow() - timedelta(days=30)
+        cutoff = get_local_now() - timedelta(days=30)
         rows = (
             RiskRecord.query
             .filter(
@@ -256,7 +257,7 @@ class FeatureExtractor:
 
         返回: {student_id: 0.95}
         """
-        cutoff = date.today() - timedelta(days=days)
+        cutoff = get_local_now().date() - timedelta(days=days)
         rows = (
             Attendance.query
             .filter(
