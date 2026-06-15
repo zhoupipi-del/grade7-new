@@ -94,7 +94,9 @@
     <button type="submit" class="btn btn-success btn-lg px-4" onclick="return confirm('确认发布？发布后将计算排名并展示给所有用户。')">
       <i class="bi bi-check-circle me-2"></i>确认发布
     </button>
-    <span class="text-muted ms-3">共 {{ evals_by_grade|sum('value|length') if evals_by_grade else 0 }} 个班级待发布</span>
+    {% set ns = namespace(cnt=0) %}
+    {% for _gid, _evs in (evals_by_grade or {}).items() %}{% set ns.cnt = ns.cnt + (_evs|length) %}{% endfor %}
+    <span class="text-muted ms-3">共 {{ ns.cnt }} 个班级待发布</span>
   </form>
 </div>
 
