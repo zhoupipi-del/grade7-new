@@ -714,8 +714,8 @@ def test_api_endpoints(app):
     if resp.status_code == 200:
         info(f"  响应: {resp.get_json()}")
 
-    # 测试登录
-    resp = client.post("/auth/login", data={
+    # 测试登录（路由在 blueprints/auth.py，前缀为 /login）
+    resp = client.post("/login", data={
         "username": "admin",
         "password": "admin123",
     }, follow_redirects=False)

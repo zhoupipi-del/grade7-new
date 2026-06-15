@@ -55,11 +55,21 @@ def create_app():
     # ── 一键注册所有蓝图 ──
     register_all(app)
 
+    # ── 健康检查（无需登录）──
+    @app.route("/health")
+    def health():
+        from sqlalchemy import text
+        try:
+            db.session.execute(text("SELECT 1"))
+            return {"status": "ok", "db": "connected"}, 200
+        except Exception as e:
+            return {"status": "error", "db": str(e)}, 500
+
     # ── Jinja 全局变量 ──
     @app.context_processor
     def inject_globals():
         """向所有模板注入全局变量，减少路由重复传参"""
-        from datetime import datetime as dt_now
+        from utils import get_local_now
         try:
             _classes = Class.query.filter_by(is_active=True).order_by(Class.name).all()
         except Exception:
@@ -71,7 +81,7 @@ def create_app():
         return {
             "session": session,
             "ROLES": ROLES,
-            "now": dt_now.utcnow(),
+            "now": get_local_now(),
             "classes": _classes,
             "semesters": _semesters,
         }

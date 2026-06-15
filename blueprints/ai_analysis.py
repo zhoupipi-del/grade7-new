@@ -4,11 +4,10 @@ from flask import Blueprint, render_template, jsonify, request, session, current
 from sqlalchemy.orm import joinedload
 from models import db, Student, Attendance, DisciplineRecord, Score, LeaveRequest, Class, User, RiskRecord, PsychSurvey, MentalHealthAssessment, WingsScore, ProblemStudent
 from decorators import login_required, require_role
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from sqlalchemy import func, text
 from collections import defaultdict
-# send_notification 通过内联 import 调用以避免循环导入
-from utils.sonar_bus import publish_risk, publish_briefing
+from utils import get_local_now
 
 ai_analysis_bp = Blueprint("ai_analysis", __name__, url_prefix="/ai-analysis")
 
@@ -169,7 +168,7 @@ def index():
     role = session.get("role", "")
     grade_id = session.get("grade_id")
     class_id = session.get("class_id")
-    today = date.today()
+    today = get_local_now().date()
 
     # ── 1. 确定查询范围 ──
     t1 = time_module.time()
@@ -433,7 +432,7 @@ def index():
 def student_detail(sid):
     """单个学生的AI分析报告（JSON）"""
     student = Student.query.get_or_404(sid)
-    today = date.today()
+    today = get_local_now().date()
 
     # 权限检查
     role = session.get("role", "")
@@ -720,7 +719,7 @@ def api_scan():
     if auth != f"Bearer {SCAN_SECRET}":
         return jsonify({"code": 1, "msg": "Unauthorized"}), 401
 
-    today = date.today()
+    today = get_local_now().date()
     app = current_app._get_current_object()
     scan_summary = {"scanned": 0, "new_risks": 0, "red": 0, "yellow": 0, "notifications_sent": 0}
 
@@ -1167,7 +1166,7 @@ def api_regression():
     else:
         return jsonify({"code": 1, "msg": "未登录"}), 401
     
-    today = date.today()
+    today = get_local_now().date()
     semester_start = today.replace(month=9, day=1) if today.month >= 9 else today.replace(month=2, day=1)
     month_start = today.replace(day=1)
 
@@ -1325,7 +1324,7 @@ def dashboard():
     role = session.get("role", "")
     grade_id = session.get("grade_id")
     class_id = session.get("class_id")
-    today = date.today()
+    today = get_local_now().date()
 
     # ── 班级列表（供前端筛选器） ──
     if role == "ms_admin":
@@ -1518,7 +1517,7 @@ def dashboard_detail(sid):
         flash("无权查看", "danger")
         return redirect(url_for("ai_analysis.dashboard"))
 
-    today = date.today()
+    today = get_local_now().date()
 
     # 心理问卷
     psych = PsychSurvey.query.filter_by(
@@ -1700,7 +1699,7 @@ def _calculate_comprehensive_risk_score(stu, today, attendance_records=None,
 def api_comprehensive_risk(sid):
     """综合风险评分 API — 返回0-100分风险评分 + 因子分解"""
     student = Student.query.get_or_404(sid)
-    today = date.today()
+    today = get_local_now().date()
 
     # 权限检查
     role = session.get("role", "")
@@ -1782,7 +1781,7 @@ def api_briefing(sid):
     elif role in ("class_teacher", "teacher") and student.class_id != session.get("class_id"):
         return jsonify({"error": "无权查看"}), 403
 
-    today = date.today()
+    today = get_local_now().date()
     semester_start = today.replace(month=9, day=1) if today.month >= 9 else today.replace(month=2, day=1)
     month_start = today.replace(day=1)
     week_start = today - timedelta(days=today.weekday())
@@ -2069,7 +2068,7 @@ def api_predict_mental_health(sid):
 def api_predict_discipline(sid):
     """违纪趋势预测 API — 基于历史频率的简单预测"""
     student = Student.query.get_or_404(sid)
-    today = date.today()
+    today = get_local_now().date()
     semester_start = today.replace(month=9, day=1) if today.month >= 9 else today.replace(month=2, day=1)
 
     records = DisciplineRecord.query.filter(
