@@ -10,7 +10,7 @@ from models import (
     db, Student, Class, Grade, User,
     DisciplineRecord, LeaveRequest, Attendance,
     Score, Exam, Subject, WingsScore,
-    RiskRecord, HomeVisit,
+    RiskRecord, HomeVisit, FlagEvaluation,
     MentalHealthAssessment, PsychSurvey,
     EndTermComment, TeacherNote,
 )
