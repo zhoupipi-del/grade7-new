@@ -30,10 +30,7 @@ jobs:
             /opt/grade7-new/venv/bin/python3 -m pip install --upgrade pip -q
             /opt/grade7-new/venv/bin/pip install -r requirements.txt
             echo "--- verify critical imports ---"
-            /opt/grade7-new/venv/bin/python3 -c "
-import flask; import jwt; import sqlalchemy; import pymysql
-print('All critical modules OK')
-" || { echo "=== CRITICAL IMPORT FAILED ==="; exit 1; }
+            /opt/grade7-new/venv/bin/python3 -c "import flask; import jwt; import sqlalchemy; import pymysql; print('All critical modules OK')" || { echo "=== CRITICAL IMPORT FAILED ==="; exit 1; }
             echo "--- restart service (stop + start for preload) ---"
             systemctl stop grade7-new
             sleep 2
