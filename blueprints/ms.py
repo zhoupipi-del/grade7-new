@@ -427,7 +427,7 @@ def _calc_flag_weights(self_score, grade_score, ms_score):
     某维度缺失时，其余维度按比例瓜分该权重。
     """
     BASE_W = [0.2, 0.3, 0.5]
-    scores = [self_score, grade_score, ms_score]
+    scores = [float(s) if s is not None else None for s in (self_score, grade_score, ms_score)]
     available = [s is not None for s in scores]
 
     if not any(available):
@@ -607,13 +607,14 @@ def generate_evaluation():
 
         # ── 违纪+考勤合流扣分 ──
         # 1. 违纪扣分（周期内该班级所有违纪记录的points总和 × 0.1）
-        discipline_points = db.session.query(
-            func.sum(DisciplineRecord.points)
-        ).filter(
-            DisciplineRecord.class_id == cls.id,
-            DisciplineRecord.created_at >= start_date,
-            DisciplineRecord.created_at <= end_date
-        ).scalar() or 0.0
+        discipline_points = float(
+            db.session.query(func.sum(DisciplineRecord.points))
+            .filter(
+                DisciplineRecord.class_id == cls.id,
+                DisciplineRecord.created_at >= start_date,
+                DisciplineRecord.created_at <= end_date,
+            ).scalar() or 0
+        )
 
         # 2. 考勤异常扣分（迟到/缺勤/早退/请假 次数 × 0.05）
         attendance_exceptions = Attendance.query.filter(
@@ -759,7 +760,8 @@ def _parse_period_range(period_type, period_label):
             end = date(start.year, start.month, last_day)
             return start, end
     except (ValueError, TypeError):
-        return None, None
+        pass
+    return None, None
 
 
 # ── 问题学生管理 — 全校建档 ──
