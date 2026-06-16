@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+
+{% block title %}增值评价 — AI温暖评语{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-heart text-danger me-2"></i>增值评价 — AI温暖评语</h4>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <select id="gradeFilter" class="form-select form-select-sm" style="width:140px;">
+      <option value="">全部年级</option>
+      {% for g in grades %}
+      <option value="{{ g.id }}" {% if grade_filter == g.id %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
+    <select id="examFilter" class="form-select form-select-sm" style="width:200px;">
+      <option value="">全部考试</option>
+      {% for e in exams %}
+      <option value="{{ e.id }}" {% if exam_filter == e.id %}selected{% endif %}>{{ e.name }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-outline-primary btn-sm" onclick="filterComments()">
+      <i class="bi bi-funnel me-1"></i>筛选
+    </button>
+  </div>
+</div>
+
+<!-- 扫描面板 -->
+<div class="card mb-4 border-danger">
+  <div class="card-header bg-danger text-white">
+    <i class="bi bi-search-heart me-2"></i>扫描"隐形好学生"
+    <small class="ms-2">— 选择两次考试，系统自动识别成绩中下游但品行好、进步大的学生</small>
+  </div>
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small mb-0">上次考试</label>
+        <select id="prevExam" class="form-select form-select-sm" style="width:200px;">
+          {% for e in exams %}
+          <option value="{{ e.id }}">{{ e.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-0">本次考试</label>
+        <select id="currExam" class="form-select form-select-sm" style="width:200px;">
+          {% for e in exams %}
+          <option value="{{ e.id }}" {% if loop.index == 1 %}selected{% endif %}>{{ e.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-0">年级</label>
+        <select id="scanGrade" class="form-select form-select-sm" style="width:140px;">
+          <option value="">全部年级</option>
+          {% for g in grades %}
+          <option value="{{ g.id }}">{{ g.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-danger btn-sm" onclick="scanStudents()">
+          <i class="bi bi-search me-1"></i>扫描
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 评语列表 -->
+{% if comments %}
+<div class="row g-3">
+  {% for c in comments %}
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100 {% if c.status == 'published' %}border-success{% else %}border-warning{% endif %}">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+          <div>
+            <strong>{{ c.student.name if c.student else '-' }}</strong>
+            <span class="text-muted small">{{ c.class_.name if c.class_ else '' }}</span>
+          </div>
+          <span class="badge {% if c.status == 'published' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+            {{ c.status }}
+          </span>
+        </div>
+
+        <!-- 数据概要 -->
+        <div class="small mb-2">
+          {% if c.score_delta and c.score_delta > 0 %}
+          <span class="text-success"><i class="bi bi-arrow-up"></i> +{{ "%.1f"|format(c.score_delta) }}分</span>
+          {% endif %}
+          {% if c.rank_delta and c.rank_delta > 0 %}
+          <span class="text-info ms-2"><i class="bi bi-trophy"></i> 进步{{ c.rank_delta }}名</span>
+          {% endif %}
+          <span class="text-muted ms-2">五翼{{ "%.1f"|format(c.behavior_score) if c.behavior_score else '-' }}</span>
+          {% if c.discipline_count == 0 %}
+          <span class="text-success ms-2">零违纪</span>
+          {% endif %}
+        </div>
+
+        <!-- 评语内容 -->
+        {% if c.comment_text %}
+        <p class="card-text small mb-2" style="max-height:80px;overflow:hidden;line-height:1.6;">
+          {{ c.comment_text[:100] }}...
+        </p>
+        {% endif %}
+
+        <!-- 闪光点标签 -->
+        {% if c.tags %}
+        <div class="mb-2">
+          {% for tag in c.tags[:3] %}
+          <span class="badge bg-light text-dark me-1">{{ tag }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      <div class="card-footer bg-transparent border-top-0">
+        <div class="d-flex gap-1">
+          {% if c.status == 'draft' %}
+          <form method="POST" action="{{ url_for('value_added.publish_comment', cid=c.id) }}" class="flex-fill">
+            <button type="submit" class="btn btn-sm btn-success w-100">发布</button>
+          </form>
+          {% endif %}
+          <form method="POST" action="{{ url_for('value_added.delete_comment', cid=c.id) }}" class="flex-fill"
+                onsubmit="return confirm('确认删除？')">
+            <button type="submit" class="btn btn-sm btn-outline-danger w-100">删除</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% elif grade_filter or exam_filter %}
+<div class="text-center py-5">
+  <i class="bi bi-heart display-1 text-muted"></i>
+  <p class="text-muted mt-3">该筛选条件下暂无评语</p>
+</div>
+
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-heart display-1 text-muted"></i>
+  <p class="text-muted mt-3">选择两次考试开始扫描"隐形好学生"</p>
+  <p class="text-muted small">系统会自动识别成绩中下游但品行好、进步大的学生，生成温暖鼓励评语</p>
+</div>
+{% endif %}
+
+<script>
+function filterComments() {
+  const gId = document.getElementById('gradeFilter').value;
+  const eId = document.getElementById('examFilter').value;
+  let url = "{{ url_for('value_added.index') }}?";
+  const params = [];
+  if (gId) params.push('grade_id=' + gId);
+  if (eId) params.push('exam_id=' + eId);
+  window.location.href = url + params.join('&');
+}
+
+function scanStudents() {
+  const prev = document.getElementById('prevExam').value;
+  const curr = document.getElementById('currExam').value;
+  const grade = document.getElementById('scanGrade').value;
+
+  if (!prev || !curr) {
+    showToast('请选择两次考试', 'warning');
+    return;
+  }
+  if (prev === curr) {
+    showToast('两次考试不能相同', 'warning');
+    return;
+  }
+
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = "{{ url_for('value_added.scan_students') }}";
+
+  const fields = {prev_exam_id: prev, curr_exam_id: curr, grade_id: grade};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = k;
+      input.value = v;
+      form.appendChild(input);
+    }
+  }
+  document.body.appendChild(form);
+  form.submit();
+}
+
+function showToast(msg, type) {
+  const toast = document.createElement('div');
+  toast.className = 'position-fixed top-0 end-0 p-3';
+  toast.style.zIndex = '9999';
+  toast.innerHTML = '<div class="alert alert-' + (type || 'info') + ' alert-dismissible fade show" role="alert">' +
+    msg + '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+</script>
+{% endblock %}

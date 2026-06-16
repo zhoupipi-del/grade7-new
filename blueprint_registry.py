@@ -38,6 +38,7 @@ from blueprints.comparison import comparison_bp
 from blueprints.ai_inference import bp as ai_inference_bp
 from blueprints.markov import bp as markov_bp
 from blueprints.fission import bp as fission_bp
+from blueprints.value_added import value_added_bp
 
 # ── 所有蓝图注册表 ──
 # 格式: (blueprint, url_prefix, 说明)
@@ -81,6 +82,7 @@ BLUEPRINTS = [
     (ai_inference_bp, "/ai-api", "AI 线上推理 — 学生风险实时预测 API"),
     (markov_bp,      "/api/markov", "数学学力事件视界 — Markov链状态转移/教学熔断预警"),
     (fission_bp,     "/api/fission", "群体违纪链式核裂变溯源引擎"),
+    (value_added_bp, "/value-added", "增值评价 — AI识别隐形好学生/温暖评语"),
 ]
 
 
