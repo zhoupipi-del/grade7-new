@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}流动红旗周报{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-newspaper text-danger me-2"></i>流动红旗周报</h4>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <select id="gradeFilter" class="form-select form-select-sm" style="width:140px;">
+      <option value="">全部年级</option>
+      {% for g in grades %}
+      <option value="{{ g.id }}" {% if grade_filter == g.id %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
+    <a href="{{ url_for('ms.leaderboard') }}" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-flag-fill me-1"></i>返回排名
+    </a>
+  </div>
+</div>
+
+<!-- 一键生成区 -->
+<div class="card mb-4 border-info">
+  <div class="card-body py-2">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div class="text-muted small">
+        <i class="bi bi-robot me-1"></i>
+        选择评价周期和年级，AI 将基于已发布的流动红旗数据自动生成周报（含颁奖词、改进建议）
+      </div>
+      <div class="d-flex gap-2 align-items-center">
+        <select id="genPeriodType" class="form-select form-select-sm" style="width:80px;">
+          <option value="week">周评</option>
+          <option value="month">月评</option>
+          <option value="term">期末</option>
+        </select>
+        <select id="genPeriodLabel" class="form-select form-select-sm" style="width:200px;">
+        </select>
+        <select id="genGradeFilter" class="form-select form-select-sm" style="width:140px;">
+          <option value="">全部年级</option>
+          {% for g in grades %}
+          <option value="{{ g.id }}">{{ g.name }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-success btn-sm" onclick="generateReport()">
+          <i class="bi bi-stars me-1"></i>AI 生成周报
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if reports_by_grade %}
+{% for gid, reports in reports_by_grade.items() %}
+<div class="mb-4">
+  <h5 class="border-bottom pb-2 mb-3">
+    <i class="bi bi-diagram-3 me-2"></i>{{ reports[0].grade.name if reports[0].grade else '年级' + gid|string }}
+    <span class="badge bg-secondary ms-2">{{ reports|length }} 份</span>
+  </h5>
+  <div class="row g-3">
+    {% for r in reports %}
+    <div class="col-md-6 col-lg-4">
+      <div class="card h-100 {% if r.status == 'published' %}border-success{% else %}border-warning{% endif %}">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <div>
+              <span class="badge {% if r.period_type == 'week' %}bg-primary{% elif r.period_type == 'month' %}bg-info text-dark{% else %}bg-danger{% endif %} me-1">
+                {% if r.period_type == 'week' %}周评{% elif r.period_type == 'month' %}月评{% else %}期末{% endif %}
+              </span>
+              <strong>{{ r.period_label }}</strong>
+            </div>
+            <span class="badge {% if r.status == 'published' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+              {% if r.status == 'published' %}已发布{% else %}草稿{% endif %}
+            </span>
+          </div>
+
+          <div class="small mb-2">
+            <span class="text-muted">参评 {{ r.class_count or '-' }} 个班级</span>
+            <br>
+            {% if r.top_class_name %}
+            <span class="text-danger"><i class="bi bi-trophy-fill"></i> {{ r.top_class_name }} ({{ "%.1f"|format(r.top_score) }}分)</span>
+            {% endif %}
+          </div>
+
+          {% if r.report_summary %}
+          <p class="card-text small text-muted mb-2" style="max-height:60px;overflow:hidden;">
+            {{ r.report_summary[:80] }}...
+          </p>
+          {% endif %}
+        </div>
+        <div class="card-footer bg-transparent border-top-0 pb-2">
+          <a href="{{ url_for('ms.flag_report_detail', rid=r.id) }}" class="btn btn-sm btn-outline-primary w-100">
+            <i class="bi bi-eye me-1"></i>查看详情
+          </a>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-newspaper display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无周报记录</p>
+  <p class="text-muted small">选择周期后点击「AI 生成周报」自动生成</p>
+</div>
+{% endif %}
+
+<script>
+// 加载期间选项
+document.getElementById('genPeriodType').addEventListener('change', function() {
+  const val = this.value;
+  fetch("{{ url_for('ms.api_periods') }}")
+    .then(r => r.json())
+    .then(data => {
+      const sel = document.getElementById('genPeriodLabel');
+      sel.innerHTML = '';
+      (data[val] || []).forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.value;
+        opt.textContent = p.label;
+        sel.appendChild(opt);
+      });
+    });
+});
+
+// 触发初始加载
+document.getElementById('genPeriodType').dispatchEvent(new Event('change'));
+
+// 年级筛选
+document.getElementById('gradeFilter').addEventListener('change', function() {
+  const gId = this.value;
+  let url = "{{ url_for('ms.flag_report_list') }}";
+  if (gId) url += "?grade_id=" + encodeURIComponent(gId);
+  window.location.href = url;
+});
+
+// 生成周报
+function generateReport() {
+  const periodType = document.getElementById('genPeriodType').value;
+  const periodLabel = document.getElementById('genPeriodLabel').value;
+  const gradeId = document.getElementById('genGradeFilter').value;
+
+  if (!periodLabel) {
+    showToast('请先选择评价周期', 'warning');
+    return;
+  }
+
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = "{{ url_for('ms.generate_flag_report') }}";
+
+  const fields = {period_type: periodType, period_label: periodLabel, grade_id: gradeId};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = k;
+      input.value = v;
+      form.appendChild(input);
+    }
+  }
+  document.body.appendChild(form);
+  form.submit();
+}
+
+function showToast(msg, type) {
+  const toast = document.createElement('div');
+  toast.className = 'position-fixed top-0 end-0 p-3';
+  toast.style.zIndex = '9999';
+  toast.innerHTML = '<div class="alert alert-' + (type || 'info') + ' alert-dismissible fade show" role="alert">' +
+    msg + '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+</script>
+{% endblock %}

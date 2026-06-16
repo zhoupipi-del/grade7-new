@@ -1104,3 +1104,118 @@ class FlagEvaluation(db.Model):
 
     class_ = db.relationship("Class", lazy="joined")
     grade = db.relationship("Grade", lazy="joined")
+
+
+# ── 流动红旗周报（AI生成）──
+class FlagReport(db.Model):
+    """AI生成的流动红旗评价周报 — 含排名分析、颁奖词、改进建议"""
+    __tablename__ = "flag_reports"
+    __table_args__ = (
+        UniqueConstraint("period_type", "period_label", "grade_id",
+                         name="uq_flag_report_period_grade"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    period_type = db.Column(db.String(10), nullable=False, index=True)   # week / month / term
+    period_label = db.Column(db.String(60), nullable=False)
+    grade_id = db.Column(db.Integer, db.ForeignKey("grades.id"), nullable=False, index=True)
+
+    # LLM 生成内容
+    report_summary = db.Column(db.Text, nullable=True)        # 周报总述（200-400字）
+    award_speech = db.Column(db.Text, nullable=True)          # 颁奖词（第一名班级专属）
+    runner_up_speech = db.Column(db.Text, nullable=True)      # 亚军寄语
+    improvement_advice = db.Column(db.Text, nullable=True)   # 末位班级改进建议
+    highlights = db.Column(db.Text, nullable=True)            # 本期亮点/数据分析（JSON数组）
+
+    # 元信息
+    class_count = db.Column(db.Integer, nullable=True)        # 参评班级数
+    top_class_id = db.Column(db.Integer, nullable=True)
+    top_class_name = db.Column(db.String(64), nullable=True)
+    top_score = db.Column(db.Float, nullable=True)
+    bottom_class_id = db.Column(db.Integer, nullable=True)
+    bottom_class_name = db.Column(db.String(64), nullable=True)
+
+    status = db.Column(db.String(10), nullable=False, default="draft", index=True)  # draft / published
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.Column(db.String(64), nullable=True)
+
+    grade = db.relationship("Grade", lazy="joined")
+    top_class = db.relationship("Class", foreign_keys=[top_class_id], lazy="joined")
+
+
+# ── 增值评价记录（AI温暖评语）──
+class ValueAddedComment(db.Model):
+    """增值评价AI评语 — 针对"隐形好学生"的温暖鼓励"""
+    __tablename__ = "value_added_comments"
+    __table_args__ = (
+        UniqueConstraint("student_id", "exam_id", name="uq_va_student_exam"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey("students.id"), nullable=False, index=True)
+    class_id = db.Column(db.Integer, db.ForeignKey("classes.id"), nullable=False)
+    grade_id = db.Column(db.Integer, db.ForeignKey("grades.id"), nullable=False)
+    exam_id = db.Column(db.Integer, db.ForeignKey("exams.id"), nullable=False, index=True)
+
+    # 识别依据
+    prev_total = db.Column(db.Float, nullable=True)         # 上次总分
+    curr_total = db.Column(db.Float, nullable=True)         # 本次总分
+    score_delta = db.Column(db.Float, nullable=True)        # 进步分
+    rank_delta = db.Column(db.Integer, nullable=True)       # 排名变化
+    behavior_score = db.Column(db.Float, nullable=True)     # 五翼行为均分
+    discipline_count = db.Column(db.Integer, default=0)      # 违纪次数
+    attendance_rate = db.Column(db.Float, nullable=True)    # 出勤率
+
+    # AI 生成
+    comment_text = db.Column(db.Text, nullable=True)        # AI温暖评语
+    highlight_tags = db.Column(db.Text, nullable=True)       # 闪光点标签（JSON数组）
+
+    status = db.Column(db.String(10), nullable=False, default="draft", index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    student = db.relationship("Student", lazy="joined")
+    class_ = db.relationship("Class", lazy="joined")
+    grade = db.relationship("Grade", lazy="joined")
+    exam = db.relationship("Exam", lazy="joined")
+
+
+# ── 跨表因果链诊断 ──
+class CausalDiagnosis(db.Model):
+    """成绩下滑因果链诊断报告 — 跨表关联分析"""
+    __tablename__ = "causal_diagnoses"
+    __table_args__ = (
+        UniqueConstraint("student_id", "exam_id", "subject_id",
+                         name="uq_causal_stu_exam_subj"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey("students.id"), nullable=False, index=True)
+    class_id = db.Column(db.Integer, db.ForeignKey("classes.id"), nullable=False)
+    grade_id = db.Column(db.Integer, db.ForeignKey("grades.id"), nullable=False)
+    exam_id = db.Column(db.Integer, db.ForeignKey("exams.id"), nullable=False, index=True)
+    subject_id = db.Column(db.Integer, db.ForeignKey("subjects.id"), nullable=True, index=True)
+
+    # 成绩变化
+    prev_score = db.Column(db.Float, nullable=True)
+    curr_score = db.Column(db.Float, nullable=True)
+    score_drop = db.Column(db.Float, nullable=True)         # 下滑幅度
+
+    # AI 诊断结果
+    evidence_chain = db.Column(db.Text, nullable=True)       # 证据链（JSON数组）
+    primary_cause = db.Column(db.String(200), nullable=True)  # 主要原因
+    secondary_cause = db.Column(db.String(200), nullable=True) # 次要原因
+    diagnosis_report = db.Column(db.Text, nullable=True)       # 诊断报告正文
+    intervention_plan = db.Column(db.Text, nullable=True)     # 干预方案
+    risk_level = db.Column(db.String(10), nullable=True, default="low")  # low / medium / high / critical
+
+    # 处理状态
+    is_processed = db.Column(db.Boolean, default=False, index=True)
+    processed_by = db.Column(db.String(64), nullable=True)
+    processed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    student = db.relationship("Student", lazy="joined")
+    class_ = db.relationship("Class", lazy="joined")
+    grade = db.relationship("Grade", lazy="joined")
+    exam = db.relationship("Exam", lazy="joined")
+    subject = db.relationship("Subject", lazy="joined")

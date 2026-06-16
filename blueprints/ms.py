@@ -1,7 +1,7 @@
 """德育处工作台 — 规则配置/任务下发/问题学生建档/全校总览"""
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, current_app
 from models import db, Student, Class, Grade, User, Task, TaskFeedback
-from models import DisciplineRecord, DisciplineAppeal, RoutineScore, ProblemStudent, ProblemTrack, ROLES, Subject, FlagEvaluation
+from models import DisciplineRecord, DisciplineAppeal, RoutineScore, ProblemStudent, ProblemTrack, ROLES, Subject, FlagEvaluation, FlagReport
 from models import Attendance, LeaveRequest
 from models import Message
 from blueprints.discipline_utils import check_escalation, send_discipline_notifications, send_appeal_notifications, deduct_quality_score
@@ -11,6 +11,8 @@ from utils.db_utils import safe_commit
 from utils import get_local_now
 from datetime import date, datetime, timedelta
 from sqlalchemy import func
+import json as _json
+import requests
 
 ms_bp = Blueprint("ms", __name__)
 
@@ -762,6 +764,259 @@ def _parse_period_range(period_type, period_label):
     except (ValueError, TypeError):
         pass
     return None, None
+
+
+# ══════════════════════════════════════════════════════════════
+#  流动红旗周报 — AI 一键生成
+# ══════════════════════════════════════════════════════════════
+
+FLAG_REPORT_SYSTEM_PROMPT = """你是一位拥有20年经验的初中德育管理资深主任，擅长撰写流动红旗评价周报。你的报告将直接用于全校德育工作通报，语气要有权威感又有温度。
+
+[核心约束]
+1. 严禁出现"在领导的关怀下"等空话套话。
+2. 必须引用具体数据：班级得分、排名变动、违纪扣分详情、考勤异常次数。
+3. 颁奖词要有仪式感和文学性，末位建议要体现关怀而非批评。
+4. report_summary 200-400字，award_speech 100-150字，runner_up_speech 80-120字，improvement_advice 100-200字。
+5. highlights 是3-5个关键数据洞察（如"XX班考勤异常达N次，为主要失分项"）。
+
+[输出格式]
+必须输出严格的 JSON 格式，不要任何 Markdown 包裹（如 ```json），直接返回以下结构的字符串：
+{
+  "report_summary": "200-400字周报总述，涵盖整体表现、排名格局、关键变化",
+  "award_speech": "100-150字颁奖词，授予第一名班级，要有仪式感",
+  "runner_up_speech": "80-120字亚军寄语，鼓励继续追赶",
+  "improvement_advice": "100-200字改进建议，针对末位班级，语气温暖有建设性",
+  "highlights": ["关键洞察1", "关键洞察2", "关键洞察3"]
+}"""
+
+
+def _call_llm_api(system_prompt, user_content):
+    """调用大模型API（支持DeepSeek/通义千问/OpenAI兼容接口）"""
+    api_key = current_app.config.get("LLM_API_KEY", "")
+    api_url = current_app.config.get("LLM_API_URL", "https://api.deepseek.com/v1/chat/completions")
+    model = current_app.config.get("LLM_MODEL", "deepseek-chat")
+    timeout = current_app.config.get("LLM_TIMEOUT", 45)
+
+    if not api_key:
+        raise RuntimeError("LLM_API_KEY 未配置，请在环境变量中设置")
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ],
+        "temperature": 0.7,
+        "max_tokens": 2048,
+        "response_format": {"type": "json_object"}
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    resp = requests.post(api_url, json=payload, headers=headers, timeout=timeout)
+    resp.raise_for_status()
+    result = resp.json()
+    return result["choices"][0]["message"]["content"]
+
+
+def _build_flag_report_context(evaluations):
+    """
+    根据 FlagEvaluation 已发布列表，构建 LLM 上下文字符串。
+    evaluations: 同一 (period_type, period_label, grade_id) 下的已发布评价列表（按 rank 排序）
+    """
+    lines = []
+    lines.append(f"评价类型: {evaluations[0].period_type}")
+    lines.append(f"评价周期: {evaluations[0].period_label}")
+    lines.append(f"参评班级数: {len(evaluations)}")
+    lines.append("")
+
+    for ev in evaluations:
+        cls_name = ev.class_.name if ev.class_ else "未知班级"
+        rank_str = f"第{ev.rank}名" if ev.rank else "未排名"
+        score_parts = []
+        if ev.self_score is not None:
+            score_parts.append(f"班主任自评={ev.self_score:.1f}(权重{ev.self_weight:.0%})")
+        if ev.grade_score is not None:
+            score_parts.append(f"年级组评级={ev.grade_score:.1f}(权重{ev.grade_weight:.0%})")
+        if ev.ms_score is not None:
+            score_parts.append(f"德育处评级={ev.ms_score:.1f}(权重{ev.ms_weight:.0%})")
+
+        line = f"{rank_str} {cls_name}: 最终得分 {ev.final_score:.1f}"
+        if score_parts:
+            line += f" | 维度分解: {', '.join(score_parts)}"
+        if ev.base_score is not None:
+            line += f" | 加权底分 {ev.base_score:.1f}"
+        if ev.discipline_deduction and ev.discipline_deduction > 0:
+            line += f" | 违纪扣分 -{ev.discipline_deduction:.1f} (总违纪{ev.discipline_points:.0f}分)"
+        if ev.attendance_deduction and ev.attendance_deduction > 0:
+            line += f" | 考勤扣分 -{ev.attendance_deduction:.1f} (异常{ev.attendance_exceptions}次)"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+@ms_bp.route("/flag-reports")
+@require_role("ms_admin")
+def flag_report_list():
+    """流动红旗周报列表 — 按年级分组展示"""
+    grade_id = request.args.get("grade_id", type=int)
+    grades = Grade.query.all()
+
+    q = FlagReport.query.order_by(FlagReport.created_at.desc())
+    if grade_id:
+        q = q.filter_by(grade_id=grade_id)
+
+    reports = q.all()
+
+    # 按年级分组
+    from itertools import groupby
+    reports.sort(key=lambda r: r.grade_id)
+    reports_by_grade = {}
+    for g_id, group in groupby(reports, key=lambda r: r.grade_id):
+        reports_by_grade[g_id] = list(group)
+
+    return render_template("ms/flag_report_list.html",
+                           reports_by_grade=reports_by_grade,
+                           grades=grades,
+                           grade_filter=grade_id)
+
+
+@ms_bp.route("/flag-reports/generate", methods=["POST"])
+@require_role("ms_admin")
+def generate_flag_report():
+    """调用 LLM 生成流动红旗周报"""
+    grade_id = request.form.get("grade_id", type=int)
+    period_type = request.form.get("period_type")
+    period_label = request.form.get("period_label")
+
+    if not period_type or not period_label:
+        flash("请选择评价周期", "danger")
+        return redirect(url_for("ms.flag_report_list"))
+
+    # 查询该周期+年级的已发布评价
+    q = FlagEvaluation.query.filter_by(
+        period_type=period_type, period_label=period_label, status="published"
+    )
+    if grade_id:
+        q = q.filter_by(grade_id=grade_id)
+    else:
+        # 未选年级 → 按年级逐个生成
+        grades = Grade.query.all()
+        generated = 0
+        for g in grades:
+            g_evals = q.filter_by(grade_id=g.id).order_by(FlagEvaluation.rank.asc()).all()
+            if len(g_evals) < 2:
+                continue
+            report = _create_flag_report_for_grade(g.id, period_type, period_label, g_evals)
+            if report:
+                generated += 1
+
+        if generated > 0:
+            flash(f"已生成 {generated} 份周报（按年级分组）", "success")
+        else:
+            flash("该周期没有足够的已发布评价数据（每个年级至少需要2个班级）", "warning")
+        return redirect(url_for("ms.flag_report_list"))
+
+    # 选了年级 → 单年级生成
+    evals = q.order_by(FlagEvaluation.rank.asc()).all()
+    if len(evals) < 2:
+        flash("该周期该年级至少需要2个班级的已发布评价才能生成周报", "warning")
+        return redirect(url_for("ms.flag_report_list"))
+
+    report = _create_flag_report_for_grade(grade_id, period_type, period_label, evals)
+    if report:
+        flash("周报生成成功", "success")
+        return redirect(url_for("ms.flag_report_detail", rid=report.id))
+    else:
+        flash("周报生成失败", "danger")
+        return redirect(url_for("ms.flag_report_list"))
+
+
+def _create_flag_report_for_grade(grade_id, period_type, period_label, evals):
+    """为单个年级创建流动红旗周报（内部函数）"""
+    # 检查是否已存在
+    existing = FlagReport.query.filter_by(
+        period_type=period_type, period_label=period_label, grade_id=grade_id
+    ).first()
+    if existing:
+        # 覆盖旧报告
+        db.session.delete(existing)
+        safe_commit()
+
+    # 构建 LLM 上下文
+    context = _build_flag_report_context(evals)
+
+    try:
+        llm_output = _call_llm_api(FLAG_REPORT_SYSTEM_PROMPT, context)
+        data = _json.loads(llm_output)
+    except Exception as e:
+        flash(f"AI 生成失败: {str(e)}", "danger")
+        return None
+
+    top_ev = evals[0]  # 已按 rank 排序
+    bottom_ev = evals[-1]
+
+    report = FlagReport(
+        period_type=period_type,
+        period_label=period_label,
+        grade_id=grade_id,
+        report_summary=data.get("report_summary", ""),
+        award_speech=data.get("award_speech", ""),
+        runner_up_speech=data.get("runner_up_speech", ""),
+        improvement_advice=data.get("improvement_advice", ""),
+        highlights=_json.dumps(data.get("highlights", []), ensure_ascii=False),
+        class_count=len(evals),
+        top_class_id=top_ev.class_id,
+        top_class_name=top_ev.class_.name if top_ev.class_ else "",
+        top_score=top_ev.final_score,
+        bottom_class_id=bottom_ev.class_id,
+        bottom_class_name=bottom_ev.class_.name if bottom_ev.class_ else "",
+        status="draft",
+        created_by=session.get("username", ""),
+    )
+    db.session.add(report)
+    safe_commit()
+
+    audit_log("generate_flag_report", f"生成流动红旗周报: {period_type}/{period_label}/年级{grade_id}")
+    return report
+
+
+@ms_bp.route("/flag-reports/<int:rid>")
+@require_role("ms_admin")
+def flag_report_detail(rid):
+    """流动红旗周报详情"""
+    report = FlagReport.query.get_or_404(rid)
+    # 解析 highlights JSON
+    try:
+        highlights = _json.loads(report.highlights) if report.highlights else []
+    except Exception:
+        highlights = []
+    return render_template("ms/flag_report_detail.html", report=report, highlights=highlights)
+
+
+@ms_bp.route("/flag-reports/<int:rid>/publish", methods=["POST"])
+@require_role("ms_admin")
+def publish_flag_report(rid):
+    """发布周报"""
+    report = FlagReport.query.get_or_404(rid)
+    report.status = "published"
+    safe_commit()
+    audit_log("publish_flag_report", f"发布流动红旗周报 ID={rid}")
+    flash("周报已发布", "success")
+    return redirect(url_for("ms.flag_report_detail", rid=rid))
+
+
+@ms_bp.route("/flag-reports/<int:rid>/delete", methods=["POST"])
+@require_role("ms_admin")
+def delete_flag_report(rid):
+    """删除周报"""
+    report = FlagReport.query.get_or_404(rid)
+    db.session.delete(report)
+    safe_commit()
+    audit_log("delete_flag_report", f"删除流动红旗周报 ID={rid}")
+    flash("周报已删除", "success")
+    return redirect(url_for("ms.flag_report_list"))
 
 
 # ── 问题学生管理 — 全校建档 ──

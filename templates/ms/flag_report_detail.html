@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}流动红旗周报详情{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0">
+    <i class="bi bi-newspaper text-danger me-2"></i>
+    <span class="badge {% if report.period_type == 'week' %}bg-primary{% elif report.period_type == 'month' %}bg-info text-dark{% else %}bg-danger{% endif %}">
+      {% if report.period_type == 'week' %}周评{% elif report.period_type == 'month' %}月评{% else %}期末总评{% endif %}
+    </span>
+    {{ report.period_label }}
+    — {{ report.grade.name if report.grade else '年级' + report.grade_id|string }}
+  </h4>
+  <div class="d-flex gap-2">
+    <span class="badge {% if report.status == 'published' %}bg-success{% else %}bg-warning text-dark{% endif %} fs-6">
+      {% if report.status == 'published' %}已发布{% else %}草稿{% endif %}
+    </span>
+    {% if report.status == 'draft' %}
+    <form method="POST" action="{{ url_for('ms.publish_flag_report', rid=report.id) }}" class="d-inline">
+      <button type="submit" class="btn btn-success btn-sm" onclick="return confirm('确认发布此周报？')">
+        <i class="bi bi-check-circle me-1"></i>发布
+      </button>
+    </form>
+    {% endif %}
+    <form method="POST" action="{{ url_for('ms.delete_flag_report', rid=report.id) }}" class="d-inline">
+      <button type="submit" class="btn btn-outline-danger btn-sm" onclick="return confirm('确认删除此周报？')">
+        <i class="bi bi-trash me-1"></i>删除
+      </button>
+    </form>
+    <a href="{{ url_for('ms.flag_report_list') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>返回列表
+    </a>
+  </div>
+</div>
+
+<div class="row g-3">
+  <!-- 左侧：周报正文 -->
+  <div class="col-lg-8">
+    <!-- 元信息 -->
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="row text-center">
+          <div class="col">
+            <div class="text-muted small">参评班级</div>
+            <div class="fs-4 fw-bold">{{ report.class_count or '-' }}</div>
+          </div>
+          <div class="col">
+            <div class="text-muted small">冠军班级</div>
+            <div class="fs-4 fw-bold text-danger">{{ report.top_class_name or '-' }}</div>
+          </div>
+          <div class="col">
+            <div class="text-muted small">冠军得分</div>
+            <div class="fs-4 fw-bold text-primary">{{ "%.1f"|format(report.top_score) if report.top_score else '-' }}</div>
+          </div>
+          <div class="col">
+            <div class="text-muted small">末位班级</div>
+            <div class="fs-4 fw-bold text-secondary">{{ report.bottom_class_name or '-' }}</div>
+          </div>
+          <div class="col">
+            <div class="text-muted small">生成时间</div>
+            <div class="fs-6">{{ report.created_at.strftime('%Y-%m-%d %H:%M') if report.created_at else '-' }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 周报总述 -->
+    {% if report.report_summary %}
+    <div class="card mb-3">
+      <div class="card-header bg-light">
+        <i class="bi bi-journal-text me-2"></i>周报总述
+      </div>
+      <div class="card-body">
+        <p class="mb-0" style="line-height:1.8;">{{ report.report_summary }}</p>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- 颁奖词 -->
+    {% if report.award_speech %}
+    <div class="card mb-3 border-warning">
+      <div class="card-header bg-warning text-dark">
+        <i class="bi bi-trophy-fill me-2"></i>冠军颁奖词 — {{ report.top_class_name }}
+      </div>
+      <div class="card-body">
+        <blockquote class="blockquote mb-0">
+          <p class="fst-italic" style="line-height:1.8;">{{ report.award_speech }}</p>
+        </blockquote>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- 亚军寄语 -->
+    {% if report.runner_up_speech %}
+    <div class="card mb-3 border-secondary">
+      <div class="card-header bg-secondary text-white">
+        <i class="bi bi-medal me-2"></i>亚军寄语
+      </div>
+      <div class="card-body">
+        <p class="mb-0" style="line-height:1.8;">{{ report.runner_up_speech }}</p>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- 改进建议 -->
+    {% if report.improvement_advice %}
+    <div class="card mb-3 border-info">
+      <div class="card-header bg-info text-dark">
+        <i class="bi bi-lightbulb me-2"></i>改进建议 — {{ report.bottom_class_name }}
+      </div>
+      <div class="card-body">
+        <p class="mb-0" style="line-height:1.8;">{{ report.improvement_advice }}</p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- 右侧：数据洞察 -->
+  <div class="col-lg-4">
+    <!-- 关键亮点 -->
+    {% if highlights %}
+    <div class="card mb-3">
+      <div class="card-header bg-light">
+        <i class="bi bi-lightning-fill me-2 text-warning"></i>关键数据洞察
+      </div>
+      <div class="card-body p-0">
+        <ul class="list-group list-group-flush">
+          {% for h in highlights %}
+          <li class="list-group-item">
+            <i class="bi bi-bar-chart me-2 text-primary"></i>{{ h }}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- 生成信息 -->
+    <div class="card mb-3">
+      <div class="card-header bg-light">
+        <i class="bi bi-info-circle me-2"></i>报告信息
+      </div>
+      <div class="card-body small">
+        <div class="mb-1">
+          <span class="text-muted">生成人：</span>{{ report.created_by or '-' }}
+        </div>
+        <div class="mb-1">
+          <span class="text-muted">生成时间：</span>{{ report.created_at.strftime('%Y-%m-%d %H:%M:%S') if report.created_at else '-' }}
+        </div>
+        <div>
+          <span class="text-muted">状态：</span>
+          <span class="badge {% if report.status == 'published' %}bg-success{% else %}bg-warning text-dark{% endif %}">
+            {{ report.status }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div class="card">
+      <div class="card-body">
+        {% if report.status == 'draft' %}
+        <form method="POST" action="{{ url_for('ms.publish_flag_report', rid=report.id) }}">
+          <button type="submit" class="btn btn-success w-100 mb-2" onclick="return confirm('确认发布？')">
+            <i class="bi bi-send me-1"></i>发布周报
+          </button>
+        </form>
+        {% endif %}
+        <a href="{{ url_for('ms.leaderboard') }}" class="btn btn-outline-primary w-100 mb-2">
+          <i class="bi bi-flag-fill me-1"></i>查看排名详情
+        </a>
+        <a href="{{ url_for('ms.flag_report_list') }}" class="btn btn-outline-secondary w-100">
+          <i class="bi bi-arrow-left me-1"></i>返回周报列表
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

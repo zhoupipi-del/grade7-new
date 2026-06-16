@@ -14,7 +14,7 @@
         </ul>
     </li>
     <li class="nav-item dropdown">
-        <a class="nav-link dropdown-toggle {% if request.path.startswith('/ms/discipline') or request.path.startswith('/ms/appeals') or request.path.startswith('/ms/routine') or request.path.startswith('/ms/leaderboard') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
+        <a class="nav-link dropdown-toggle {% if request.path.startswith('/ms/discipline') or request.path.startswith('/ms/appeals') or request.path.startswith('/ms/routine') or request.path.startswith('/ms/leaderboard') or request.path.startswith('/ms/flag-reports') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
             <i class="bi bi-exclamation-triangle"></i> 纪律考评
         </a>
         <ul class="dropdown-menu">
@@ -23,6 +23,7 @@
             <li><a class="dropdown-item" href="{{ url_for('ms.appeal_list') }}">申诉管理</a></li>
             <li><a class="dropdown-item" href="{{ url_for('ms.routine_overview') }}">常规评分</a></li>
             <li><a class="dropdown-item" href="{{ url_for('ms.leaderboard') }}">流动红旗</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('ms.flag_report_list') }}"><i class="bi bi-newspaper"></i> 流动红旗周报</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="{{ url_for('ms.attendance_overview') }}">考勤总览</a></li>
         </ul>
