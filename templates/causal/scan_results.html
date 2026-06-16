@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}扫描结果 — 成绩下滑{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0">
+    <i class="bi bi-diagram-2 text-danger me-2"></i>成绩下滑扫描
+    <span class="badge bg-danger">{{ drops|length }} 条</span>
+  </h4>
+  <div class="text-muted small">
+    {{ prev_exam_name }} → {{ curr_exam_name }}（下滑 ≥ 5分）
+  </div>
+</div>
+
+{% if drops %}
+<div class="alert alert-info small">
+  <i class="bi bi-info-circle me-1"></i>
+  点击「诊断」按钮将调用 AI 分析该学生的成绩下滑原因，关联违纪/考勤/心理等跨表数据，生成因果链诊断报告。
+  每次诊断约需 5-10 秒。
+</div>
+
+<!-- 下滑列表 -->
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover table-sm mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>学生</th>
+            <th>班级</th>
+            <th>科目</th>
+            <th class="text-end">上次</th>
+            <th class="text-end">本次</th>
+            <th class="text-end">下滑</th>
+            <th>状态</th>
+            <th class="text-center">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in drops %}
+          <tr>
+            <td class="fw-bold">{{ d.student.name if d.student else '-' }}</td>
+            <td>{{ d.student.class_.name if d.student and d.student.class_ else '' }}</td>
+            <td>{{ d.subject.name if d.subject else '-' }}</td>
+            <td class="text-end">{{ "%.1f"|format(d.prev_score) }}</td>
+            <td class="text-end">{{ "%.1f"|format(d.curr_score) }}</td>
+            <td class="text-end text-danger fw-bold">-{{ "%.1f"|format(d.score_drop) }}</td>
+            <td>
+              {% if d.has_diagnosis %}
+              <span class="badge bg-success">已诊断</span>
+              {% else %}
+              <span class="badge bg-warning text-dark">待诊断</span>
+              {% endif %}
+            </td>
+            <td class="text-center">
+              <form method="POST" action="{{ url_for('causal.diagnose') }}" class="d-inline">
+                <input type="hidden" name="student_id" value="{{ d.student_id }}">
+                <input type="hidden" name="subject_id" value="{{ d.subject_id }}">
+                <input type="hidden" name="exam_id" value="{{ curr_exam_id }}">
+                <input type="hidden" name="prev_score" value="{{ d.prev_score }}">
+                <input type="hidden" name="curr_score" value="{{ d.curr_score }}">
+                <button type="submit" class="btn btn-sm btn-danger"
+                        onclick="return confirm('将为 {{ d.student.name if d.student }} 生成因果链诊断，约需5-10秒，确认？')">
+                  <i class="bi bi-robot me-1"></i>诊断
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="text-center mt-3">
+  <a href="{{ url_for('causal.index') }}" class="btn btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>返回列表
+  </a>
+</div>
+
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-check-circle display-1 text-success"></i>
+  <p class="text-muted mt-3">未发现显著下滑（≥5分）</p>
+</div>
+{% endif %}
+{% endblock %}

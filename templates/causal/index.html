@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}因果链诊断引擎{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0"><i class="bi bi-diagram-2 text-danger me-2"></i>跨表因果链诊断</h4>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <select id="gradeFilter" class="form-select form-select-sm" style="width:140px;">
+      <option value="">全部年级</option>
+      {% for g in grades %}
+      <option value="{{ g.id }}" {% if grade_filter == g.id %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
+    <select id="examFilter" class="form-select form-select-sm" style="width:200px;">
+      <option value="">全部考试</option>
+      {% for e in exams %}
+      <option value="{{ e.id }}" {% if exam_filter == e.id %}selected{% endif %}>{{ e.name }}</option>
+      {% endfor %}
+    </select>
+    <select id="riskFilter" class="form-select form-select-sm" style="width:120px;">
+      <option value="">全部风险</option>
+      <option value="critical" {% if risk_filter == 'critical' %}selected{% endif %}>极高</option>
+      <option value="high" {% if risk_filter == 'high' %}selected{% endif %}>高</option>
+      <option value="medium" {% if risk_filter == 'medium' %}selected{% endif %}>中</option>
+      <option value="low" {% if risk_filter == 'low' %}selected{% endif %}>低</option>
+    </select>
+    <button class="btn btn-outline-primary btn-sm" onclick="filterDiagnoses()"><i class="bi bi-funnel me-1"></i>筛选</button>
+  </div>
+</div>
+
+<!-- 扫描面板 -->
+<div class="card mb-4 border-danger">
+  <div class="card-header bg-danger text-white">
+    <i class="bi bi-search me-2"></i>扫描成绩下滑
+    <small class="ms-2">— 选择两次考试，自动找出各科显著下滑学生（≥5分）</small>
+  </div>
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small mb-0">上次考试</label>
+        <select id="prevExam" class="form-select form-select-sm" style="width:200px;">
+          {% for e in exams %}
+          <option value="{{ e.id }}">{{ e.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-0">本次考试</label>
+        <select id="currExam" class="form-select form-select-sm" style="width:200px;">
+          {% for e in exams %}
+          <option value="{{ e.id }}" {% if loop.index == 1 %}selected{% endif %}>{{ e.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-0">年级</label>
+        <select id="scanGrade" class="form-select form-select-sm" style="width:140px;">
+          <option value="">全部年级</option>
+          {% for g in grades %}
+          <option value="{{ g.id }}">{{ g.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-danger btn-sm" onclick="scanDrops()">
+          <i class="bi bi-search me-1"></i>扫描下滑
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 诊断列表 -->
+{% if diagnoses %}
+<div class="row g-3">
+  {% for d in diagnoses %}
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100 {% if d.is_processed %}border-secondary{% else %}border-danger{% endif %}">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+          <div>
+            <strong>{{ d.student.name if d.student else '-' }}</strong>
+            <span class="text-muted small">{{ d.class_.name if d.class_ else '' }}</span>
+          </div>
+          <div class="d-flex gap-1">
+            <span class="badge bg-{{ d.risk_color or 'secondary' }}">{{ d.risk_level or 'low' }}</span>
+            {% if d.is_processed %}<span class="badge bg-secondary">已处理</span>{% endif %}
+          </div>
+        </div>
+
+        <div class="small mb-2">
+          <span class="text-muted">{{ d.subject.name if d.subject else '全科' }}</span>
+          <span class="text-danger ms-2">
+            <i class="bi bi-arrow-down"></i>
+            {{ d.prev_score|float|round(1) }} → {{ d.curr_score|float|round(1) }}
+            (-{{ d.score_drop|float|round(1) }})
+          </span>
+        </div>
+
+        {% if d.primary_cause %}
+        <div class="small mb-1">
+          <span class="fw-bold text-danger">主因：</span>{{ d.primary_cause }}
+        </div>
+        {% endif %}
+
+        {% if d.diagnosis_report %}
+        <p class="card-text small text-muted mb-1" style="max-height:50px;overflow:hidden;">
+          {{ d.diagnosis_report[:80] }}...
+        </p>
+        {% endif %}
+
+        <!-- 证据链概要 -->
+        {% if d.evidence_list %}
+        <div class="small">
+          {% for ev in d.evidence_list[:3] %}
+          <span class="badge bg-light text-dark me-1">{{ ev.type }}</span>
+          {% endfor %}
+          {% if d.evidence_list|length > 3 %}
+          <span class="text-muted">+{{ d.evidence_list|length - 3 }}</span>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      <div class="card-footer bg-transparent border-top-0">
+        <a href="{{ url_for('causal.detail', did=d.id) }}" class="btn btn-sm btn-outline-primary w-100">
+          <i class="bi bi-eye me-1"></i>查看诊断
+        </a>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="text-center py-5">
+  <i class="bi bi-diagram-2 display-1 text-muted"></i>
+  <p class="text-muted mt-3">暂无诊断记录</p>
+  <p class="text-muted small">选择两次考试扫描成绩下滑，一键生成因果链诊断</p>
+</div>
+{% endif %}
+
+<script>
+function filterDiagnoses() {
+  const params = [];
+  const gId = document.getElementById('gradeFilter').value;
+  const eId = document.getElementById('examFilter').value;
+  const rId = document.getElementById('riskFilter').value;
+  if (gId) params.push('grade_id=' + gId);
+  if (eId) params.push('exam_id=' + eId);
+  if (rId) params.push('risk_level=' + rId);
+  window.location.href = "{{ url_for('causal.index') }}?" + params.join('&');
+}
+
+function scanDrops() {
+  const prev = document.getElementById('prevExam').value;
+  const curr = document.getElementById('currExam').value;
+  const grade = document.getElementById('scanGrade').value;
+  if (!prev || !curr) { showToast('请选择两次考试', 'warning'); return; }
+  if (prev === curr) { showToast('两次考试不能相同', 'warning'); return; }
+
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = "{{ url_for('causal.scan_drops') }}";
+  [{prev_exam_id: prev}, {curr_exam_id: curr}, {grade_id: grade}].forEach(obj => {
+    for (const [k, v] of Object.entries(obj)) {
+      if (v) {
+        const input = document.createElement('input');
+        input.type = 'hidden'; input.name = k; input.value = v;
+        form.appendChild(input);
+      }
+    }
+  });
+  document.body.appendChild(form);
+  form.submit();
+}
+
+function showToast(msg, type) {
+  const toast = document.createElement('div');
+  toast.className = 'position-fixed top-0 end-0 p-3';
+  toast.style.zIndex = '9999';
+  toast.innerHTML = '<div class="alert alert-' + (type || 'info') + ' alert-dismissible fade show" role="alert">' +
+    msg + '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}因果链诊断详情{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h4 class="mb-0">
+    <i class="bi bi-diagram-2 text-danger me-2"></i>因果链诊断
+    <span class="badge bg-{{ d.risk_color or 'secondary' }}">{{ d.risk_level }}</span>
+    {% if d.is_processed %}<span class="badge bg-secondary">已处理</span>{% endif %}
+  </h4>
+  <div class="d-flex gap-2">
+    {% if not d.is_processed %}
+    <form method="POST" action="{{ url_for('causal.mark_processed', did=d.id) }}" class="d-inline">
+      <button type="submit" class="btn btn-success btn-sm" onclick="return confirm('标记为已处理？')">
+        <i class="bi bi-check-circle me-1"></i>标记已处理
+      </button>
+    </form>
+    {% endif %}
+    <form method="POST" action="{{ url_for('causal.delete_diagnosis', did=d.id) }}" class="d-inline">
+      <button type="submit" class="btn btn-outline-danger btn-sm" onclick="return confirm('确认删除？')">
+        <i class="bi bi-trash me-1"></i>删除
+      </button>
+    </form>
+    <a href="{{ url_for('causal.index') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>返回
+    </a>
+  </div>
+</div>
+
+<!-- 学生信息 -->
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="row text-center">
+      <div class="col">
+        <div class="text-muted small">学生</div>
+        <div class="fs-5 fw-bold">{{ d.student.name if d.student else '-' }}</div>
+        <div class="text-muted small">{{ d.class_.name if d.class_ else '' }}</div>
+      </div>
+      <div class="col">
+        <div class="text-muted small">科目</div>
+        <div class="fs-5 fw-bold">{{ d.subject.name if d.subject else '-' }}</div>
+      </div>
+      <div class="col">
+        <div class="text-muted small">成绩变化</div>
+        <div class="fs-5">
+          <span class="text-danger">{{ d.prev_score|float|round(1) }}</span>
+          →
+          <span class="text-danger fw-bold">{{ d.curr_score|float|round(1) }}</span>
+        </div>
+        <div class="text-danger fw-bold">-{{ d.score_drop|float|round(1) }}分</div>
+      </div>
+      <div class="col">
+        <div class="text-muted small">风险等级</div>
+        <div class="fs-5">
+          <span class="badge bg-{{ d.risk_color or 'secondary' }} fs-6">
+            {% if d.risk_level == 'critical' %}极高危{% elif d.risk_level == 'high' %}高危{% elif d.risk_level == 'medium' %}中等{% else %}低{% endif %}
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-8">
+    <!-- 证据链 -->
+    {% if d.evidence_list %}
+    <div class="card mb-3">
+      <div class="card-header bg-light">
+        <i class="bi bi-link-45deg me-2"></i>证据链
+      </div>
+      <div class="card-body p-0">
+        {% for ev in d.evidence_list %}
+        <div class="d-flex align-items-center p-2 border-bottom">
+          <span class="badge bg-{% if ev.severity == 'critical' %}danger{% elif ev.severity == 'high' %}warning text-dark{% elif ev.severity == 'medium' %}info text-dark{% else %}success{% endif %} me-2" style="min-width:50px;">
+            {% if ev.severity == 'critical' %}极高{% elif ev.severity == 'high' %}高{% elif ev.severity == 'medium' %}中{% else %}低{% endif %}
+          </span>
+          <strong class="me-2" style="min-width:50px;">{{ ev.type }}</strong>
+          <span class="text-muted small">{{ ev.detail }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- 诊断报告 -->
+    {% if d.diagnosis_report %}
+    <div class="card mb-3">
+      <div class="card-header bg-danger text-white">
+        <i class="bi bi-file-text me-2"></i>诊断报告
+      </div>
+      <div class="card-body" style="line-height:1.8;">
+        {{ d.diagnosis_report }}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- 干预方案 -->
+    {% if d.intervention_plan %}
+    <div class="card mb-3 border-info">
+      <div class="card-header bg-info text-dark">
+        <i class="bi bi-clipboard2-pulse me-2"></i>干预方案
+      </div>
+      <div class="card-body" style="line-height:1.8;">
+        {{ d.intervention_plan }}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="col-lg-4">
+    <!-- 诊断结论 -->
+    <div class="card mb-3">
+      <div class="card-header bg-light">
+        <i class="bi bi-bullseye me-2"></i>诊断结论
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <div class="text-muted small mb-1">主要原因</div>
+          <div class="fw-bold text-danger">{{ d.primary_cause or '-' }}</div>
+        </div>
+        <div>
+          <div class="text-muted small mb-1">次要原因</div>
+          <div class="text-warning">{{ d.secondary_cause or '-' }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 处理状态 -->
+    <div class="card mb-3">
+      <div class="card-header bg-light">
+        <i class="bi bi-info-circle me-2"></i>状态信息
+      </div>
+      <div class="card-body small">
+        <div class="mb-1">
+          <span class="text-muted">风险等级：</span>
+          <span class="badge bg-{{ d.risk_color or 'secondary' }}">{{ d.risk_level }}</span>
+        </div>
+        <div class="mb-1">
+          <span class="text-muted">处理状态：</span>
+          {% if d.is_processed %}
+          <span class="text-success">已处理（{{ d.processed_by or '-' }}）</span>
+          {% else %}
+          <span class="text-warning">待处理</span>
+          {% endif %}
+        </div>
+        {% if d.processed_at %}
+        <div>
+          <span class="text-muted">处理时间：</span>{{ d.processed_at.strftime('%Y-%m-%d %H:%M') }}
+        </div>
+        {% endif %}
+        <div class="mt-2">
+          <span class="text-muted">创建时间：</span>{{ d.created_at.strftime('%Y-%m-%d %H:%M:%S') if d.created_at else '-' }}
+        </div>
+      </div>
+    </div>
+
+    <!-- 操作 -->
+    <div class="card">
+      <div class="card-body">
+        {% if not d.is_processed %}
+        <form method="POST" action="{{ url_for('causal.mark_processed', did=d.id) }}">
+          <button type="submit" class="btn btn-success w-100 mb-2" onclick="return confirm('确认标记为已处理？')">
+            <i class="bi bi-check-circle me-1"></i>标记已处理
+          </button>
+        </form>
+        {% endif %}
+        <a href="{{ url_for('student_profile.detail', student_id=d.student_id) }}" class="btn btn-outline-primary w-100 mb-2">
+          <i class="bi bi-person me-1"></i>查看学生画像
+        </a>
+        <a href="{{ url_for('causal.index') }}" class="btn btn-outline-secondary w-100">
+          <i class="bi bi-arrow-left me-1"></i>返回列表
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -78,7 +78,7 @@
         </a>
     </li>
     <li class="nav-item dropdown">
-        <a class="nav-link dropdown-toggle {% if request.path.startswith('/ai-analysis') or request.path.startswith('/mental-health') or request.path.startswith('/communication') or request.path.startswith('/value-added') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
+        <a class="nav-link dropdown-toggle {% if request.path.startswith('/ai-analysis') or request.path.startswith('/mental-health') or request.path.startswith('/communication') or request.path.startswith('/value-added') or request.path.startswith('/causal') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
             <i class="bi bi-cpu"></i> 智能分析
         </a>
         <ul class="dropdown-menu">
@@ -86,6 +86,7 @@
             <li><a class="dropdown-item" href="{{ url_for('ai_analysis.dashboard') }}"><i class="bi bi-archive"></i> 全景德育总账</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="{{ url_for('value_added.index') }}"><i class="bi bi-heart"></i> 增值评价(温暖评语)</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('causal.index') }}"><i class="bi bi-diagram-2"></i> 因果链诊断</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="{{ url_for('mental_health.index') }}"><i class="bi bi-heart-pulse"></i> 心理健康评估</a></li>
             <li><a class="dropdown-item" href="{{ url_for('communication.index') }}"><i class="bi bi-chat-dots"></i> 家校沟通追踪</a></li>

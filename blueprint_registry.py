@@ -39,6 +39,7 @@ from blueprints.ai_inference import bp as ai_inference_bp
 from blueprints.markov import bp as markov_bp
 from blueprints.fission import bp as fission_bp
 from blueprints.value_added import value_added_bp
+from blueprints.causal import causal_bp
 
 # ── 所有蓝图注册表 ──
 # 格式: (blueprint, url_prefix, 说明)
@@ -83,6 +84,7 @@ BLUEPRINTS = [
     (markov_bp,      "/api/markov", "数学学力事件视界 — Markov链状态转移/教学熔断预警"),
     (fission_bp,     "/api/fission", "群体违纪链式核裂变溯源引擎"),
     (value_added_bp, "/value-added", "增值评价 — AI识别隐形好学生/温暖评语"),
+    (causal_bp,      "/causal",      "因果链诊断 — 成绩下滑跨表归因/AI干预方案"),
 ]
 
 
