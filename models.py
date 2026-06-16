@@ -1129,10 +1129,10 @@ class FlagReport(db.Model):
 
     # 元信息
     class_count = db.Column(db.Integer, nullable=True)        # 参评班级数
-    top_class_id = db.Column(db.Integer, nullable=True)
+    top_class_id = db.Column(db.Integer, db.ForeignKey("classes.id"), nullable=True)
     top_class_name = db.Column(db.String(64), nullable=True)
     top_score = db.Column(db.Float, nullable=True)
-    bottom_class_id = db.Column(db.Integer, nullable=True)
+    bottom_class_id = db.Column(db.Integer, db.ForeignKey("classes.id"), nullable=True)
     bottom_class_name = db.Column(db.String(64), nullable=True)
 
     status = db.Column(db.String(10), nullable=False, default="draft", index=True)  # draft / published
