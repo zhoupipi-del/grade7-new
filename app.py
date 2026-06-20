@@ -209,7 +209,13 @@ def _setup_logging(app):
 
 
 def _seed_admin(app):
-    """首次启动自动创建管理员账号"""
+    """首次启动自动创建管理员账号。
+
+    密码优先级:
+      1. 环境变量 ADMIN_DEFAULT_PASSWORD（推荐）
+      2. 安全随机生成（兜底，打印到控制台供运维保存）
+    """
+    import secrets
     from models import User
     admin = User.query.filter_by(username="admin").first()
     if not admin:
@@ -218,10 +224,16 @@ def _seed_admin(app):
             display_name="系统管理员",
             role="ms_admin",
         )
-        admin.set_password("admin123")
+        pw = os.environ.get("ADMIN_DEFAULT_PASSWORD", "")
+        if not pw:
+            pw = secrets.token_urlsafe(16)
+        admin.set_password(pw)
         db.session.add(admin)
         safe_commit()
-        app.logger.info("初始化: 管理员账号已创建: admin / admin123")
+        if os.environ.get("ADMIN_DEFAULT_PASSWORD"):
+            app.logger.info("初始化: 管理员账号已创建 admin（密码来自环境变量）")
+        else:
+            app.logger.info("初始化: 管理员账号已创建 admin 密码=%s（请保存并设入环境变量）", pw)
 
 
 if __name__ == "__main__":
@@ -232,11 +244,6 @@ if __name__ == "__main__":
     print("  http://127.0.0.1:5000")
     print("=" * 60 + "\n")
     app.run(host="0.0.0.0", port=5000, debug=True)
-
-
-if __name__ == "__main__":
-    app = create_app()
-    print("\n" + "=" * 60)
     print("  梨江中学德育管理平台")
     print("  角色: 德育处 → 年级组 → 班主任 → 家长")
     print("  http://127.0.0.1:5000")
