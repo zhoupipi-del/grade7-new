@@ -11,8 +11,6 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from celery_app import celery_app
-from config import Config
-from utils.pdf_utils import generate_class_reports_pdf
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,8 +25,11 @@ def generate_class_pdf_async(self, class_id, semester=None):
             meta={'status': '正在准备数据...', 'percent': 10}
         )
         
-        # Create Flask app context (needed for Model.query)
+        # Lazy import (avoid import errors at startup)
         from app import create_app
+        from utils.pdf_utils import generate_class_reports_pdf
+        
+        # Create Flask app context (needed for Model.query)
         app = create_app()
         with app.app_context():
             # Generate PDF

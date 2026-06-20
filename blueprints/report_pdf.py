@@ -165,6 +165,7 @@ def class_reports(class_id):
     semester = request.args.get("semester", None)
 
     # 提交Celery异步任务
+    from tasks import generate_class_pdf_async
     task = generate_class_pdf_async.delay(class_id, semester)
     
     # 重定向到任务状态页面
