@@ -1,0 +1,24 @@
+# Wings 3.0 Backend Dependencies
+# 安装: pip install -r requirements.txt
+
+# Web Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+aiomysql==0.2.0
+pymysql==1.1.1
+
+# Auth
+PyJWT==2.10.1
+python-multipart==0.0.18
+
+# Validation
+pydantic==2.10.3
+
+# LLM (from existing system)
+httpx==0.28.1
+
+# Dev
+watchfiles==1.0.0
