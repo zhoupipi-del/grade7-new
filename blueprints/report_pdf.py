@@ -180,39 +180,53 @@ def task_status(task_id):
     from tasks import celery_app
     from celery.result import AsyncResult
     
-    task = AsyncResult(task_id, app=celery_app)
-    
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        # AJAX请求：返回JSON
-        if task.state == 'PENDING':
-            response = {
-                'state': task.state,
-                'status': '任务排队中...',
-                'percent': 0
-            }
-        elif task.state == 'PROGRESS':
-            response = {
-                'state': task.state,
-                'status': task.info.get('status', '正在生成...'),
-                'percent': task.info.get('percent', 50)
-            }
-        elif task.state == 'SUCCESS':
-            response = {
-                'state': task.state,
-                'status': '生成完成！',
-                'percent': 100,
-                'download_url': task.result.get('download_url')
-            }
-        else:  # FAILURE
-            response = {
-                'state': task.state,
-                'status': f"生成失败: {task.info}",
+    try:
+        task = AsyncResult(task_id, app=celery_app)
+        
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            # AJAX请求：返回JSON
+            if task.state == 'PENDING':
+                response = {
+                    'state': task.state,
+                    'status': '任务排队中...',
+                    'percent': 0
+                }
+            elif task.state == 'PROGRESS':
+                response = {
+                    'state': task.state,
+                    'status': task.info.get('status', '正在生成...') if isinstance(task.info, dict) else '正在生成...',
+                    'percent': task.info.get('percent', 50) if isinstance(task.info, dict) else 50
+                }
+            elif task.state == 'SUCCESS':
+                result = task.result if isinstance(task.result, dict) else {}
+                response = {
+                    'state': task.state,
+                    'status': '生成完成！',
+                    'percent': 100,
+                    'download_url': result.get('download_url', '')
+                }
+            else:  # FAILURE
+                # 安全获取错误信息
+                error_msg = str(task.info) if task.info else '未知错误'
+                response = {
+                    'state': task.state,
+                    'status': f"生成失败: {error_msg}",
+                    'percent': -1
+                }
+            return jsonify(response)
+        else:
+            # 普通请求：渲染状态页面
+            return render_template("report_pdf/task_status.html", task_id=task_id)
+    except Exception as e:
+        # 捕获所有异常（包括任务状态查询失败）
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({
+                'state': 'FAILURE',
+                'status': f'查询任务状态失败: {str(e)}',
                 'percent': -1
-            }
-        return jsonify(response)
-    else:
-        # 普通请求：渲染状态页面
-        return render_template("report_pdf/task_status.html", task_id=task_id)
+            }), 200
+        else:
+            return f"任务状态查询失败: {str(e)}", 500
 
 
 @report_pdf_bp.route("/download/<filename>")
