@@ -33,8 +33,8 @@
         </a>
     </li>
     <li class="nav-item">
-        <a class="nav-link {% if request.path.startswith('/wings') %}active{% endif %}" href="{{ url_for('wings.dashboard') }}">
-            <i class="bi bi-star"></i> 五翼评价
+        <a class="nav-link {% if request.path.startswith('/quality') %}active{% endif %}" href="{{ url_for('quality.dashboard') }}">
+            <i class="bi bi-star"></i> 综合素质评价
         </a>
     </li>
     <li class="nav-item dropdown">
@@ -45,9 +45,9 @@
             <li><a class="dropdown-item" href="{{ url_for('scores.index') }}">成绩管理</a></li>
             <li><a class="dropdown-item" href="{{ url_for('scores.comparison') }}">多学期对比</a></li>
             <li><a class="dropdown-item" href="{{ url_for('scores.trend') }}">成绩趋势线</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('endterm_comment.index') }}">期末评语</a></li>
-            <li><hr class="dropdown-divider"></li>
-            <li><a class="dropdown-item" href="{{ url_for('quality.dashboard') }}">综合素质评价</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('report_pdf.class_select') }}">
+                <i class="bi bi-file-pdf text-danger"></i> 报告单导出
+            </a></li>
         </ul>
     </li>
     <li class="nav-item dropdown">
@@ -77,6 +77,8 @@
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="{{ url_for('mental_health.index') }}"><i class="bi bi-heart-pulse"></i> 心理健康评估</a></li>
             <li><a class="dropdown-item" href="{{ url_for('communication.index') }}"><i class="bi bi-chat-dots"></i> 家校沟通追踪</a></li>
+            <li><hr class="dropdown-divider"></li>
+            {# <li><a class="dropdown-item" href="{{ url_for('ai_prescription.index') }}"><i class="bi bi-prescription2"></i> AI德育大秘</a></li> #}
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="{{ url_for('markov.dashboard') }}"><i class="bi bi-radioactive"></i> 学力事件视界</a></li>
             <li><a class="dropdown-item" href="/api/fission/dashboard"><i class="bi bi-lightning"></i> 链式核裂变溯源</a></li>
