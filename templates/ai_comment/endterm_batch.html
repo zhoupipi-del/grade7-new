@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+{% block title %}批量录入期末评语{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 页面标题 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1"><i class="bi bi-grid-3x3-gap"></i> 批量录入期末评语</h4>
+            <p class="text-muted mb-0 small">为全班学生一次性填写期末评语</p>
+        </div>
+        <a href="{{ url_for('ai_comment.endterm_list') }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> 返回列表
+        </a>
+    </div>
+
+    <!-- 班级选择 + 学期 -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <form method="get" action="{{ url_for('ai_comment.endterm_batch') }}" class="row g-2 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label form-label-sm mb-0">班级</label>
+                    <select name="class_id" id="classSelect" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="">请选择班级</option>
+                        {% for c in available_classes %}
+                        <option value="{{ c.id }}" {% if target_class_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <label class="form-label form-label-sm mb-0">学期</label>
+                    <select name="semester" class="form-select form-select-sm">
+                        <option value="{{ semester }}" selected>{{ semester }}</option>
+                        <option value="2025-2026-1"{% if semester=='2025-2026-1' %} selected{% endif %}>2025-2026-1</option>
+                        <option value="2024-2025-2"{% if semester=='2024-2025-2' %} selected{% endif %}>2024-2025-2</option>
+                        <option value="2024-2025-1"{% if semester=='2024-2025-1' %} selected{% endif %}>2024-2025-1</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-secondary btn-sm"><i class="bi bi-funnel"></i> 切换</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if not target_class_id %}
+    <!-- 未选择班级提示 -->
+    <div class="card text-center py-5">
+        <div class="card-body">
+            <i class="bi bi-people display-3 text-muted"></i>
+            <h5 class="mt-3 text-muted">请先选择要操作的班级</h5>
+            <p class="text-muted small">从上方下拉菜单选择班级，即可显示该班所有学生进行批量评语填写。</p>
+        </div>
+    </div>
+
+    {% elif students %}
+    <!-- 批量录入主区域 -->
+    <form method="post" action="{{ url_for('ai_comment.endterm_batch') }}" id="batchForm">
+        <input type="hidden" name="semester" value="{{ semester }}">
+
+        <!-- 操作栏 -->
+        <div class="card mb-3">
+            <div class="card-body py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <span class="badge bg-primary fs-6">{{ (class_.name if available_classes else '') or '' }}
+                        {% for c in available_classes %}
+                            {% if c.id == target_class_id %}{{ c.name }}{% endif %}
+                        {% endfor %}
+                    </span>
+                    <span class="text-muted ms-2">共 {{ students|length }} 名学生 &nbsp;|&nbsp;
+                        已填写 {{ comments_map.keys()|list|length }} 条</span>
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-info btn-sm" onclick="fillTemplate('good')">
+                        <i class="bi bi-magic"></i> 一键填充优秀模板
+                    </button>
+                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="fillTemplate('average')">
+                        <i class="bi bi-magic"></i> 填充通用模板
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearAll()">
+                        <i class="bi bi-eraser"></i> 清空
+                    </button>
+                    <button type="submit" class="btn btn-success btn-sm" onclick="return confirm('确认保存全部评语？');">
+                        <i class="bi bi-save"></i> 保存全部（草稿）
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 学生评语列表 -->
+        <div class="row g-3">
+            {% for s in students %}
+            {% set ec = comments_map.get(s.id) %}
+            <div class="col-lg-6" data-student-id="{{ s.id }}">
+                <div class="card h-100 border-{% if ec and ec.overall_comment %}success{% else %}light{% endif %}">
+                    <div class="card-header d-flex justify-content-between align-items-center py-2 px-3"
+                         style="cursor:pointer;" onclick="toggleCard(this)">
+                        <div class="d-flex align-items-center gap-2">
+                            <strong>{{ loop.index }}. {{ s.name }}</strong>
+                            <small class="text-muted">{{ s.student_no }}</small>
+                            {% if s.gender == '女' %}
+                            <i class="bi bi-gender-female text-danger"></i>
+                            {% else %}
+                            <i class="bi bi-gender-male text-primary"></i>
+                            {% endif %}
+                            {% if ec and ec.overall_comment %}
+                            <i class="bi bi-check-circle-fill text-success" title="已填写"></i>
+                            {% endif %}
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            {% if ec and ec.status == 'published' %}
+                            <span class="badge bg-success" style="font-size:10px;">已发布</span>
+                            {% elif ec %}
+                            <span class="badge bg-warning text-dark" style="font-size:10px;">草稿</span>
+                            {% endif %}
+                            <i class="bi bi-chevron-down card-toggle-icon"></i>
+                        </div>
+                    </div>
+                    <div class="card-collapse show">
+                        <div class="card-body pt-2 pb-3">
+                            <input type="hidden" name="student_ids" value="{{ s.id }}">
+
+                            <!-- 综合评语 -->
+                            <div class="mb-2">
+                                <label class="form-label fw-bold small text-primary mb-0">
+                                    <i class="bi bi-chat-quote"></i> 综合评语
+                                </label>
+                                <textarea name="comment_{{ s.id }}" rows="3"
+                                          class="form-control form-control-sm batch-comment"
+                                          data-sid="{{ s.id }}"
+                                          placeholder="输入综合评语...">{% if ec %}{{ ec.overall_comment }}{% endif %}</textarea>
+                            </div>
+
+                            <div class="row g-2">
+                                <div class="col-md-4">
+                                    <label class="form-label fw-bold small text-success mb-0">
+                                        <i class="bi bi-hand-thumbs-up"></i> 优点
+                                    </label>
+                                    <textarea name="strengths_{{ s.id }}" rows="2"
+                                              class="form-control form-control-sm"
+                                              placeholder="优点...">{% if ec %}{{ ec.strengths }}{% endif %}</textarea>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label fw-bold small text-warning mb-0">
+                                        <i class="bi bi-exclamation-circle"></i> 待改进
+                                    </label>
+                                    <textarea name="improvements_{{ s.id }}" rows="2"
+                                              class="form-control form-control-sm"
+                                              placeholder="待改进...">{% if ec %}{{ ec.improvements }}{% endif %}</textarea>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label fw-bold small text-info mb-0">
+                                        <i class="bi bi-lightbulb"></i> 建议
+                                    </label>
+                                    <textarea name="suggestion_{{ s.id }}" rows="2"
+                                              class="form-control form-control-sm"
+                                              placeholder="教师建议...">{% if ec %}{{ ec.teacher_suggestion }}{% endif %}</textarea>
+                                </div>
+                            </div>
+
+                            <div class="mt-2 d-flex justify-content-end gap-1">
+                                <button type="button" class="btn btn-outline-primary btn-sm"
+                                        onclick="openSingleEdit({{ s.id }}, '{{ s.name }}', '{{ semester }}')">
+                                    <i class="bi bi-box-arrow-up-right"></i> 详细编辑
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </form>
+
+    {% else %}
+    <!-- 无学生数据 -->
+    <div class="card text-center py-5">
+        <div class="card-body">
+            <i class="bi bi-inbox display-3 text-muted"></i>
+            <h5 class="mt-3 text-muted">该班级暂无学生数据</h5>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+// 展开/折叠卡片
+function toggleCard(header) {
+    const body = header.nextElementSibling;
+    const icon = header.querySelector('.card-toggle-icon');
+    if (body.classList.contains('show')) {
+        body.classList.remove('show');
+        icon.className = 'bi bi-chevron-left card-toggle-icon';
+    } else {
+        body.classList.add('show');
+        icon.className = 'bi bi-chevron-down card-toggle-icon';
+    }
+}
+
+// 打开单个编辑页面
+function openSingleEdit(studentId, studentName, semester) {
+    window.open(
+        "{{ url_for('ai_comment.endterm_create') }}?student_id=" + studentId + "&semester=" + semester,
+        "_blank",
+        "width=900,height=800"
+    );
+}
+
+// 一键填充模板
+const TEMPLATES = {
+    good: `该生学习态度端正，课堂上认真听讲，积极思考并回答问题。在思想品德方面表现优秀，尊敬师长、团结同学。行为习惯良好，能自觉遵守学校规章制度。希望在今后的学习中继续保持优点，争取更大的进步。`,
+    average: `该生在校期间表现良好，能够遵守学校的各项规章制度。学习上较为刻苦但需改进方法。希望能在今后的学习中更加专注，提高课堂效率。`,
+};
+
+function fillTemplate(type) {
+    document.querySelectorAll('.batch-comment').forEach(el => {
+        if (!el.value.trim()) {
+            el.value = TEMPLATES[type];
+            // 更新卡片边框样式
+            const card = el.closest('.card');
+            if (card) {
+                card.classList.remove('border-light');
+                card.classList.add('border-warning');
+            }
+        }
+    });
+}
+
+function clearAll() {
+    if (!confirm('确定清空所有未保存的评语内容？')) return;
+    document.querySelectorAll('.batch-comment').forEach(el => { el.value = ''; });
+    document.querySelectorAll('textarea[name^="strengths_"]').forEach(el => { el.value = ''; });
+    document.querySelectorAll('textarea[name^="improvements_"]').forEach(el => { el.value = ''; });
+    document.querySelectorAll('textarea[name^="suggestion_"]').forEach(el => { el.value = ''; });
+
+    // 恢复边框
+    document.querySelectorAll('[data-student-id] .card').forEach(card => {
+        card.classList.remove('border-warning', 'border-success');
+        card.classList.add('border-light');
+    });
+}
+
+// 输入时标记为已修改
+document.querySelectorAll('textarea').forEach(el => {
+    el.addEventListener('input', () => {
+        const card = el.closest('.card');
+        if (card && el.value.trim()) {
+            card.classList.remove('border-light');
+            card.classList.add('border-success');
+        }
+    });
+});
+</script>
+
+<style>
+.card-collapse {
+    overflow: hidden;
+    transition: max-height 0.25s ease-out;
+}
+.card-collapse.show {
+    max-height: 1000px;
+}
+.card-collapse:not(.show) {
+    max-height: 0;
+}
+</style>
+{% endblock %}

@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+{% block title %}班级月度德育处方{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 面包屑 + 标题 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1">
+                <a href="{{ url_for('ai_prescription.index') }}" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> 返回</a>
+                <i class="bi bi-file-earmark-medical text-primary ms-2"></i> 班级月度德育处方
+            </h4>
+            <p class="text-muted mb-0 small">基于流动红旗归档快照 + 三维评分，AI 生成德育处方</p>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+            <a href="{{ url_for('ai_prescription.history_page') }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-clock-history"></i> 查看历史
+            </a>
+        </div>
+    </div>
+
+    <!-- 选择器卡片 -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label fw-bold"><i class="bi bi-people"></i> 选择班级</label>
+                    <select id="sel-class" class="form-select">
+                        {% for c in classes %}
+                        <option value="{{ c.id }}">{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if not classes %}
+                    <small class="text-danger">暂无可管理的班级</small>
+                    {% endif %}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-bold"><i class="bi bi-calendar3"></i> 评价周期</label>
+                    <select id="sel-period" class="form-select">
+                        {% for p in periods %}
+                        <option value="{{ p.period_type }}" data-label="{{ p.period_label }}">{{ p.period_label }} ({{ p.period_type }})</option>
+                        {% endfor %}
+                    </select>
+                    {% if not periods %}
+                    <small class="text-warning">暂无归档周期，请先在流动红旗模块完成归档</small>
+                    {% endif %}
+                </div>
+                <div class="col-md-4">
+                    <button id="btn-generate" class="btn btn-primary w-100" disabled>
+                        <i class="bi bi-cpu"></i> 生成德育处方
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载中提示 -->
+    <div id="loading-card" class="card d-none">
+        <div class="card-body text-center py-4">
+            <div class="spinner-border text-primary mb-2" role="status"></div>
+            <p class="mb-0 text-muted">AI 正在分析归档数据并生成处方，请稍候（约10-20秒）...</p>
+        </div>
+    </div>
+
+    <!-- 结果展示区 -->
+    <div id="result-area"></div>
+
+    <!-- 默认空状态 -->
+    <div id="empty-state" class="text-center py-5 text-muted">
+        <i class="bi bi-file-earmark-text" style="font-size:3rem;"></i>
+        <p class="mt-2">选择班级和评价周期后，点击"生成德育处方"</p>
+    </div>
+</div>
+
+<script>
+(function() {
+    const btnGenerate = document.getElementById('btn-generate');
+    const selClass = document.getElementById('sel-class');
+    const selPeriod = document.getElementById('sel-period');
+    const loadingCard = document.getElementById('loading-card');
+    const resultArea = document.getElementById('result-area');
+    const emptyState = document.getElementById('empty-state');
+
+    // 检查是否可生成
+    function checkReady() {
+        btnGenerate.disabled = !selClass.value || !selPeriod.value;
+    }
+    selClass.addEventListener('change', checkReady);
+    selPeriod.addEventListener('change', checkReady);
+    checkReady();
+
+    let currentPrescription = null;  // 当前生成的处方数据（供保存用）
+    let currentClassId = null;
+    let currentPeriodType = null;
+    let currentPeriodLabel = null;
+
+    btnGenerate.addEventListener('click', async function() {
+        const classId = selClass.value;
+        const periodType = selPeriod.value;
+        const periodLabel = selPeriod.options[selPeriod.selectedIndex].dataset.label;
+
+        if (!classId || !periodLabel) return;
+
+        // 缓存当前参数（供保存用）
+        currentClassId = classId;
+        currentPeriodType = periodType;
+        currentPeriodLabel = periodLabel;
+        currentPrescription = null;
+
+        // UI 切换
+        btnGenerate.disabled = true;
+        btnGenerate.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 生成中...';
+        loadingCard.classList.remove('d-none');
+        resultArea.innerHTML = '';
+        emptyState.classList.add('d-none');
+
+        try {
+            const resp = await fetch('{{ url_for("ai_prescription.api_class_prescription") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    class_id: parseInt(classId),
+                    period_type: periodType,
+                    period_label: periodLabel
+                })
+            });
+
+            const result = await resp.json();
+
+            if (result.status === 'success') {
+                currentPrescription = result.data;
+                renderPrescription(result.data, result.context);
+            } else {
+                resultArea.innerHTML = `
+                    <div class="alert alert-danger mt-3">
+                        <i class="bi bi-exclamation-triangle"></i> ${result.message || '生成失败'}
+                    </div>`;
+            }
+        } catch(err) {
+            resultArea.innerHTML = `
+                <div class="alert alert-danger mt-3">
+                    <i class="bi bi-exclamation-triangle"></i> 请求失败: ${err.message}
+                </div>`;
+        } finally {
+            loadingCard.classList.add('d-none');
+            btnGenerate.disabled = false;
+            btnGenerate.innerHTML = '<i class="bi bi-cpu"></i> 生成德育处方';
+        }
+    });
+
+    function renderPrescription(data, ctx) {
+        const hasFlag = ctx.has_flag;
+        const flagBadge = hasFlag
+            ? '<span class="badge bg-success"><i class="bi bi-trophy"></i> 流动红旗</span>'
+            : '<span class="badge bg-secondary">未获红旗</span>';
+
+    function renderPrescription(data, ctx) {
+        const hasFlag = ctx.has_flag;
+        const flagBadge = hasFlag
+            ? '<span class="badge bg-success"><i class="bi bi-trophy"></i> 流动红旗</span>'
+            : '<span class="badge bg-secondary">未获红旗</span>';
+
+        let html = `
+        <div class="card shadow-sm" id="prescription-card">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center flex-wrap">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <i class="bi bi-file-earmark-medical"></i>
+                    <strong>${ctx.class_name}</strong> - 德育处方
+                    <span class="badge bg-light text-dark">${ctx.period_label}</span>
+                    <span class="badge bg-light text-dark">得分: ${ctx.final_score}</span>
+                    <span class="badge bg-light text-dark">排名: 第${ctx.rank}名</span>
+                    ${flagBadge}
+                </div>
+                <div class="d-flex gap-2 align-items-center">
+                    <button class="btn btn-sm btn-outline-light" id="btn-save" onclick="savePrescription()">
+                        <i class="bi bi-cloud-upload"></i> 保存处方
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+        `;
+
+        // 总体诊断
+        if (data.diagnosis) {
+            html += `
+                <div class="mb-3">
+                    <h6 class="text-primary border-bottom pb-1"><i class="bi bi-clipboard2-check"></i> 总体诊断</h6>
+                    <p class="ps-3">${data.diagnosis}</p>
+                </div>`;
+        }
+
+        // 优势分析 + 短板预警 (两列)
+        html += '<div class="row g-3 mb-3">';
+        if (data.strengths && data.strengths.length) {
+            html += `
+                <div class="col-md-6">
+                    <h6 class="text-success border-bottom pb-1"><i class="bi bi-hand-thumbs-up"></i> 优势分析</h6>
+                    <ul class="ps-3">
+                        ${data.strengths.map(s => `<li class="small">${s}</li>`).join('')}
+                    </ul>
+                </div>`;
+        }
+        if (data.weaknesses && data.weaknesses.length) {
+            html += `
+                <div class="col-md-6">
+                    <h6 class="text-warning border-bottom pb-1"><i class="bi bi-exclamation-circle"></i> 短板预警</h6>
+                    <ul class="ps-3">
+                        ${data.weaknesses.map(w => `<li class="small">${w}</li>`).join('')}
+                    </ul>
+                </div>`;
+        }
+        html += '</div>';
+
+        // 风险预警
+        if (data.risk_warning) {
+            const isSafe = data.risk_warning.includes('未见明显');
+            html += `
+                <div class="alert ${isSafe ? 'alert-success' : 'alert-danger'} mb-3">
+                    <i class="bi bi-shield-exclamation"></i> <strong>风险预警</strong><br>
+                    ${data.risk_warning}
+                </div>`;
+        }
+
+        // 行动建议
+        if (data.action_plan && data.action_plan.length) {
+            html += `
+                <div class="mb-3">
+                    <h6 class="text-info border-bottom pb-1"><i class="bi bi-list-check"></i> 行动建议</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light">
+                                <tr><th style="width:50%;">具体行动</th><th>时间节点</th><th>责任主体</th></tr>
+                            </thead>
+                            <tbody>
+                                ${data.action_plan.map(a => `
+                                    <tr>
+                                        <td class="small">${a.action || ''}</td>
+                                        <td class="small text-center">${a.timeline || ''}</td>
+                                        <td class="small text-center">${a.owner || ''}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>`;
+        }
+
+        // 鼓励语
+        if (data.encouragement) {
+            html += `
+                <div class="alert alert-primary border-0 bg-light">
+                    <i class="bi bi-chat-heart text-primary"></i> <strong>给班主任的话：</strong>${data.encouragement}
+                </div>`;
+        }
+
+        // 打印按钮
+        html += `
+                <div class="text-end mt-3">
+                    <button class="btn btn-outline-secondary btn-sm" onclick="window.print()">
+                        <i class="bi bi-printer"></i> 打印处方
+                    </button>
+                </div>
+            </div>
+        </div>`;
+
+        resultArea.innerHTML = html;
+    }
+
+    // 保存处方到持久化表
+    window.savePrescription = async function() {
+        if (!currentPrescription) {
+            showToast('请先生成处方再保存', 'warning');
+            return;
+        }
+        if (!currentClassId || !currentPeriodLabel) {
+            showToast('班级或周期信息缺失', 'danger');
+            return;
+        }
+
+        const btnSave = document.getElementById('btn-save');
+        if (btnSave) {
+            btnSave.disabled = true;
+            btnSave.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 保存中...';
+        }
+
+        try {
+            const resp = await fetch('{{ url_for("ai_prescription.api_save") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    type: 'class_prescription',
+                    class_id: parseInt(currentClassId),
+                    period_type: currentPeriodType,
+                    period_label: currentPeriodLabel,
+                    diagnosis_json: JSON.stringify(currentPrescription)
+                })
+            });
+
+            const result = await resp.json();
+
+            if (result.status === 'success') {
+                showToast(result.message || '处方已保存', 'success');
+                if (btnSave) {
+                    btnSave.innerHTML = '<i class="bi bi-check-lg"></i> 已保存';
+                    btnSave.classList.remove('btn-outline-light');
+                    btnSave.classList.add('btn-success');
+                }
+            } else {
+                showToast(result.message || '保存失败', 'danger');
+                if (btnSave) {
+                    btnSave.disabled = false;
+                    btnSave.innerHTML = '<i class="bi bi-cloud-upload"></i> 重新保存';
+                }
+            }
+        } catch(err) {
+            showToast('保存请求失败: ' + err.message, 'danger');
+            if (btnSave) {
+                btnSave.disabled = false;
+                btnSave.innerHTML = '<i class="bi bi-cloud-upload"></i> 重新保存';
+            }
+        }
+    };
+
+    // Toast 提示
+    function showToast(msg, type) {
+        const toast = document.createElement('div');
+        toast.className = `alert alert-${type || 'info'} position-fixed`;
+        toast.style.cssText = 'top:80px;right:20px;z-index:9999;min-width:300px;box-shadow:0 4px 12px rgba(0,0,0,.3);';
+        toast.innerHTML = `<i class="bi bi-info-circle"></i> ${msg}`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 4000);
+    }
+})();
+</script>
+{% endblock %}

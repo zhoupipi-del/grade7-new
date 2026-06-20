@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>梨江中学期末评语{{ semester or '全部' }}</title>
+<style>
+  /* ── 打印样式优化 ── */
+  @media print {
+    .no-print { display: none !important; }
+    body { margin: 1.5cm 2cm; }
+    @page {
+      size: A4;
+      margin: 2cm 2cm 2.5cm 2cm;
+    }
+    .comment-block { page-break-inside: avoid; }
+    .page-header { position: running(header); }
+    .page-footer { position: running(footer); }
+    @page {
+      @top-center { content: element(header); }
+      @bottom-right { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; font-size: 10pt; color: #666; }
+      @bottom-left { content: "梨江中学 · 期末评语报告"; font-size: 10pt; color: #666; }
+    }
+  }
+
+  /* ── 基础样式 ── */
+  body {
+    font-family: "仿宋", "FangSong", "宋体", "SimSun", serif;
+    font-size: 14pt;
+    line-height: 2;
+    color: #222;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* ── 页眉 ── */
+  .page-header {
+    text-align: center;
+    border-bottom: 3px double #1a5276;
+    padding-bottom: 12pt;
+    margin-bottom: 20pt;
+  }
+  .page-header .school-logo {
+    width: 60pt;
+    height: 60pt;
+    vertical-align: middle;
+    margin-right: 12pt;
+  }
+  .page-header .school-name {
+    font-size: 24pt;
+    font-weight: bold;
+    color: #1a5276;
+    vertical-align: middle;
+  }
+  .page-header .subtitle {
+    font-size: 13pt;
+    color: #555;
+    margin-top: 4pt;
+  }
+
+  /* ── 标题区 ── */
+  h1 {
+    text-align: center;
+    font-size: 22pt;
+    font-weight: bold;
+    color: #1a5276;
+    margin: 24pt 0 6pt 0;
+    letter-spacing: 4pt;
+  }
+  .report-meta {
+    text-align: center;
+    font-size: 12pt;
+    color: #555;
+    margin-bottom: 20pt;
+  }
+  .report-meta span {
+    margin: 0 16pt;
+  }
+
+  /* ── 评语卡片 ── */
+  .comment-block {
+    border: 1pt solid #1a5276;
+    border-radius: 6pt;
+    padding: 16pt 20pt;
+    margin-bottom: 16pt;
+    background: #f9fbfd;
+    box-shadow: 0 1pt 3pt rgba(0,0,0,0.06);
+  }
+  .student-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1pt dashed #1a5276;
+    padding-bottom: 8pt;
+    margin-bottom: 10pt;
+  }
+  .student-name {
+    font-size: 16pt;
+    font-weight: bold;
+    color: #1a5276;
+  }
+  .student-class {
+    font-size: 12pt;
+    color: #555;
+  }
+  .comment-meta {
+    font-size: 10pt;
+    color: #888;
+    text-align: right;
+  }
+  .comment-section {
+    margin: 8pt 0;
+    text-indent: 2em;
+  }
+  .comment-section .label {
+    font-weight: bold;
+    color: #1a5276;
+  }
+  .status-badge {
+    display: inline-block;
+    padding: 1pt 8pt;
+    border-radius: 3pt;
+    font-size: 10pt;
+    font-weight: bold;
+  }
+  .status-published {
+    background: #d4edda;
+    color: #155724;
+  }
+  .status-draft {
+    background: #fff3cd;
+    color: #856404;
+  }
+
+  /* ── 页脚 ── */
+  .page-footer {
+    text-align: center;
+    font-size: 9pt;
+    color: #999;
+    border-top: 1pt solid #ddd;
+    padding-top: 6pt;
+    margin-top: 24pt;
+  }
+
+  /* ── 打印按钮区 ── */
+  .no-print {
+    text-align: center;
+    margin: 20pt;
+  }
+  .no-print button {
+    padding: 8pt 20pt;
+    margin: 0 8pt;
+    font-size: 12pt;
+    border: 1pt solid #1a5276;
+    background: #1a5276;
+    color: white;
+    border-radius: 4pt;
+    cursor: pointer;
+  }
+  .no-print button:hover {
+    background: #154360;
+  }
+</style>
+</head>
+<body>
+
+<!-- 打印按钮（不打印） -->
+<div class="no-print">
+  <button onclick="window.print()">🖨️ 打印 / 保存为PDF</button>
+  <button onclick="history.back()">← 返回</button>
+</div>
+
+<!-- 页眉 -->
+<div class="page-header">
+  <!-- 如果有学校Logo，取消下面注释并放置 logo.png 到 static/img/ 目录
+  <img class="school-logo" src="{{ url_for('static', filename='img/logo.png') }}" alt="校徽">
+  -->
+  <span class="school-name">梨江中学</span>
+  <div class="subtitle">LIJIANG MIDDLE SCHOOL</div>
+</div>
+
+<!-- 标题 -->
+<h1>期末评语报告</h1>
+<div class="report-meta">
+  <span>学期：{{ semester or '全部' }}</span>
+  <span>生成时间：{{ moment().format('YYYY年MM月DD日') if moment else '' }}</span>
+  <span>共 {{ comments|length }} 份评语</span>
+</div>
+
+<!-- 评语列表 -->
+{% for c in comments %}
+<div class="comment-block">
+  <div class="student-header">
+    <div>
+      <span class="student-name">{{ c.student.name if c.student else '未知学生' }}</span>
+      {% if c.student and c.student.class_ %}
+      <span class="student-class">（{{ c.student.class_.name }}）</span>
+      {% endif %}
+    </div>
+    <div class="comment-meta">
+      填写人：{{ c.created_by or '—' }} &nbsp;|&nbsp;
+      状态：
+      <span class="status-badge {% if c.status=='published' %}status-published{% else %}status-draft{% endif %}">
+        {{ '已发布' if c.status=='published' else '草稿' }}
+      </span>
+    </div>
+  </div>
+
+  <div class="comment-section">
+    <span class="label">综合评语：</span><br>
+    {{ c.overall_comment or '—' }}
+  </div>
+
+  {% if c.strengths %}
+  <div class="comment-section">
+    <span class="label">主要优点：</span><br>
+    {{ c.strengths }}
+  </div>
+  {% endif %}
+
+  {% if c.improvements %}
+  <div class="comment-section">
+    <span class="label">待改进：</span><br>
+    {{ c.improvements }}
+  </div>
+  {% endif %}
+
+  {% if c.suggestions %}
+  <div class="comment-section">
+    <span class="label">建议：</span><br>
+    {{ c.suggestions }}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+
+<!-- 页脚 -->
+<div class="page-footer">
+  梨江中学德育处 · 期末评语报告 &nbsp;|&nbsp; 打印日期：{{ moment().format('YYYY-MM-DD') if moment else '' }}
+</div>
+
+<!-- 引入 moment.js 用于日期格式化（预览时） -->
+<script src="{{ url_for('static', filename='js/moment.min.js') }}"></script>
+<script>
+  // 如果 moment.js 未加载，使用简单日期
+  if (typeof moment === 'undefined') {
+    document.querySelectorAll('.report-meta span:nth-child(2)').forEach(el => {
+      el.textContent = el.textContent.replace('{{ moment().format("YYYY年MM月DD日") if moment else "" }}', new Date().toLocaleDateString('zh-CN'));
+    });
+    document.querySelector('.page-footer').textContent =
+      document.querySelector('.page-footer').textContent.replace('{{ moment().format("YYYY-MM-DD") if moment else "" }}', new Date().toISOString().split('T')[0]);
+  }
+</script>
+</body>
+</html>

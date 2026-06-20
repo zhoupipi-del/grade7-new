@@ -1,0 +1,391 @@
+{% extends "base.html" %}
+{% block title %}考前心理安抚话术{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 面包屑 + 标题 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1">
+                <a href="{{ url_for('ai_prescription.index') }}" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> 返回</a>
+                <i class="bi bi-heart-pulse text-danger ms-2"></i> 考前心理安抚精细化话术
+            </h4>
+            <p class="text-muted mb-0 small">基于 MSSMHS-55 十维因子 + 干预轨迹，AI 定制安抚话术</p>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+            <a href="{{ url_for('ai_prescription.history_page') }}?type=psych" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-clock-history"></i> 查看历史
+            </a>
+            {% if session.role in ('ms_admin', 'grade_leader') and high_risk_students|length > 0 %}
+            <button id="btn-batch" class="btn btn-danger btn-sm">
+                <i class="bi bi-cpu"></i> 批量生成全部话术
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 高风险学生列表 -->
+    <div class="card mb-3">
+        <div class="card-header bg-danger text-white">
+            <i class="bi bi-exclamation-triangle"></i> 高风险学生名单
+            <span class="badge bg-light text-danger ms-2">{{ high_risk_students|length }} 人</span>
+        </div>
+        <div class="card-body p-0">
+            {% if not high_risk_students %}
+            <div class="text-center py-4 text-muted">
+                <i class="bi bi-emoji-smile" style="font-size:2rem;"></i>
+                <p class="mt-2 mb-0">暂无高风险学生，无需生成安抚话术</p>
+            </div>
+            {% else %}
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>姓名</th>
+                            <th>班级</th>
+                            <th>量表</th>
+                            <th>总分</th>
+                            <th>评估日期</th>
+                            <th>干预次数</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in high_risk_students %}
+                        <tr id="row-{{ s.student_id }}">
+                            <td class="fw-bold">{{ s.student_name }}</td>
+                            <td>{{ s.class_name }}</td>
+                            <td><span class="badge bg-info">{{ s.scale_name }}</span></td>
+                            <td><span class="badge bg-danger">{{ s.total_score }}</span></td>
+                            <td class="small text-muted">{{ s.assessment_date[:10] if s.assessment_date else '-' }}</td>
+                            <td>
+                                {% if s.intervention_count > 0 %}
+                                <span class="badge bg-warning text-dark">{{ s.intervention_count }} 次</span>
+                                {% else %}
+                                <span class="text-muted">无</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <button class="btn btn-outline-danger btn-sm btn-generate-single"
+                                        data-student-id="{{ s.student_id }}"
+                                        data-student-name="{{ s.student_name }}">
+                                    <i class="bi bi-magic"></i> 生成话术
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 批量进度条 -->
+    <div id="batch-progress" class="card d-none mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="fw-bold"><i class="bi bi-cpu"></i> 批量生成进度</span>
+                <span id="batch-progress-text" class="text-muted small">0 / 0</span>
+            </div>
+            <div class="progress" style="height: 24px;">
+                <div id="batch-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-danger"
+                     role="progressbar" style="width: 0%;">0%</div>
+            </div>
+            <div id="batch-log" class="mt-2 small text-muted" style="max-height: 120px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <!-- 话术结果展示区 -->
+    <div id="results-area"></div>
+</div>
+
+<script>
+(function() {
+    const resultsArea = document.getElementById('results-area');
+    const btnBatch = document.getElementById('btn-batch');
+    const batchProgress = document.getElementById('batch-progress');
+    const batchProgressBar = document.getElementById('batch-progress-bar');
+    const batchProgressText = document.getElementById('batch-progress-text');
+    const batchLog = document.getElementById('batch-log');
+
+    // 单个生成
+    document.querySelectorAll('.btn-generate-single').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const studentId = this.dataset.studentId;
+            const studentName = this.dataset.studentName;
+            const row = document.getElementById('row-' + studentId);
+
+            // UI 切换
+            this.disabled = true;
+            this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 生成中...';
+            row.classList.add('table-warning');
+
+            try {
+                const resp = await fetch(`/ai-prescription/api/psych-comfort/${studentId}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const result = await resp.json();
+
+                if (result.status === 'success') {
+                    renderComfort(result.data, result.student_name, studentId);
+                    row.classList.remove('table-warning');
+                    row.classList.add('table-success');
+                    this.innerHTML = '<i class="bi bi-check-lg"></i> 已生成';
+                    this.classList.remove('btn-outline-danger');
+                    this.classList.add('btn-success');
+                } else {
+                    showToast(result.message || '生成失败', 'danger');
+                    this.disabled = false;
+                    this.innerHTML = '<i class="bi bi-magic"></i> 重试';
+                    row.classList.remove('table-warning');
+                }
+            } catch(err) {
+                showToast('请求失败: ' + err.message, 'danger');
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-magic"></i> 重试';
+                row.classList.remove('table-warning');
+            }
+        });
+    });
+
+    // 批量生成
+    if (btnBatch) {
+        btnBatch.addEventListener('click', async function() {
+            if (!confirm('确认为全部高风险学生批量生成安抚话术？\n注意：批量调用可能需要较长时间，且熔断器可能在中途触发。')) return;
+
+            btnBatch.disabled = true;
+            btnBatch.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 批量生成中...';
+            batchProgress.classList.remove('d-none');
+            resultsArea.innerHTML = '';
+            batchLog.innerHTML = '';
+
+            try {
+                const resp = await fetch('{{ url_for("ai_prescription.api_psych_comfort_batch") }}', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                const result = await resp.json();
+
+                const total = result.total || 0;
+                const success = result.success || 0;
+                const failed = result.failed || 0;
+
+                batchProgressBar.style.width = '100%';
+                batchProgressBar.textContent = `${success}/${total} 成功`;
+                batchProgressText.textContent = `成功 ${success} / 失败 ${failed} / 共 ${total}`;
+
+                if (result.results && result.results.length) {
+                    result.results.forEach(r => {
+                        if (r.status === 'success') {
+                            renderComfort(r.data, r.student_name, r.student_id);
+                            const row = document.getElementById('row-' + r.student_id);
+                            if (row) {
+                                row.classList.add('table-success');
+                                const btn = row.querySelector('.btn-generate-single');
+                                if (btn) {
+                                    btn.disabled = true;
+                                    btn.innerHTML = '<i class="bi bi-check-lg"></i> 已生成';
+                                    btn.classList.remove('btn-outline-danger');
+                                    btn.classList.add('btn-success');
+                                }
+                            }
+                            batchLog.innerHTML += `<div class="text-success"><i class="bi bi-check-circle"></i> ${r.student_name} - 生成成功</div>`;
+                        } else {
+                            batchLog.innerHTML += `<div class="text-danger"><i class="bi bi-x-circle"></i> ${r.student_name} - ${r.message || '失败'}</div>`;
+                        }
+                    });
+                }
+
+                if (result.status === 'partial') {
+                    showToast(`批量完成：${success} 成功, ${failed} 失败（可能熔断器已触发）`, 'warning');
+                } else {
+                    showToast(`批量完成：全部 ${success} 名学生话术生成成功`, 'success');
+                }
+            } catch(err) {
+                showToast('批量请求失败: ' + err.message, 'danger');
+            } finally {
+                btnBatch.disabled = false;
+                btnBatch.innerHTML = '<i class="bi bi-cpu"></i> 批量生成全部话术';
+            }
+        });
+    }
+
+    // 渲染安抚话术
+    function renderComfort(data, studentName, studentId) {
+        const panelId = 'comfort-' + studentId;
+
+        // 缓存数据供保存用
+        window['comfortData_' + studentId] = data;
+
+        let html = `
+        <div class="card shadow-sm mb-3" id="${panelId}">
+            <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center flex-wrap">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <i class="bi bi-heart-pulse"></i>
+                    <strong>${studentName}</strong> - 考前心理安抚话术指南
+                </div>
+                <div class="d-flex gap-2 align-items-center">
+                    <button class="btn btn-sm btn-outline-light" onclick="saveComfort(${studentId}, '${studentName}')">
+                        <i class="bi bi-cloud-upload"></i> 保存话术
+                    </button>
+                    <button class="btn btn-sm btn-outline-light" onclick="document.getElementById('${panelId}').scrollIntoView({behavior:'smooth'});">
+                        <i class="bi bi-arrow-up"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+        `;
+
+        // 学生心理画像
+        if (data.student_profile) {
+            html += `
+                <div class="alert alert-secondary mb-3">
+                    <i class="bi bi-person-vcard"></i> <strong>学生心理画像</strong><br>
+                    ${data.student_profile}
+                </div>`;
+        }
+
+        // 突出风险因子
+        if (data.key_factors && data.key_factors.length) {
+            html += `
+                <div class="mb-3">
+                    <h6 class="text-danger border-bottom pb-1"><i class="bi bi-exclamation-diamond"></i> 突出风险因子</h6>
+                    <div class="row g-2">
+                        ${data.key_factors.map(f => `
+                            <div class="col-md-6">
+                                <div class="card border-danger border-opacity-50">
+                                    <div class="card-body py-2 px-3">
+                                        <span class="badge bg-danger">${f.factor}</span>
+                                        <span class="badge bg-light text-dark ms-1">得分: ${f.score}</span>
+                                        <p class="small mt-1 mb-0">${f.analysis || ''}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+        }
+
+        // 学生话术
+        if (data.student_script) {
+            const sc = data.student_script;
+            html += `
+                <div class="mb-3">
+                    <h6 class="text-primary border-bottom pb-1"><i class="bi bi-chat-quote"></i> 对学生的话术</h6>
+                    <div class="ps-3">
+                        ${sc.opening ? `<p><span class="fw-bold text-primary">[开场白]</span> ${sc.opening}</p>` : ''}
+                        ${sc.empathy ? `<p><span class="fw-bold text-primary">[共情]</span> ${sc.empathy}</p>` : ''}
+                        ${sc.empowerment ? `<p><span class="fw-bold text-primary">[赋能]</span> ${sc.empowerment}</p>` : ''}
+                        ${sc.closing ? `<p><span class="fw-bold text-primary">[收尾]</span> ${sc.closing}</p>` : ''}
+                    </div>
+                </div>`;
+        }
+
+        // 家长指导
+        if (data.parent_guide) {
+            const pg = data.parent_guide;
+            html += `<div class="mb-3"><h6 class="text-success border-bottom pb-1"><i class="bi bi-people"></i> 对家长的指导</h6>`;
+
+            if (pg.communication_tips && pg.communication_tips.length) {
+                html += `<p class="fw-bold small text-success mb-1">沟通要点：</p><ul class="small ps-3">`;
+                pg.communication_tips.forEach(t => html += `<li>${t}</li>`);
+                html += `</ul>`;
+            }
+            if (pg.avoid_list && pg.avoid_list.length) {
+                html += `<p class="fw-bold small text-danger mb-1 mt-2">应避免的行为：</p><ul class="small ps-3">`;
+                pg.avoid_list.forEach(t => html += `<li class="text-danger">${t}</li>`);
+                html += `</ul>`;
+            }
+            if (pg.support_actions && pg.support_actions.length) {
+                html += `<p class="fw-bold small text-info mb-1 mt-2">支持行动：</p><ul class="small ps-3">`;
+                pg.support_actions.forEach(t => html += `<li>${t}</li>`);
+                html += `</ul>`;
+            }
+            html += `</div>`;
+        }
+
+        // 后续跟进
+        if (data.follow_up) {
+            html += `
+                <div class="alert alert-info border-0">
+                    <i class="bi bi-arrow-repeat"></i> <strong>后续跟进建议：</strong>${data.follow_up}
+                </div>`;
+        }
+
+        // 打印
+        html += `
+                <div class="text-end">
+                    <button class="btn btn-outline-secondary btn-sm" onclick="window.print()">
+                        <i class="bi bi-printer"></i> 打印
+                    </button>
+                </div>
+            </div>
+        </div>`;
+
+        resultsArea.insertAdjacentHTML('beforeend', html);
+    }
+
+    // Toast 提示
+    function showToast(msg, type) {
+        const toast = document.createElement('div');
+        toast.className = `alert alert-${type || 'info'} position-fixed`;
+        toast.style.cssText = 'top:80px;right:20px;z-index:9999;min-width:300px;box-shadow:0 4px 12px rgba(0,0,0,.3);';
+        toast.innerHTML = `<i class="bi bi-info-circle"></i> ${msg}`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 4000);
+    }
+
+    // 保存安抚话术到持久化表
+    window.saveComfort = async function(studentId, studentName) {
+        const data = window['comfortData_' + studentId];
+        if (!data) {
+            showToast('话术数据缺失，请重新生成', 'warning');
+            return;
+        }
+
+        const btn = event.target.closest('button');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 保存中...';
+        }
+
+        try {
+            const resp = await fetch('{{ url_for("ai_prescription.api_save") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    type: 'psych_comfort',
+                    student_id: parseInt(studentId),
+                    comfort_script_json: JSON.stringify(data)
+                })
+            });
+
+            const result = await resp.json();
+
+            if (result.status === 'success') {
+                showToast(result.message || '话术已保存', 'success');
+                if (btn) {
+                    btn.innerHTML = '<i class="bi bi-check-lg"></i> 已保存';
+                    btn.classList.remove('btn-outline-light');
+                    btn.classList.add('btn-success');
+                }
+            } else {
+                showToast(result.message || '保存失败', 'danger');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-cloud-upload"></i> 重新保存';
+                }
+            }
+        } catch(err) {
+            showToast('保存请求失败: ' + err.message, 'danger');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-cloud-upload"></i> 重新保存';
+            }
+        }
+    };
+})();
+</script>
+{% endblock %}

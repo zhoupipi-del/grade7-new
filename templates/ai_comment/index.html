@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}AI 评语引擎{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="text-center mb-4">
+        <h3><i class="bi bi-robot text-primary me-2"></i>AI 评语引擎</h3>
+        <p class="text-muted">统一 AI 评语生成与管理平台 — 期末评语 + 增值评价</p>
+    </div>
+
+    <div class="row g-4">
+        <!-- 期末评语卡片 -->
+        <div class="col-md-6">
+            <div class="card h-100 border-primary shadow-sm">
+                <div class="card-body text-center py-4">
+                    <div class="display-4 mb-3 text-primary">
+                        <i class="bi bi-journal-text"></i>
+                    </div>
+                    <h5>期末评语</h5>
+                    <p class="text-muted small mb-3">
+                        撰写/批量录入/查看/导出<br>
+                        AI 智能生成正式评语（严谨版）<br>
+                        四字段结构：优点·改进·评语·建议
+                    </p>
+                    <div class="d-flex justify-content-center gap-2">
+                        <a href="{{ url_for('ai_comment.endterm_list') }}" class="btn btn-primary">
+                            <i class="bi bi-list-ul me-1"></i> 评语列表
+                        </a>
+                        <a href="{{ url_for('ai_comment.endterm_create') }}" class="btn btn-outline-primary">
+                            <i class="bi bi-plus-lg me-1"></i> 撰写评语
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 增值评价卡片 -->
+        <div class="col-md-6">
+            <div class="card h-100 border-danger shadow-sm">
+                <div class="card-body text-center py-4">
+                    <div class="display-4 mb-3 text-danger">
+                        <i class="bi bi-heart"></i>
+                    </div>
+                    <h5>增值评价</h5>
+                    <p class="text-muted small mb-3">
+                        扫描"隐形好学生"<br>
+                        AI 生成温暖鼓励评语（暖心版）<br>
+                        闪光点标签 + 进步数据支撑
+                    </p>
+                    <div class="d-flex justify-content-center">
+                        <a href="{{ url_for('ai_comment.value_added_list') }}" class="btn btn-danger">
+                            <i class="bi bi-search-heart me-1"></i> 扫描好学生
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 架构说明 -->
+    <div class="card mt-4 border-0 bg-light">
+        <div class="card-body py-2">
+            <div class="row text-center small text-muted">
+                <div class="col">
+                    <i class="bi bi-database me-1"></i> 共享数据聚合器
+                </div>
+                <div class="col">
+                    <i class="bi bi-cpu me-1"></i> 统一 LLM 客户端
+                </div>
+                <div class="col">
+                    <i class="bi bi-shield-check me-1"></i> 熔断保护
+                </div>
+                <div class="col">
+                    <i class="bi bi-file-earmark-check me-1"></i> 数据持久化
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,375 @@
+{% extends "base.html" %}
+{% block title %}绿洲干预追踪 - 梨江中学{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="mb-1"><i class="bi bi-shield-heart me-2"></i>绿洲干预追踪</h4>
+        <p class="text-muted mb-0">心理健康干预全生命周期管理</p>
+    </div>
+    <div>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createModal">
+            <i class="bi bi-plus-circle me-1"></i>新建干预记录
+        </button>
+    </div>
+</div>
+
+<!-- 统计卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-md-2">
+        <div class="card border-primary shadow-sm">
+            <div class="card-body text-center py-3">
+                <h3 class="text-primary mb-0">{{ stats.total }}</h3>
+                <small class="text-muted">干预总数</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card border-warning shadow-sm">
+            <div class="card-body text-center py-3">
+                <h3 class="text-warning mb-0">{{ stats.tracking }}</h3>
+                <small class="text-muted">追踪中</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card border-success shadow-sm">
+            <div class="card-body text-center py-3">
+                <h3 class="text-success mb-0">{{ stats.completed }}</h3>
+                <small class="text-muted">已结案</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-info shadow-sm">
+            <div class="card-body text-center py-3">
+                <h3 class="text-info mb-0">{{ stats.effective }}</h3>
+                <small class="text-muted">干预有效</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-success shadow-sm">
+            <div class="card-body text-center py-3">
+                <h3 class="text-success mb-0">{{ stats.improved }}</h3>
+                <small class="text-muted">风险等级改善</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 筛选 -->
+<div class="card shadow-sm mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label mb-0 small">状态</label>
+                <select name="status" class="form-select form-select-sm">
+                    <option value="">全部</option>
+                    <option value="tracking" {% if status_filter == 'tracking' %}selected{% endif %}>追踪中</option>
+                    <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>已结案</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-0 small">风险等级</label>
+                <select name="risk" class="form-select form-select-sm">
+                    <option value="">全部</option>
+                    {% for val, label in risk_levels %}
+                    <option value="{{ val }}" {% if risk_filter == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-funnel"></i> 筛选</button>
+                <a href="{{ url_for('mental_health.intervention_list') }}" class="btn btn-sm btn-outline-secondary">重置</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 干预记录列表 -->
+<div class="card shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>学生</th>
+                    <th>班级</th>
+                    <th>干预类型</th>
+                    <th>干预日期</th>
+                    <th>干预前风险</th>
+                    <th>随访后风险</th>
+                    <th>效果评估</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in records %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('mental_health.intervention_timeline', student_id=r.student_id) }}" class="text-decoration-none fw-semibold">
+                            {{ r.student.name if r.student else '--' }}
+                        </a>
+                    </td>
+                    <td>{{ r.student.class_.name if r.student and r.student.class_ else '--' }}</td>
+                    <td><span class="badge bg-secondary">{{ r.intervention_type }}</span></td>
+                    <td>{{ r.intervention_date.strftime('%Y-%m-%d') if r.intervention_date else '--' }}</td>
+                    <td>
+                        {% if r.mh_risk_before == 'high' %}
+                        <span class="badge bg-danger">高风险</span>
+                        {% elif r.mh_risk_before == 'medium' %}
+                        <span class="badge bg-warning text-dark">中风险</span>
+                        {% elif r.mh_risk_before == 'low' %}
+                        <span class="badge bg-success">低风险</span>
+                        {% else %}
+                        <span class="text-muted">--</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.mh_risk_after == 'high' %}
+                        <span class="badge bg-danger">高风险</span>
+                        {% elif r.mh_risk_after == 'medium' %}
+                        <span class="badge bg-warning text-dark">中风险</span>
+                        {% elif r.mh_risk_after == 'low' %}
+                        <span class="badge bg-success">低风险</span>
+                        {% else %}
+                        <span class="text-muted">待随访</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.effect_rating == '显著好转' %}
+                        <span class="badge bg-success">显著好转</span>
+                        {% elif r.effect_rating == '略有好转' %}
+                        <span class="badge bg-info">略有好转</span>
+                        {% elif r.effect_rating == '无变化' %}
+                        <span class="badge bg-secondary">无变化</span>
+                        {% elif r.effect_rating == '恶化' %}
+                        <span class="badge bg-danger">恶化</span>
+                        {% else %}
+                        <span class="text-muted">--</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.status == 'tracking' %}
+                        <span class="badge bg-warning text-dark">追踪中</span>
+                        {% else %}
+                        <span class="badge bg-success">已结案</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <a href="{{ url_for('mental_health.intervention_timeline', student_id=r.student_id) }}"
+                               class="btn btn-outline-primary" title="时间线">
+                                <i class="bi bi-clock-history"></i>
+                            </a>
+                            {% if r.status == 'tracking' and session.role in ['ms_admin', 'grade_leader', 'class_teacher'] %}
+                            <button class="btn btn-outline-success" onclick="openFollowupModal({{ r.id }})" title="随访">
+                                <i class="bi bi-check2-circle"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="9" class="text-center text-muted py-4">
+                        <i class="bi bi-inbox display-6 d-block mb-2"></i>
+                        暂无干预记录，点击右上角"新建干预记录"开始追踪
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 新建干预记录 Modal -->
+<div class="modal fade" id="createModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>新建心理健康干预记录</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createForm">
+                    <div class="mb-3">
+                        <label class="form-label">学生 <span class="text-danger">*</span></label>
+                        <input type="text" id="studentSearch" class="form-control" placeholder="输入学生姓名搜索..." autocomplete="off">
+                        <input type="hidden" name="student_id" id="studentId">
+                        <div id="studentResults" class="list-group position-absolute" style="z-index: 1055; max-height: 200px; overflow-y: auto; display: none;"></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">干预类型</label>
+                            <select name="intervention_type" class="form-select">
+                                {% for val, label in intervention_types %}
+                                <option value="{{ val }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">计划随访日期</label>
+                            <input type="date" name="follow_up_date" class="form-control">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">谈话记录 / 干预详情</label>
+                        <textarea name="notes" class="form-control" rows="4" placeholder="记录谈话内容、干预措施、学生反应等..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">家长反馈</label>
+                        <textarea name="parent_feedback" class="form-control" rows="2" placeholder="家长的反馈意见（如有）"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="submitCreate()">
+                    <i class="bi bi-check-lg me-1"></i>创建记录
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 随访 Modal -->
+<div class="modal fade" id="followupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-check2-circle me-2"></i>随访记录</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="followupForm">
+                    <input type="hidden" name="intervention_id" id="followup_int_id">
+                    <div class="mb-3">
+                        <label class="form-label">干预后风险等级</label>
+                        <select name="mh_risk_after" class="form-select">
+                            <option value="low">低风险</option>
+                            <option value="medium">中风险</option>
+                            <option value="high">高风险</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">效果评估</label>
+                        <select name="effect_rating" class="form-select">
+                            {% for val, label in effect_ratings %}
+                            <option value="{{ val }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">随访记录</label>
+                        <textarea name="follow_up_notes" class="form-control" rows="3" placeholder="记录随访谈话内容、学生当前状态等..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">家长反馈（更新）</label>
+                        <textarea name="parent_feedback" class="form-control" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-success" onclick="submitFollowup()">
+                    <i class="bi bi-check-lg me-1"></i>提交随访
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 学生搜索
+var searchTimer;
+document.getElementById('studentSearch').addEventListener('input', function() {
+    clearTimeout(searchTimer);
+    var keyword = this.value.trim();
+    var resultsDiv = document.getElementById('studentResults');
+    if (keyword.length < 1) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+    searchTimer = setTimeout(function() {
+        fetch('{{ url_for("mental_health.api_search_students") }}?q=' + encodeURIComponent(keyword))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                resultsDiv.innerHTML = '';
+                data.forEach(function(s) {
+                    var riskBadge = '';
+                    if (s.risk_level === 'high') riskBadge = ' <span class="badge bg-danger">高风险</span>';
+                    else if (s.risk_level === 'medium') riskBadge = ' <span class="badge bg-warning text-dark">中风险</span>';
+                    var item = document.createElement('a');
+                    item.className = 'list-group-item list-group-item-action';
+                    item.innerHTML = s.name + ' (' + s.class_name + ')' + riskBadge;
+                    item.style.cursor = 'pointer';
+                    item.onclick = function() {
+                        document.getElementById('studentSearch').value = s.name + ' (' + s.class_name + ')';
+                        document.getElementById('studentId').value = s.id;
+                        resultsDiv.style.display = 'none';
+                    };
+                    resultsDiv.appendChild(item);
+                });
+                resultsDiv.style.display = data.length > 0 ? 'block' : 'none';
+            });
+    }, 300);
+});
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('#studentSearch') && !e.target.closest('#studentResults')) {
+        document.getElementById('studentResults').style.display = 'none';
+    }
+});
+
+function submitCreate() {
+    var form = document.getElementById('createForm');
+    var fd = new FormData(form);
+    var data = {};
+    fd.forEach(function(v, k) { data[k] = v; });
+    if (!data.student_id) {
+        alert('请选择学生');
+        return;
+    }
+    fetch('{{ url_for("mental_health.intervention_create") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(function(r) { return r.json(); }).then(function(res) {
+        if (res.status === 'ok') {
+            alert('干预记录已创建');
+            location.reload();
+        } else {
+            alert(res.message || '创建失败');
+        }
+    }).catch(function(e) { alert('请求失败: ' + e); });
+}
+
+function openFollowupModal(intId) {
+    document.getElementById('followup_int_id').value = intId;
+    new bootstrap.Modal(document.getElementById('followupModal')).show();
+}
+
+function submitFollowup() {
+    var form = document.getElementById('followupForm');
+    var fd = new FormData(form);
+    var data = {};
+    fd.forEach(function(v, k) { data[k] = v; });
+    var intId = data.intervention_id;
+    delete data.intervention_id;
+    fetch('/mental-health/interventions/' + intId + '/followup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(function(r) { return r.json(); }).then(function(res) {
+        if (res.status === 'ok') {
+            alert('随访记录已更新' + (res.mh_risk_improved === true ? '，风险等级已改善' : ''));
+            location.reload();
+        } else {
+            alert(res.message || '更新失败');
+        }
+    }).catch(function(e) { alert('请求失败: ' + e); });
+}
+</script>
+{% endblock %}

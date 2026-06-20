@@ -1,0 +1,374 @@
+{% extends "base.html" %}
+{% block title %}德育大秘历史档案馆{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 面包屑 + 标题 -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1">
+                <a href="{{ url_for('ai_prescription.index') }}" class="text-decoration-none text-muted small">
+                    <i class="bi bi-arrow-left"></i> 返回
+                </a>
+                <i class="bi bi-archive text-primary ms-2"></i> 德育大秘历史档案馆
+            </h4>
+            <p class="text-muted mb-0 small">查看已保存的班级德育处方和学生心理安抚话术</p>
+        </div>
+    </div>
+
+    <!-- Tab 切换 -->
+    <ul class="nav nav-tabs mb-3" id="historyTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="class-tab" data-bs-toggle="tab" data-bs-target="#class-panel" type="button" role="tab">
+                <i class="bi bi-file-earmark-medical"></i> 班级处方历史
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="psych-tab" data-bs-toggle="tab" data-bs-target="#psych-panel" type="button" role="tab">
+                <i class="bi bi-heart-pulse"></i> 心理安抚历史
+            </button>
+        </li>
+    </ul>
+
+    <!-- 过滤条件 -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-3" id="filter-row">
+                <div class="col-md-4" id="class-filter">
+                    <label class="form-label fw-bold"><i class="bi bi-building"></i> 年级</label>
+                    <select id="filter-grade" class="form-select">
+                        <option value="">全部年级</option>
+                    </select>
+                </div>
+                <div class="col-md-4" id="class-filter-2">
+                    <label class="form-label fw-bold"><i class="bi bi-people"></i> 班级</label>
+                    <select id="filter-class" class="form-select">
+                        <option value="">全部班级</option>
+                    </select>
+                </div>
+                <div class="col-md-4" id="period-filter">
+                    <label class="form-label fw-bold"><i class="bi bi-calendar3"></i> 周期</label>
+                    <select id="filter-period" class="form-select">
+                        <option value="">全部周期</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载中 -->
+    <div id="loading" class="text-center py-4 d-none">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-2 text-muted">加载中...</p>
+    </div>
+
+    <!-- 空状态 -->
+    <div id="empty-state" class="text-center py-5 text-muted">
+        <i class="bi bi-inbox" style="font-size:3rem;"></i>
+        <p class="mt-2">暂无历史记录</p>
+    </div>
+
+    <!-- 历史列表 -->
+    <div id="history-list" class="d-none"></div>
+
+    <!-- 详情面板（抽屉式） -->
+    <div id="detail-panel" class="card shadow-sm d-none">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <strong id="detail-title">记录详情</strong>
+            <button class="btn btn-sm btn-outline-secondary" onclick="closeDetail()">
+                <i class="bi bi-x-lg"></i> 关闭
+            </button>
+        </div>
+        <div class="card-body" id="detail-body"></div>
+    </div>
+</div>
+
+<script>
+(function() {
+    let currentType = 'class';  // 'class' or 'psych'
+
+    // 初始化
+    loadGrades();
+    loadClassHistory();
+
+    // Tab 切换
+    document.getElementById('class-tab').addEventListener('click', function() {
+        currentType = 'class';
+        document.getElementById('period-filter').classList.remove('d-none');
+        loadClassHistory();
+    });
+    document.getElementById('psych-tab').addEventListener('click', function() {
+        currentType = 'psych';
+        document.getElementById('period-filter').classList.add('d-none');
+        loadPsychHistory();
+    });
+
+    // 过滤条件变化
+    document.getElementById('filter-grade').addEventListener('change', function() {
+        loadClassesForGrade(this.value);
+        if (currentType === 'class') loadClassHistory();
+    });
+    document.getElementById('filter-class').addEventListener('change', function() {
+        if (currentType === 'class') loadClassHistory();
+    });
+    document.getElementById('filter-period').addEventListener('change', function() {
+        if (currentType === 'class') loadClassHistory();
+    });
+
+    // 加载年级
+    async function loadGrades() {
+        try {
+            const resp = await fetch('/api/grades');
+            const data = await resp.json();
+            const sel = document.getElementById('filter-grade');
+            data.grades.forEach(g => {
+                const opt = document.createElement('option');
+                opt.value = g.id;
+                opt.textContent = g.name;
+                sel.appendChild(opt);
+            });
+        } catch(e) { console.error('加载年级失败', e); }
+    }
+
+    // 加载班级（根据年级）
+    async function loadClassesForGrade(gradeId) {
+        const sel = document.getElementById('filter-class');
+        sel.innerHTML = '<option value="">全部班级</option>';
+        if (!gradeId) return;
+        try {
+            const resp = await fetch(`/api/classes?grade_id=${gradeId}`);
+            const data = await resp.json();
+            data.classes.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name;
+                sel.appendChild(opt);
+            });
+        } catch(e) { console.error('加载班级失败', e); }
+    }
+
+    // 加载班级处方历史
+    async function loadClassHistory() {
+        showLoading(true);
+        const params = new URLSearchParams();
+        const classId = document.getElementById('filter-class').value;
+        const period = document.getElementById('filter-period').value;
+        if (classId) params.append('class_id', classId);
+        if (period) params.append('period_label', period);
+
+        try {
+            const resp = await fetch(`{{ url_for('ai_prescription.api_history_class') }}?${params.toString()}`);
+            const result = await resp.json();
+            if (result.status === 'success' && result.records.length > 0) {
+                renderClassHistory(result.records);
+                // 加载周期选项
+                loadPeriodOptions(result.records);
+            } else {
+                showEmpty('暂无班级处方历史记录');
+            }
+        } catch(e) {
+            showEmpty('加载失败: ' + e.message);
+        } finally {
+            showLoading(false);
+        }
+    }
+
+    // 加载心理安抚历史
+    async function loadPsychHistory() {
+        showLoading(true);
+        const params = new URLSearchParams();
+        const classId = document.getElementById('filter-class').value;
+        if (classId) params.append('class_id', classId);
+
+        try {
+            const resp = await fetch(`{{ url_for('ai_prescription.api_history_psych') }}?${params.toString()}`);
+            const result = await resp.json();
+            if (result.status === 'success' && result.records.length > 0) {
+                renderPsychHistory(result.records);
+            } else {
+                showEmpty('暂无心理安抚历史记录');
+            }
+        } catch(e) {
+            showEmpty('加载失败: ' + e.message);
+        } finally {
+            showLoading(false);
+        }
+    }
+
+    // 渲染班级处方历史
+    function renderClassHistory(records) {
+        const container = document.getElementById('history-list');
+        let html = '';
+        records.forEach(r => {
+            html += `
+            <div class="card mb-2 shadow-sm">
+                <div class="card-body d-flex justify-content-between align-items-center flex-wrap">
+                    <div class="d-flex align-items-center gap-3 flex-wrap">
+                        <span class="badge bg-primary">${r.grade_name || ''}</span>
+                        <strong>${r.class_name || ''}</strong>
+                        <span class="badge bg-secondary">${r.period_label || ''}</span>
+                        <small class="text-muted">${r.diagnosis_summary || '无摘要'}</small>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center">
+                        <small class="text-muted">${r.creator_name || ''} · ${r.created_at ? r.created_at.substring(0,10) : ''}</small>
+                        <button class="btn btn-sm btn-outline-primary" onclick="viewDetail('class', ${r.id})">
+                            <i class="bi bi-eye"></i> 查看
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+        });
+        container.innerHTML = html;
+        container.classList.remove('d-none');
+        document.getElementById('empty-state').classList.add('d-none');
+    }
+
+    // 渲染心理安抚历史
+    function renderPsychHistory(records) {
+        const container = document.getElementById('history-list');
+        let html = '';
+        records.forEach(r => {
+            html += `
+            <div class="card mb-2 shadow-sm">
+                <div class="card-body d-flex justify-content-between align-items-center flex-wrap">
+                    <div class="d-flex align-items-center gap-3 flex-wrap">
+                        <span class="badge bg-danger">${r.class_name || ''}</span>
+                        <strong>${r.student_name || ''}</strong>
+                        <small class="text-muted">${r.student_profile || '无摘要'}</small>
+                        <span class="badge bg-warning text-dark">${r.key_factors_count || 0} 个风险因子</span>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center">
+                        <small class="text-muted">${r.creator_name || ''} · ${r.created_at ? r.created_at.substring(0,10) : ''}</small>
+                        <button class="btn btn-sm btn-outline-danger" onclick="viewDetail('psych', ${r.id})">
+                            <i class="bi bi-eye"></i> 查看
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+        });
+        container.innerHTML = html;
+        container.classList.remove('d-none');
+        document.getElementById('empty-state').classList.add('d-none');
+    }
+
+    // 查看详情
+    window.viewDetail = async function(type, id) {
+        const panel = document.getElementById('detail-panel');
+        const body = document.getElementById('detail-body');
+        body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div><p class="mt-2">加载详情中...</p></div>';
+        panel.classList.remove('d-none');
+        panel.scrollIntoView({behavior: 'smooth'});
+
+        try {
+            const resp = await fetch(`{{ url_for('ai_prescription.api_detail', record_type=type, record_id=0) }}`.replace('/0', `/${id}`));
+            const result = await resp.json();
+            if (result.status === 'success') {
+                renderDetail(type, result.data, result.meta);
+            } else {
+                body.innerHTML = `<div class="alert alert-danger">${result.message || '加载失败'}</div>`;
+            }
+        } catch(e) {
+            body.innerHTML = `<div class="alert alert-danger">请求失败: ${e.message}</div>`;
+        }
+    };
+
+    // 渲染详情
+    function renderDetail(type, data, meta) {
+        const body = document.getElementById('detail-body');
+        let html = '';
+
+        if (type === 'class') {
+            document.getElementById('detail-title').textContent = `${meta.class_name} - ${meta.period_label} 德育处方`;
+            // 总体诊断
+            if (data.diagnosis) {
+                html += `<div class="mb-3"><h6 class="text-primary border-bottom pb-1">总体诊断</h6><p>${data.diagnosis}</p></div>`;
+            }
+            // 优势
+            if (data.strengths && data.strengths.length) {
+                html += `<div class="mb-3"><h6 class="text-success border-bottom pb-1">优势分析</h6><ul>${data.strengths.map(s => `<li>${s}</li>`).join('')}</ul></div>`;
+            }
+            // 短板
+            if (data.weaknesses && data.weaknesses.length) {
+                html += `<div class="mb-3"><h6 class="text-warning border-bottom pb-1">短板预警</h6><ul>${data.weaknesses.map(w => `<li>${w}</li>`).join('')}</ul></div>`;
+            }
+            // 风险
+            if (data.risk_warning) {
+                html += `<div class="alert ${data.risk_warning.includes('未见') ? 'alert-success' : 'alert-danger'} mb-3">${data.risk_warning}</div>`;
+            }
+            // 行动建议
+            if (data.action_plan && data.action_plan.length) {
+                html += `<div class="mb-3"><h6 class="text-info border-bottom pb-1">行动建议</h6><ul>${data.action_plan.map(a => `<li><strong>${a.action}</strong> (${a.timeline}, ${a.owner})</li>`).join('')}</ul></div>`;
+            }
+            // 鼓励
+            if (data.encouragement) {
+                html += `<div class="alert alert-primary border-0 bg-light">给班主任: ${data.encouragement}</div>`;
+            }
+        } else if (type === 'psych') {
+            document.getElementById('detail-title').textContent = `${meta.student_name} - 心理安抚话术`;
+            // 画像
+            if (data.student_profile) {
+                html += `<div class="alert alert-secondary mb-3">${data.student_profile}</div>`;
+            }
+            // 风险因子
+            if (data.key_factors && data.key_factors.length) {
+                html += `<div class="mb-3"><h6 class="text-danger border-bottom pb-1">风险因子</h6>${data.key_factors.map(f => `<div class="card border-danger mb-2"><div class="card-body py-2"><span class="badge bg-danger">${f.factor}</span> ${f.analysis || ''}</div></div>`).join('')}</div>`;
+            }
+            // 学生话术
+            if (data.student_script) {
+                const sc = data.student_script;
+                html += `<div class="mb-3"><h6 class="text-primary border-bottom pb-1">学生话术</h6>`;
+                if (sc.opening) html += `<p><strong>开场:</strong> ${sc.opening}</p>`;
+                if (sc.empathy) html += `<p><strong>共情:</strong> ${sc.empathy}</p>`;
+                if (sc.empowerment) html += `<p><strong>赋能:</strong> ${sc.empowerment}</p>`;
+                if (sc.closing) html += `<p><strong>收尾:</strong> ${sc.closing}</p>`;
+                html += `</div>`;
+            }
+            // 家长指导
+            if (data.parent_guide) {
+                html += `<div class="mb-3"><h6 class="text-success border-bottom pb-1">家长指导</h6>`;
+                if (data.parent_guide.communication_tips) {
+                    html += `<p><strong>沟通要点:</strong></p><ul>${data.parent_guide.communication_tips.map(t => `<li>${t}</li>`).join('')}</ul>`;
+                }
+                html += `</div>`;
+            }
+        }
+
+        body.innerHTML = html;
+    }
+
+    // 关闭详情
+    window.closeDetail = function() {
+        document.getElementById('detail-panel').classList.add('d-none');
+    };
+
+    // 加载周期选项
+    function loadPeriodOptions(records) {
+        const sel = document.getElementById('filter-period');
+        const existing = new Set();
+        Array.from(sel.options).forEach(o => existing.add(o.value));
+        records.forEach(r => {
+            if (r.period_label && !existing.has(r.period_label)) {
+                const opt = document.createElement('option');
+                opt.value = r.period_label;
+                opt.textContent = r.period_label;
+                sel.appendChild(opt);
+                existing.add(r.period_label);
+            }
+        });
+    }
+
+    function showLoading(show) {
+        const el = document.getElementById('loading');
+        if (show) el.classList.remove('d-none');
+        else el.classList.add('d-none');
+    }
+
+    function showEmpty(msg) {
+        const el = document.getElementById('empty-state');
+        el.querySelector('p').textContent = msg || '暂无历史记录';
+        el.classList.remove('d-none');
+        document.getElementById('history-list').classList.add('d-none');
+    }
+})();
+</script>
+{% endblock %}

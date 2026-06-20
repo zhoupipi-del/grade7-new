@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}AI德育大秘{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="text-center mb-4 mt-3">
+        <h3 class="fw-bold"><i class="bi bi-robot"></i> AI 德育大秘评语引擎</h3>
+        <p class="text-muted">基于流动红旗深度快照 + 心理健康多维因子 + 干预轨迹，一键生成德育处方与心理安抚话术</p>
+    </div>
+
+    <div class="row g-4 justify-content-center">
+        <!-- 功能一：班级月度德育处方 -->
+        <div class="col-md-5">
+            <div class="card h-100 border-primary shadow-sm" style="cursor:pointer;" onclick="location.href='{{ url_for('ai_prescription.class_prescription') }}'">
+                <div class="card-body text-center p-4">
+                    <div class="mb-3">
+                        <i class="bi bi-file-earmark-medical" style="font-size:3rem; color:#0d6efd;"></i>
+                    </div>
+                    <h4 class="card-title fw-bold text-primary">班级月度德育处方</h4>
+                    <p class="text-muted mb-3">
+                        读取流动红旗归档快照（三维评分、违纪扣分、考勤异常、年级排名对比），
+                        由 DeepSeek 大模型生成包含<span class="fw-bold">总体诊断、优势分析、短板预警、风险预警、行动建议</span>的完整处方。
+                    </p>
+                    <div class="d-flex justify-content-center gap-2 flex-wrap mb-2">
+                        <span class="badge bg-light text-dark"><i class="bi bi-archive"></i> FlagArchiveReport</span>
+                        <span class="badge bg-light text-dark"><i class="bi bi-bar-chart"></i> 三维评分</span>
+                        <span class="badge bg-light text-dark"><i class="bi bi-trophy"></i> 排名对比</span>
+                    </div>
+                    <span class="btn btn-primary mt-2">
+                        <i class="bi bi-arrow-right-circle"></i> 进入
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 功能二：高风险学生考前心理安抚话术 -->
+        <div class="col-md-5">
+            <div class="card h-100 border-danger shadow-sm" style="cursor:pointer;" onclick="location.href='{{ url_for('ai_prescription.psych_comfort') }}'">
+                <div class="card-body text-center p-4">
+                    <div class="mb-3">
+                        <i class="bi bi-heart-pulse" style="font-size:3rem; color:#dc3545;"></i>
+                    </div>
+                    <h4 class="card-title fw-bold text-danger">考前心理安抚话术</h4>
+                    <p class="text-muted mb-3">
+                        读取高风险学生的 MSSMHS-55 十维心理因子得分、干预记录轨迹和家长反馈，
+                        由 DeepSeek 大模型定制<span class="fw-bold">学生话术 + 家长指导 + 后续跟进</span>的精细化安抚指南。
+                    </p>
+                    <div class="d-flex justify-content-center gap-2 flex-wrap mb-2">
+                        <span class="badge bg-light text-dark"><i class="bi bi-clipboard2-pulse"></i> MSSMHS-55</span>
+                        <span class="badge bg-light text-dark"><i class="bi bi-activity"></i> 干预轨迹</span>
+                        <span class="badge bg-light text-dark"><i class="bi bi-people"></i> 家长反馈</span>
+                    </div>
+                    <span class="btn btn-danger mt-2">
+                        <i class="bi bi-arrow-right-circle"></i> 进入
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 技术说明 -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card bg-light">
+                <div class="card-body py-2">
+                    <p class="mb-0 text-muted small">
+                        <i class="bi bi-info-circle"></i>
+                        本引擎统一使用 <code>utils/llm_client.call_llm()</code> 共享客户端，内置熔断器（3次失败 -> 60秒冷却）+ 指数退避重试。
+                        所有数据来源于系统现有归档与评估记录，不新建数据表。
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
