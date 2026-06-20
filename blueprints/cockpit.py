@@ -10,6 +10,11 @@ from decorators import login_required, require_role, scope_query
 from datetime import date, timedelta, datetime
 from sqlalchemy import func, case, text
 from utils.db_utils import safe_commit
+from utils.statistics_service import (
+    get_basic_stats, get_discipline_stats, get_attendance_stats,
+    get_wing_stats, get_mental_health_stats, get_notice_read_rate,
+    get_visit_stats, get_risk_stats, get_trend_data,
+)
 import json, time, io
 
 cockpit_bp = Blueprint("cockpit", __name__, template_folder="../templates/cockpit")
@@ -48,12 +53,8 @@ def data_api():
     days = request.args.get("days", 30, type=int)
     since = date.today() - timedelta(days=days)
 
-    # ── 基础统计 ──
-    total_students = Student.query.filter_by(grade_id=grade_id, is_active=True).count()
-    total_classes = Class.query.filter_by(grade_id=grade_id, is_active=True).count()
-    teachers = User.query.filter_by(grade_id=grade_id, role="class_teacher").count()
-    grade_leaders = User.query.filter_by(grade_id=grade_id, role="grade_leader").count()
-    total_teachers = teachers + grade_leaders
+    # ── 基础统计 (共享层) ──
+    basic = get_basic_stats(grade_id, teacher_roles=["class_teacher", "grade_leader"])
 
     # ── 成绩统计（优化：纯 SQL 聚合，零 ORM 对象加载）──
     score_stats = {}
@@ -96,49 +97,11 @@ def data_api():
                 "excellent_rate": round(row.excellent_count / tp * 100, 1) if tp else 0,
             }
 
-    # ── 德育统计（优化：一次聚合查询）──
-    disc_query = DisciplineRecord.query.filter(
-        DisciplineRecord.grade_id == grade_id,
-        DisciplineRecord.created_at >= since,
-    )
-    discipline_count = disc_query.count()
-    
-    # 一次查询按类型和分类聚合
-    discipline_by = db.session.query(
-        DisciplineRecord.type,
-        DisciplineRecord.category,
-        func.count(DisciplineRecord.id)
-    ).filter(
-        DisciplineRecord.grade_id == grade_id,
-        DisciplineRecord.created_at >= since,
-    ).group_by(DisciplineRecord.type, DisciplineRecord.category).all()
-    
-    disc_levels = {"warning": 0, "minor": 0, "major": 0, "serious": 0}
-    discipline_by_category = []
-    cat_map = {}
-    for dtype, cat, cnt in discipline_by:
-        disc_levels[dtype] = cnt + disc_levels.get(dtype, 0)
-        cat_key = cat or "未分类"
-        cat_map[cat_key] = cat_map.get(cat_key, 0) + cnt
-    discipline_by_category = [{"name": k, "count": v} for k, v in cat_map.items()]
+    # ── 德育统计 (共享层) ──
+    disc = get_discipline_stats(grade_id, since=since)
 
-    # ── 考勤统计（优化：一次聚合查询）──
-    att_stats = db.session.query(
-        Attendance.status,
-        func.count(Attendance.id)
-    ).filter(
-        Attendance.grade_id == grade_id,
-        Attendance.record_date >= since,
-    ).group_by(Attendance.status).all()
-    
-    att_status = {"present": 0, "late": 0, "early": 0, "absent": 0, "leave": 0}
-    total_att = 0
-    for status, cnt in att_stats:
-        att_status[status] = cnt
-        total_att += cnt
-    attendance_rate = round(att_status["present"] / total_att * 100, 1) if total_att > 0 else 0
-
-    # 请假统计
+    # ── 考勤统计 (共享层) ──
+    att = get_attendance_stats(grade_id, since=since)
     leave_count = LeaveRequest.query.filter(
         LeaveRequest.grade_id == grade_id,
         LeaveRequest.created_at >= since,
@@ -149,59 +112,17 @@ def data_api():
         LeaveRequest.status == "approved",
     ).count()
 
-    # ── 通知统计 ──
-    notice_count = Notice.query.filter(
-        Notice.grade_id == grade_id,
-        Notice.created_at >= since,
-    ).count()
-    total_notices = Notice.query.filter_by(grade_id=grade_id).count()
+    # ── 通知统计 (共享层) ──
+    notice = get_notice_read_rate(grade_id, total_students=basic["total_students"], since=since)
 
-    # 阅读率（优化：一次 JOIN 替代两次查询）
-    notice_read_rate = 0
-    if total_notices > 0 and total_students > 0:
-        total_receipts_needed = total_notices * total_students
-        read_count = db.session.execute(text("""
-            SELECT COUNT(nr.id)
-            FROM notice_receipts nr
-            JOIN notices n ON nr.notice_id = n.id
-            WHERE n.grade_id = :gid AND nr.status IN ('read', 'signed')
-        """), {"gid": grade_id}).scalar()
-        notice_read_rate = round(int(read_count or 0) / total_receipts_needed * 100, 1) if read_count else 0
+    # ── 家访统计 (共享层) ──
+    visit = get_visit_stats(grade_id, since=since)
 
-    # ── 家访统计（优化：一次聚合查询）──
-    visit_count = HomeVisit.query.filter(
-        HomeVisit.grade_id == grade_id,
-        HomeVisit.visit_date >= since,
-    ).count()
+    # ── 心理健康风险分布 (共享层) ──
+    mh_risk = get_mental_health_stats(grade_id)
 
-    visit_by_type = db.session.query(
-        HomeVisit.visit_type,
-        func.count(HomeVisit.id)
-    ).filter(
-        HomeVisit.grade_id == grade_id,
-        HomeVisit.visit_date >= since,
-    ).group_by(HomeVisit.visit_type).all()
-
-    # ── 心理健康风险分布 ──
-    mh_stats = db.session.query(
-        MentalHealthAssessment.risk_level,
-        func.count(MentalHealthAssessment.id)
-    ).filter_by(grade_id=grade_id).group_by(MentalHealthAssessment.risk_level).all()
-    mh_risk = {"high": 0, "medium": 0, "low": 0}
-    for level, cnt in mh_stats:
-        mh_risk[level] = cnt
-
-    # ── AI预警统计（最近扫描）──
-    latest_scan = db.session.query(func.max(RiskRecord.scan_date)).filter_by(grade_id=grade_id).scalar()
-    risk_stats = {"red": 0, "yellow": 0, "green": 0}
-    if latest_scan:
-        risk_data = db.session.query(
-            RiskRecord.risk_level,
-            func.count(RiskRecord.id)
-        ).filter_by(grade_id=grade_id, scan_date=latest_scan).group_by(RiskRecord.risk_level).all()
-        for level, cnt in risk_data:
-            risk_stats[level] = cnt
-    risk_scan_date = latest_scan.strftime("%Y-%m-%d") if latest_scan else None
+    # ── AI预警统计 (共享层) ──
+    risk = get_risk_stats(grade_id)
 
     # ── 活动参与度（优化：一次 JOIN 替代两次查询）──
     total_activities = Activity.query.filter(
@@ -234,20 +155,8 @@ def data_api():
         """), {"gid": grade_id}).scalar() or 0
         pm_rate = round(int(pm_signin_count) / (pm_total * 30) * 100, 1)
 
-    # ── 五翼均分（优化：一次聚合查询）──
-    wing_dimensions = db.session.query(
-        WingsScore.dimension,
-        func.avg(WingsScore.score)
-    ).filter(
-        WingsScore.grade_id == grade_id,
-    ).group_by(WingsScore.dimension).all()
-    
-    wing_avg_result = db.session.query(
-        func.avg(WingsScore.score)
-    ).filter(
-        WingsScore.grade_id == grade_id,
-    ).scalar()
-    wing_avg = round(float(wing_avg_result), 1) if wing_avg_result else 0
+    # ── 五翼均分 (共享层) ──
+    wing = get_wing_stats(grade_id)
 
     # ── 班级对比数据（优化：SQL 聚合，零 Python 循环）──
     classes = Class.query.filter_by(grade_id=grade_id, is_active=True).order_by(Class.name).all()
@@ -311,59 +220,14 @@ def data_api():
         rate = round(att["present"] / att["total"] * 100, 1) if att["total"] > 0 else 0
         class_att_data.append({"name": cls.name, "rate": rate})
 
-    # ── 趋势数据（优化：预加载 + 内存聚合，消灭 90 次查询！）──
-    trend_dates = []
-    trend_discipline = []
-    trend_attendance = []
-    trend_routine = []
-
-    # 一次查询拿到最近 days 天的所有违纪记录
-    disc_since = DisciplineRecord.query.filter(
-        DisciplineRecord.grade_id == grade_id,
-        DisciplineRecord.created_at >= since,
-    ).all()
-    disc_by_date = {}
-    for d in disc_since:
-        d_key = d.created_at.date() if d.created_at else date.today()
-        disc_by_date[d_key] = disc_by_date.get(d_key, 0) + 1
-
-    # 一次查询拿到最近 days 天的所有考勤记录
-    att_since = Attendance.query.filter(
-        Attendance.grade_id == grade_id,
-        Attendance.record_date >= since,
-    ).all()
-    att_by_date = {}
-    for a in att_since:
-        d_key = a.record_date
-        if d_key not in att_by_date:
-            att_by_date[d_key] = {"total": 0, "present": 0}
-        att_by_date[d_key]["total"] += 1
-        if a.status == "present":
-            att_by_date[d_key]["present"] += 1
-
-    # 一次查询拿到最近 days 天的所有常规评分
-    routine_since = RoutineScore.query.filter(
-        RoutineScore.grade_id == grade_id,
-        RoutineScore.created_at >= since,
-    ).all()
-    routine_by_date = {}
-    for r in routine_since:
-        d_key = r.created_at.date() if r.created_at else date.today()
-        if d_key not in routine_by_date:
-            routine_by_date[d_key] = []
-        routine_by_date[d_key].append(float(r.score) if r.score else 0)
-
-    # 现在循环日期，从内存字典中取数据（0 次数据库查询！）
-    for i in range(days - 1, -1, -1):
-        d = date.today() - timedelta(days=i)
-        trend_dates.append(d.strftime("%m-%d"))
-        trend_discipline.append(disc_by_date.get(d, 0))
-        
-        att = att_by_date.get(d, {"total": 0, "present": 0})
-        trend_attendance.append(round(att["present"] / att["total"] * 100, 1) if att["total"] > 0 else None)
-        
-        rs = routine_by_date.get(d, [])
-        trend_routine.append(round(sum(rs) / len(rs), 1) if rs else None)
+    # ── 趋势数据 (共享层) ──
+    trend_data = get_trend_data(grade_id, days=days)
+    trend_cockpit = {
+        "dates": [t["date"] for t in trend_data],
+        "discipline": [t["discipline"] for t in trend_data],
+        "attendance": [t["attendance"] for t in trend_data],
+        "routine": [t["routine"] for t in trend_data],
+    }
 
     # ── 跨考试趋势（优化：一次查询 + 内存聚合）──
     all_exams = Exam.query.filter_by(grade_id=grade_id).order_by(Exam.exam_date.asc()).all()
@@ -399,9 +263,9 @@ def data_api():
         "code": 0,
         "data": {
             # 基础统计
-            "total_students": total_students,
-            "total_classes": total_classes,
-            "total_teachers": total_teachers,
+            "total_students": basic["total_students"],
+            "total_classes": basic["total_classes"],
+            "total_teachers": basic["total_teachers"],
 
             # 成绩
             "score_stats": score_stats,
@@ -413,30 +277,28 @@ def data_api():
             },
 
             # 德育
-            "discipline_count": discipline_count,
-            "discipline_levels": disc_levels,
-            "discipline_categories": discipline_by_category,
+            "discipline_count": disc["total_count"],
+            "discipline_levels": disc["by_type"],
+            "discipline_categories": disc["by_category"],
 
             # 考勤
-            "attendance_rate": attendance_rate,
-            "attendance_status": att_status,
+            "attendance_rate": att["attendance_rate"],
+            "attendance_status": att["by_status"],
             "leave_count": leave_count,
             "leave_approved": leave_approved,
 
             # 通知
-            "notice_count": notice_count,
-            "total_notices": total_notices,
-            "notice_read_rate": notice_read_rate,
+            "notice_count": notice.get("notice_count_recent", notice["notice_count"]),
+            "total_notices": notice["notice_count"],
+            "notice_read_rate": notice["read_rate"],
 
             # 家访
-            "visit_count": visit_count,
-            "visit_types": [{"name": vtype, "count": cnt}
-                            for vtype, cnt in visit_by_type],
+            "visit_count": visit["total_count"],
+            "visit_types": visit["by_type"],
 
             # 五翼
-            "wing_avg": wing_avg,
-            "wing_dimensions": [{"name": dim, "score": round(float(s), 1)}
-                                for dim, s in wing_dimensions],
+            "wing_avg": wing["avg"],
+            "wing_dimensions": wing["by_dimension"],
 
             # 班级对比
             "class_scores": class_score_data,
@@ -444,17 +306,12 @@ def data_api():
             "class_attendance": class_att_data,
 
             # 趋势
-            "trend": {
-                "dates": trend_dates,
-                "discipline": trend_discipline,
-                "attendance": trend_attendance,
-                "routine": trend_routine,
-            },
+            "trend": trend_cockpit,
 
             # 新增维度
             "mental_health": mh_risk,
-            "risk_alerts": risk_stats,
-            "risk_scan_date": risk_scan_date,
+            "risk_alerts": {"red": risk["red"], "yellow": risk["yellow"], "green": risk["green"]},
+            "risk_scan_date": risk["scan_date"],
             "activity_stats": {
                 "total_activities": total_activities,
                 "reg_count": activity_reg_count,

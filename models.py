@@ -1,9 +1,10 @@
 """梨江中学德育管理平台 — 数据模型"""
 import json
-from datetime import datetime, date
+from datetime import date
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import UniqueConstraint
 from werkzeug.security import generate_password_hash, check_password_hash
+from utils import get_local_now
 
 db = SQLAlchemy()
 
@@ -32,7 +33,7 @@ class User(db.Model):
     bound_student_id = db.Column(db.Integer, nullable=True)  # 家长绑定孩子
     phone = db.Column(db.String(20), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
     last_login = db.Column(db.DateTime, nullable=True)
 
     def set_password(self, pw):
@@ -101,7 +102,7 @@ class Student(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     enrolled_at = db.Column(db.Date, nullable=True)
     tags = db.Column(db.Text, default="")                    # 逗号分隔标签，如"优等生,班干部,重点关注"
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     @property
     def tags_list(self):
@@ -125,7 +126,7 @@ class Task(db.Model):
     target_id = db.Column(db.Integer, nullable=True)            # grade_id 或 class_id
     status = db.Column(db.String(20), default="pending")        # pending / assigned / done / closed
     deadline = db.Column(db.Date, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
     finished_at = db.Column(db.DateTime, nullable=True)
 
     from_user = db.relationship("User", foreign_keys=[from_user_id], lazy="joined")
@@ -139,7 +140,7 @@ class TaskFeedback(db.Model):
     task_id = db.Column(db.Integer, db.ForeignKey("tasks.id"), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     content = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     task = db.relationship("Task", backref=db.backref("feedbacks", lazy="selectin"), lazy="joined")
     user = db.relationship("User", lazy="joined")
@@ -161,7 +162,7 @@ class DisciplineRecord(db.Model):
     status = db.Column(db.String(20), default="active")       # active / resolved / appealed
     verify_status = db.Column(db.String(20), default='DRAFT', index=True)  # 状态机: DRAFT/VERIFIED
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
     resolved_at = db.Column(db.DateTime, nullable=True)
 
     student = db.relationship("Student", backref=db.backref("discipline_records", lazy="selectin"), lazy="joined")
@@ -183,8 +184,8 @@ class DisciplineAppeal(db.Model):
     review_comment = db.Column(db.Text, nullable=True)                                 # 复核意见
     reviewed_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)      # 复核人
     reviewed_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
+    updated_at = db.Column(db.DateTime, default=get_local_now, onupdate=get_local_now)
 
     discipline = db.relationship("DisciplineRecord", backref=db.backref("appeals", lazy="selectin", cascade="all, delete-orphan"), lazy="joined")
     student = db.relationship("Student", lazy="joined")
@@ -205,7 +206,7 @@ class RoutineScore(db.Model):
     inspector = db.Column(db.String(64), nullable=True)
     scorer_type = db.Column(db.String(20), nullable=False, default="class_teacher", index=True)  # class_teacher / grade_leader / ms_admin
     record_date = db.Column(db.Date, default=date.today, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     class_ = db.relationship("Class", lazy="joined")
 
@@ -221,7 +222,7 @@ class Attendance(db.Model):
     status = db.Column(db.String(20), nullable=False)          # present / late / early / absent / leave
     record_date = db.Column(db.Date, default=date.today, index=True)
     note = db.Column(db.String(200), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
 
 # ── 请假 ──
@@ -241,7 +242,7 @@ class LeaveRequest(db.Model):
     class_approved_at = db.Column(db.DateTime, nullable=True)
     grade_approved_by = db.Column(db.Integer, nullable=True)
     grade_approved_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     student = db.relationship("Student", lazy="joined")
     applicant = db.relationship("User", foreign_keys=[applicant_id], lazy="joined")
@@ -261,8 +262,8 @@ class ProblemStudent(db.Model):
     intervention = db.Column(db.Text, nullable=True)           # 干预措施
     status = db.Column(db.String(20), default="active")        # active / monitoring / resolved
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
+    updated_at = db.Column(db.DateTime, default=get_local_now, onupdate=get_local_now)
 
     student = db.relationship("Student", backref=db.backref("problem_records", lazy="selectin"), lazy="joined")
 
@@ -275,7 +276,7 @@ class ProblemTrack(db.Model):
     problem_id = db.Column(db.Integer, db.ForeignKey("problem_students.id"), nullable=False)
     content = db.Column(db.Text, nullable=False)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     problem = db.relationship("ProblemStudent", backref=db.backref("tracks", lazy="selectin"), lazy="joined")
 
@@ -291,7 +292,7 @@ class Message(db.Model):
     content = db.Column(db.Text, nullable=False)
     category = db.Column(db.String(30), default="通用")   # 违纪通知/成绩通知/家长会/活动通知/请假通知/表扬/通用
     is_read = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     from_user = db.relationship("User", foreign_keys=[from_user_id], lazy="joined")
     recipient  = db.relationship("User", foreign_keys=[to_user_id], lazy="joined")
@@ -309,7 +310,7 @@ class Announcement(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     target_roles = db.Column(db.String(200), nullable=True)   # 逗号分隔，空=全部
     expire_date = db.Column(db.Date, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
 
 # ── 五翼评价（精简，从旧系统迁移核心字段） ──
@@ -325,7 +326,7 @@ class WingsScore(db.Model):
     scorer_type = db.Column(db.String(20), nullable=False)     # teacher/parent/self/peer
     scorer_id = db.Column(db.Integer, nullable=False)
     semester = db.Column(db.String(20), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
 
 # ── 心理问卷 ──
@@ -342,7 +343,7 @@ class PsychSurvey(db.Model):
     dimensions_json = db.Column(db.Text, nullable=True)         # 各维度得分JSON
     is_valid = db.Column(db.Boolean, default=True)              # 测谎校验
     verify_status = db.Column(db.String(20), default='PENDING', index=True)  # 状态机: PENDING/COMPLETED
-    completed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime, default=get_local_now)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -367,7 +368,7 @@ class Exam(db.Model):
     exam_date = db.Column(db.Date, default=date.today)
     exam_type = db.Column(db.String(20), default="月考")       # 月考/期中/期末/模拟
     grade_id = db.Column(db.Integer, db.ForeignKey("grades.id"), nullable=False, index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     grade = db.relationship("Grade", lazy="joined")
     scores = db.relationship("Score", backref="exam", lazy="dynamic", cascade="all, delete-orphan")
@@ -405,7 +406,7 @@ class Notice(db.Model):
     require_receipt = db.Column(db.Boolean, default=False)
     created_by = db.Column(db.String(50), default="")
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     target_class = db.relationship("Class", backref=db.backref("notices", lazy="selectin"), lazy="joined")
     receipts = db.relationship("NoticeReceipt", backref="notice", lazy="dynamic", cascade="all, delete-orphan")
@@ -443,8 +444,8 @@ class EndTermComment(db.Model):
     status = db.Column(db.String(20), default="draft")              # draft/published
     created_by = db.Column(db.String(50), default="")
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
+    updated_at = db.Column(db.DateTime, default=get_local_now, onupdate=get_local_now)
 
     student = db.relationship("Student", backref=db.backref("endterm_comments", lazy="selectin"), lazy="joined")
 
@@ -465,8 +466,8 @@ class ParentMeeting(db.Model):
     status = db.Column(db.String(20), default="planned")            # planned/ongoing/completed
     created_by = db.Column(db.String(50), default="")
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
+    updated_at = db.Column(db.DateTime, default=get_local_now, onupdate=get_local_now)
 
     grade = db.relationship("Grade", lazy="joined")
     signins = db.relationship("ParentMeetingSignin", backref="meeting", lazy="dynamic", cascade="all, delete-orphan")
@@ -482,7 +483,7 @@ class ParentMeetingSignin(db.Model):
     phone = db.Column(db.String(20), default="")
     is_late = db.Column(db.Boolean, default=False)
     notes = db.Column(db.Text, default="")
-    signin_time = db.Column(db.DateTime, default=datetime.utcnow)
+    signin_time = db.Column(db.DateTime, default=get_local_now)
 
     student = db.relationship("Student", lazy="joined")
 
@@ -505,7 +506,7 @@ class HomeVisit(db.Model):
     teacher_name = db.Column(db.String(50), default="")
     follow_up = db.Column(db.Text, default="")
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     student = db.relationship("Student", backref=db.backref("home_visits", lazy="selectin"), lazy="joined")
     creator = db.relationship("User", foreign_keys=[created_by_id], lazy="joined")
@@ -520,7 +521,7 @@ class AuditLog(db.Model):
     target_type = db.Column(db.String(30), nullable=False)           # Student/Score/Exam/Discipline
     target_id = db.Column(db.Integer, default=0)
     detail = db.Column(db.Text, default="")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -553,7 +554,7 @@ class QualityScore(db.Model):
     scorer_id = db.Column(db.Integer, nullable=False)
     semester = db.Column(db.String(20), nullable=False)
     comment = db.Column(db.Text, default="")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     student = db.relationship("Student", lazy="joined")
     indicator = db.relationship("QualityIndicator", lazy="joined")
@@ -576,8 +577,8 @@ class Activity(db.Model):
     cover_image = db.Column(db.String(200), default="")
     status = db.Column(db.String(20), default="draft")               # draft/published/ongoing/completed/cancelled
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
+    updated_at = db.Column(db.DateTime, default=get_local_now, onupdate=get_local_now)
 
     creator = db.relationship("User", foreign_keys=[created_by_id], lazy="joined")
     registrations = db.relationship("ActivityRegistration", backref="activity", lazy="dynamic",
@@ -596,7 +597,7 @@ class ActivityRegistration(db.Model):
     class_id = db.Column(db.Integer, nullable=False)
     status = db.Column(db.String(20), default="registered")          # registered/confirmed/cancelled
     note = db.Column(db.Text, default="")
-    registered_at = db.Column(db.DateTime, default=datetime.utcnow)
+    registered_at = db.Column(db.DateTime, default=get_local_now)
 
     student = db.relationship("Student", lazy="joined")
 
@@ -610,7 +611,7 @@ class ActivitySignin(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     activity_id = db.Column(db.Integer, db.ForeignKey("activities.id"), nullable=False, index=True)
     student_id = db.Column(db.Integer, db.ForeignKey("students.id"), nullable=False)
-    signin_time = db.Column(db.DateTime, default=datetime.utcnow)
+    signin_time = db.Column(db.DateTime, default=get_local_now)
     status = db.Column(db.String(20), default="on_time")             # on_time/late/absent
     note = db.Column(db.Text, default="")
 
@@ -629,8 +630,8 @@ class MessageTemplate(db.Model):
     is_system = db.Column(db.Boolean, default=False)                 # 系统预设模板
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     use_count = db.Column(db.Integer, default=0)                     # 使用次数统计
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
+    updated_at = db.Column(db.DateTime, default=get_local_now, onupdate=get_local_now)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -646,19 +647,19 @@ class Semester(db.Model):
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
     is_current = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
 
 class SystemConfig(db.Model):
     """系统参数配置"""
     __tablename__ = "system_configs"
     id = db.Column(db.Integer, primary_key=True)
-    key = db.Column(db.String(100), nullable=False, unique=True)         # 配置键名
-    value = db.Column(db.Text, default="")                               # 配置值
+    key = db.Column("config_key", db.String(50), nullable=False, unique=True)   # 配置键名
+    value = db.Column("config_value", db.Text, default="")                         # 配置值
     category = db.Column(db.String(30), default="通用")                  # 分类
     description = db.Column(db.String(200), default="")                  # 说明
     updated_by = db.Column(db.String(64), default="")
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=get_local_now, onupdate=get_local_now)
 
 
 class Report(db.Model):
@@ -674,7 +675,7 @@ class Report(db.Model):
     data_json = db.Column(db.Text, default="{}")                         # 报表数据 JSON
     file_path = db.Column(db.String(300), nullable=True)                 # Excel/PDF 文件路径
     generated_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    generated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    generated_at = db.Column(db.DateTime, default=get_local_now)
 
 
 class SemesterArchive(db.Model):
@@ -687,7 +688,7 @@ class SemesterArchive(db.Model):
     end_date = db.Column(db.Date, nullable=False)
     summary_json = db.Column(db.Text, default="{}")                      # 汇总数据 JSON
     archived_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    archived_at = db.Column(db.DateTime, default=datetime.utcnow)
+    archived_at = db.Column(db.DateTime, default=get_local_now)
 
 
 class MessageReply(db.Model):
@@ -697,7 +698,7 @@ class MessageReply(db.Model):
     message_id = db.Column(db.Integer, db.ForeignKey("messages.id"), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     content = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     message = db.relationship("Message", backref=db.backref("replies", lazy="dynamic", cascade="all, delete-orphan"), lazy="joined")
     user = db.relationship("User", foreign_keys=[user_id], lazy="joined")
@@ -712,7 +713,7 @@ class MessageRead(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     message_id = db.Column(db.Integer, db.ForeignKey("messages.id"), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    read_at = db.Column(db.DateTime, default=datetime.utcnow)
+    read_at = db.Column(db.DateTime, default=get_local_now)
 
 
 # ── 心理健康评估 ──
@@ -766,8 +767,8 @@ class MentalHealthAssessment(db.Model):
     reviewed_at = db.Column(db.DateTime, nullable=True)
     review_comment = db.Column(db.Text, nullable=True)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
+    updated_at = db.Column(db.DateTime, default=get_local_now, onupdate=get_local_now)
 
     # 关系
     student = db.relationship("Student", foreign_keys=[student_id], lazy="joined")
@@ -796,7 +797,7 @@ class MentalHealthQuestion(db.Model):
     # 排序
     sort_order = db.Column(db.Integer, default=0)
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     __table_args__ = (
         db.UniqueConstraint("scale_name", "dimension", "question_no", name="uq_mh_question"),
@@ -814,7 +815,7 @@ class MentalHealthAnswer(db.Model):
     # 答案值（根据option_type不同：1-4, 1-5, 0/1, 或文字）
     answer_value = db.Column(db.Integer, nullable=True)
     answer_text = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     __table_args__ = (
         db.UniqueConstraint("assessment_id", "question_id", name="uq_mh_answer"),
@@ -864,7 +865,7 @@ class RiskRecord(db.Model):
     # 处置类型: talk(谈话)/home_visit(家访)/notify_parent(通知家长)/monitor(持续观察)/resolved(已解决)
     disposal_action = db.Column(db.String(30), nullable=True, index=True)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     # 关系
     student = db.relationship("Student", foreign_keys=[student_id], lazy="joined")
@@ -930,7 +931,7 @@ class LinkageLog(db.Model):
     source_key = db.Column(db.String(120), nullable=False, comment="来源唯一标识，如 'discipline:42'")
     target_key = db.Column(db.String(120), nullable=False, comment="目标唯一标识，如 'quality:15:s1'")
     extra_info = db.Column(db.Text, nullable=True, comment="补充信息JSON")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, default=get_local_now, index=True)
 
 
 # ── 班主任手记（学生主观备注） ──
@@ -943,8 +944,8 @@ class TeacherNote(db.Model):
     teacher_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     content = db.Column(db.Text, nullable=False)
     category = db.Column(db.String(20), default="observation")    # observation/talk/intervention/positive/concern
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
+    updated_at = db.Column(db.DateTime, default=get_local_now, onupdate=get_local_now)
 
     student = db.relationship("Student", backref=db.backref("teacher_notes", lazy="selectin"), lazy="joined")
     teacher = db.relationship("User", foreign_keys=[teacher_id], lazy="joined")
@@ -998,8 +999,14 @@ class InterventionRecord(db.Model):
     follow_up_done    = db.Column(db.Boolean, default=False)  # 随访是否完成
     follow_up_notes  = db.Column(db.Text, nullable=True)    # 随访记录
 
-    created_at  = db.Column(db.DateTime, default=datetime.utcnow, index=True)
-    updated_at  = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # ── 心理健康专属字段（绿洲干预追踪扩展）──
+    assessment_id = db.Column(db.Integer, db.ForeignKey("mental_health_assessments.id"), nullable=True, index=True)
+    mh_risk_before = db.Column(db.String(20), nullable=True)   # 干预前MH风险等级 low/medium/high
+    mh_risk_after  = db.Column(db.String(20), nullable=True)   # 随访后MH风险等级
+    parent_feedback = db.Column(db.Text, nullable=True)        # 家长反馈记录
+
+    created_at  = db.Column(db.DateTime, default=get_local_now, index=True)
+    updated_at  = db.Column(db.DateTime, default=get_local_now, onupdate=get_local_now)
 
     # ── 关系 ──
     student = db.relationship("Student", foreign_keys=[student_id],
@@ -1007,6 +1014,8 @@ class InterventionRecord(db.Model):
                                                  cascade="all, delete-orphan"), lazy="joined")
     teacher = db.relationship("User", foreign_keys=[teacher_id],
                               backref=db.backref("interventions_created", lazy="dynamic"), lazy="joined")
+    assessment = db.relationship("MentalHealthAssessment", foreign_keys=[assessment_id],
+                                  backref=db.backref("intervention_logs", lazy="dynamic"), lazy="joined")
 
     @property
     def risk_delta(self):
@@ -1036,6 +1045,16 @@ class InterventionRecord(db.Model):
         """是否干预有效 (显著改善 或 略有改善)"""
         return self.effect_rating in ("显著改善", "略有改善")
 
+    @property
+    def mh_risk_improved(self):
+        """心理健康风险等级是否改善 (high→medium→low 为好转)"""
+        order = {"low": 0, "medium": 1, "high": 2}
+        before = order.get(self.mh_risk_before)
+        after = order.get(self.mh_risk_after)
+        if before is None or after is None:
+            return None
+        return after < before  # True=好转, False=持平/恶化
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -1056,6 +1075,12 @@ class InterventionRecord(db.Model):
             "status": self.status,
             "notes_snippet": (self.notes or "")[:80],
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            # 心理健康专属
+            "assessment_id": self.assessment_id,
+            "mh_risk_before": self.mh_risk_before,
+            "mh_risk_after": self.mh_risk_after,
+            "mh_risk_improved": self.mh_risk_improved,
+            "parent_feedback": (self.parent_feedback or "")[:200],
         }
 
 
@@ -1099,7 +1124,7 @@ class FlagEvaluation(db.Model):
     rank = db.Column(db.Integer, nullable=True)            # 同年级内排名（发布时计算）
     status = db.Column(db.String(10), nullable=False, default="draft", index=True)  # draft / published
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
     published_at = db.Column(db.DateTime, nullable=True)
 
     class_ = db.relationship("Class", lazy="joined")
@@ -1136,11 +1161,60 @@ class FlagReport(db.Model):
     bottom_class_name = db.Column(db.String(64), nullable=True)
 
     status = db.Column(db.String(10), nullable=False, default="draft", index=True)  # draft / published
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
     created_by = db.Column(db.String(64), nullable=True)
 
     grade = db.relationship("Grade", lazy="joined")
     top_class = db.relationship("Class", foreign_keys=[top_class_id], lazy="joined")
+
+
+# ── 流动红旗归档快照（不可变历史记录）──
+class FlagArchiveReport(db.Model):
+    """流动红旗周期归档报告 — 只读快照，杜绝历史回溯导致的排名篡改"""
+    __tablename__ = "flag_archive_reports"
+    __table_args__ = (
+        UniqueConstraint("period_type", "period_label", "class_id",
+                         name="uq_flag_archive_period_class"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    period_type = db.Column(db.String(10), nullable=False, index=True)   # week / month / term
+    period_label = db.Column(db.String(60), nullable=False)               # "2026-04-13" / "2026年4月"
+    grade_id = db.Column(db.Integer, db.ForeignKey("grades.id"), nullable=False, index=True)
+    class_id = db.Column(db.Integer, db.ForeignKey("classes.id"), nullable=False)
+
+    # 核心聚合得分与排名
+    final_score = db.Column(db.Float, nullable=False)        # 最终扣分后合流得分
+    rank = db.Column(db.Integer, nullable=False)             # 年级内最终排名
+    has_flag = db.Column(db.Boolean, default=False)          # 是否获得流动红旗（年级前2名）
+
+    # 索引备份核心指标
+    base_score = db.Column(db.Float, nullable=True)          # 加权底分（扣分前）
+    discipline_deduction = db.Column(db.Float, default=0.0)  # 违纪对冲扣分
+    attendance_deduction = db.Column(db.Float, default=0.0)  # 考勤熔断扣分
+
+    # 深度冷冻快照 JSON（三维明细、违纪事件列表、请假人数等完整数据）
+    snapshot_data_json = db.Column(db.Text, nullable=False)
+
+    # 归档元数据
+    archived_at = db.Column(db.DateTime, default=get_local_now)
+    archived_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+
+    # 关联关系
+    class_ = db.relationship("Class", lazy="joined")
+    grade = db.relationship("Grade", lazy="joined")
+
+    @property
+    def snapshot_data(self):
+        """反序列化快照 JSON"""
+        try:
+            return json.loads(self.snapshot_data_json)
+        except Exception:
+            return {}
+
+    @snapshot_data.setter
+    def snapshot_data(self, value):
+        self.snapshot_data_json = json.dumps(value, ensure_ascii=False)
 
 
 # ── 增值评价记录（AI温暖评语）──
@@ -1171,7 +1245,7 @@ class ValueAddedComment(db.Model):
     highlight_tags = db.Column(db.Text, nullable=True)       # 闪光点标签（JSON数组）
 
     status = db.Column(db.String(10), nullable=False, default="draft", index=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     student = db.relationship("Student", lazy="joined")
     class_ = db.relationship("Class", lazy="joined")
@@ -1212,10 +1286,49 @@ class CausalDiagnosis(db.Model):
     is_processed = db.Column(db.Boolean, default=False, index=True)
     processed_by = db.Column(db.String(64), nullable=True)
     processed_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     student = db.relationship("Student", lazy="joined")
     class_ = db.relationship("Class", lazy="joined")
     grade = db.relationship("Grade", lazy="joined")
     exam = db.relationship("Exam", lazy="joined")
     subject = db.relationship("Subject", lazy="joined")
+
+
+# ── AI 德育大秘输出持久化 ──
+class AIPrescriptionRecord(db.Model):
+    """AI 班级德育处方记录 — 冷冻 AI 生成结果，支持历史回溯"""
+    __tablename__ = "ai_prescription_records"
+    __table_args__ = (
+        db.UniqueConstraint("grade_id", "class_id", "period_type", "period_label",
+                           name="uq_ai_prescription_period_class"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    period_type = db.Column(db.String(20), nullable=False, index=True)   # "month" / "week" / "semester"
+    period_label = db.Column(db.String(50), nullable=False, index=True)   # "2025-2026-2"
+    grade_id = db.Column(db.Integer, db.ForeignKey("grades.id"), nullable=False, index=True)
+    class_id = db.Column(db.Integer, db.ForeignKey("classes.id"), nullable=False, index=True)
+    diagnosis_json = db.Column(db.Text, nullable=False)                  # AI 生成的完整 JSON
+    created_at = db.Column(db.DateTime, default=get_local_now, index=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+
+    grade = db.relationship("Grade", lazy="joined")
+    class_ = db.relationship("Class", lazy="joined")
+    creator = db.relationship("User", foreign_keys=[created_by], lazy="joined")
+
+
+class AIPsychComfortRecord(db.Model):
+    """AI 心理安抚话术记录 — 冷冻四段式话术及深度数据"""
+    __tablename__ = "ai_psych_comfort_records"
+
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey("students.id"), nullable=False, index=True)
+    assessment_id = db.Column(db.Integer, db.ForeignKey("mental_health_assessments.id"), nullable=True, index=True)
+    comfort_script_json = db.Column(db.Text, nullable=False)              # AI 生成的完整 JSON
+    created_at = db.Column(db.DateTime, default=get_local_now, index=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+
+    student = db.relationship("Student", lazy="joined")
+    assessment = db.relationship("MentalHealthAssessment", lazy="joined")
+    creator = db.relationship("User", foreign_keys=[created_by], lazy="joined")

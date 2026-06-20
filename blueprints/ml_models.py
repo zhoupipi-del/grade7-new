@@ -321,10 +321,10 @@ def api_similar_students(sid):
 # 🌌 德育沙盘推演舱 (What-If Simulator)
 # ============================================================
 
-import numpy as np
-import joblib
-import json as json_mod
-from datetime import datetime
+from utils.inference import load_xgb_pipeline, run_inference, classify_risk_level
+
+# ── 特征顺序常量（与 inference.py 对齐）──
+INFERENCE_FEATURE_ORDER = ["math_slope", "math_avg", "quality_score", "risk_density", "attendance_rate", "discipline_factor"]
 
 # ── 干预类型 → 特征篡改映射表 ──
 INTERVENTION_EFFECTS = {
@@ -399,25 +399,38 @@ INTERVENTION_EFFECTS = {
 }
 
 
-def _load_xgb_pipeline():
-    """懒加载 XGBoost pipeline"""
-    pipeline_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "wings_xgb_pipeline.pkl")
-    metadata_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "pipeline_metadata.pkl")
-    
-    if not os.path.exists(pipeline_path):
-        return None, None
-    
-    pipeline = joblib.load(pipeline_path)
-    
-    if os.path.exists(metadata_path):
-        metadata = joblib.load(metadata_path)
-        feature_names = metadata["feature_names"]
-        support_mask = metadata["support_mask"]
-    else:
-        feature_names = ["math_slope", "math_avg", "quality_score", "risk_density", "attendance_rate", "discipline_factor"]
-        support_mask = [True] * 6
-    
-    return pipeline, (feature_names, support_mask)
+def _features_dict_to_list(features: dict) -> list:
+    """将特征字典转为推理模块需要的列表（保持顺序）"""
+    return [features.get(f, 0.0) for f in INFERENCE_FEATURE_ORDER]
+
+
+def _predict_risk_with_inference(features: dict) -> dict:
+    """用 inference 模块预测风险，含模型缺失时的规则引擎兜底
+
+    Returns:
+        dict: {risk_prob, risk_level, top_factors}
+    """
+    try:
+        pipeline, metadata = load_xgb_pipeline()
+        features_list = _features_dict_to_list(features)
+        return run_inference(features_list, pipeline, metadata)
+    except FileNotFoundError:
+        # 兜底：规则引擎
+        risk_score = 0.0
+        if features.get("risk_density", 0) > 2:
+            risk_score += 0.3
+        if features.get("discipline_factor", 0) > 10:
+            risk_score += 0.3
+        if features.get("attendance_rate", 1.0) < 0.9:
+            risk_score += 0.2
+        if features.get("math_slope", 0) < -5:
+            risk_score += 0.2
+        risk_prob = min(1.0, risk_score)
+        return {
+            "risk_prob": risk_prob,
+            "risk_level": classify_risk_level(risk_prob),
+            "top_factors": [],
+        }
 
 
 def _get_student_feature_vector(student_id: int) -> dict:
@@ -487,52 +500,6 @@ def _apply_interventions(features: dict, interventions: list) -> dict:
     return simulated
 
 
-def _predict_risk(features: dict, pipeline, feature_names: list, support_mask: list) -> dict:
-    """
-    用 XGBoost pipeline 预测风险
-    
-    Returns:
-        {"risk_prob": float, "risk_level": str, "feature_contrib": dict}
-    """
-    if pipeline is None:
-        # 如果模型没加载，用规则引擎兜底
-        risk_score = 0.0
-        if features.get("risk_density", 0) > 2:
-            risk_score += 0.3
-        if features.get("discipline_factor", 0) > 10:
-            risk_score += 0.3
-        if features.get("attendance_rate", 1.0) < 0.9:
-            risk_score += 0.2
-        if features.get("math_slope", 0) < -5:
-            risk_score += 0.2
-        
-        risk_prob = min(1.0, risk_score)
-        risk_level = "high" if risk_prob > 0.7 else ("medium" if risk_prob > 0.4 else "low")
-        return {"risk_prob": risk_prob, "risk_level": risk_level, "feature_contrib": {}}
-    
-    # 组装特征向量（按全量特征顺序）
-    X_raw = [[features.get(f, 0.0) for f in feature_names]]
-    X = np.array(X_raw, dtype=np.float64)
-    
-    # 预测概率
-    proba = pipeline.predict_proba(X)[0]  # [neg_prob, pos_prob]
-    risk_prob = float(proba[1])  # 正例概率（需关注）
-    
-    risk_level = "high" if risk_prob > 0.7 else ("medium" if risk_prob > 0.4 else "low")
-    
-    # 特征贡献度（用 feature_importances_ 近似）
-    classifier_step = pipeline.named_steps['classifier']
-    importances = classifier_step.feature_importances_
-    passed_features = [feature_names[i] for i, passed in enumerate(support_mask) if passed]
-    
-    feature_contrib = {}
-    for i, f_name in enumerate(passed_features):
-        # 简化：用特征值 * 重要性作为贡献度
-        feature_contrib[f_name] = round(float(features.get(f_name, 0)) * float(importances[i]), 4)
-    
-    return {"risk_prob": risk_prob, "risk_level": risk_level, "feature_contrib": feature_contrib}
-
-
 def _generate_risk_curve(student_id: int, base_risk: float, simulated_risk: float) -> dict:
     """
     生成风险曲线（未来30天，每天一个数据点）
@@ -574,9 +541,15 @@ def _call_deepseek_for_tactical_report(student_name: str, orig_risk: float, sim_
     调用 DeepSeek 生成战术推演报告
     """
     try:
-        from llm_client import LLMClient
-        llm = LLMClient()
-        
+        import requests as _requests
+        api_key = current_app.config.get("LLM_API_KEY", "")
+        api_url = current_app.config.get("LLM_API_URL", "https://api.deepseek.com/v1/chat/completions")
+        model = current_app.config.get("LLM_MODEL", "deepseek-chat")
+        timeout = current_app.config.get("LLM_TIMEOUT", 60)
+
+        if not api_key:
+            return "LLM_API_KEY 未配置，请在环境变量中设置"
+
         intervention_names = [INTERVENTION_EFFECTS.get(i, {}).get("name", i) for i in interventions]
         
         # 构建干预措施详情（用于Prompt上下文）
@@ -649,8 +622,23 @@ def _call_deepseek_for_tactical_report(student_name: str, orig_risk: float, sim_
             "\n".join(intervention_context),
             changes_desc
         )
-        
-        report = llm.generate(prompt, max_tokens=1200)
+
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 1200,
+        }
+        headers = {
+            "Authorization": "Bearer {}".format(api_key),
+            "Content-Type": "application/json"
+        }
+        resp = _requests.post(api_url, json=payload, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        result = resp.json()
+        report = result["choices"][0]["message"]["content"]
         return report if report else "AI报告生成失败，请稍后重试。"
     
     except Exception as e:
@@ -712,11 +700,7 @@ def api_sandbox_deduce():
     if role == "class_teacher" and my_class_id and student.class_id != my_class_id:
         return jsonify({"code": 403, "msg": "无权访问该学生数据"})
     
-    # 2. 加载 XGBoost pipeline
-    pipeline, metadata = _load_xgb_pipeline()
-    feature_names = metadata[0] if metadata else ["math_slope", "math_avg", "quality_score", "risk_density", "attendance_rate", "discipline_factor"]
-    support_mask = metadata[1] if metadata else [True] * 6
-    
+    # 2. 加载 XGBoost pipeline（使用共享推理模块）
     # 3. 提取原始特征向量
     orig_features = _get_student_feature_vector(student_id)
     if not orig_features:
@@ -726,8 +710,8 @@ def api_sandbox_deduce():
     sim_features = _apply_interventions(orig_features, interventions)
     
     # 5. 分别计算原始风险和模拟风险
-    orig_result = _predict_risk(orig_features, pipeline, feature_names, support_mask)
-    sim_result = _predict_risk(sim_features, pipeline, feature_names, support_mask)
+    orig_result = _predict_risk_with_inference(orig_features)
+    sim_result = _predict_risk_with_inference(sim_features)
     
     orig_risk = orig_result["risk_prob"]
     sim_risk = sim_result["risk_prob"]

@@ -7,6 +7,12 @@ from sqlalchemy import func, text
 
 from decorators import login_required, require_role
 from utils import get_local_now
+from utils.statistics_service import (
+    get_basic_stats, get_discipline_stats, get_attendance_stats,
+    get_wing_stats, get_mental_health_stats, get_notice_read_rate,
+    get_visit_stats, get_risk_stats, get_trend_data,
+    get_class_score_ranking, get_score_overview,
+)
 from models import db, User, Student, Class, Grade, DisciplineRecord, RoutineScore, Task, WingsScore, HomeVisit, Notice, NoticeReceipt, Score, Exam, MentalHealthAssessment, RiskRecord, Attendance, Subject
 
 bigscreen_bp = Blueprint("bigscreen", __name__, url_prefix="/bigscreen")
@@ -33,68 +39,36 @@ def data():
         if user:
             user_grade_id = user.grade_id
 
-    total_students = Student.query.filter_by(is_active=True).count()
-    total_classes = Class.query.filter_by(is_active=True).count()
-    total_teachers = User.query.filter(User.role.in_(["class_teacher", "teacher", "grade_leader"])).count()
+    # ── 共享统计查询层 (全校视图, grade_id=None) ──
+    basic = get_basic_stats()
 
     # 违纪统计 (近30天)
     since = get_local_now() - timedelta(days=30)
-    discipline_count = DisciplineRecord.query.filter(DisciplineRecord.created_at >= since).count()
+    disc = get_discipline_stats(since=since)
 
-    # 各等级违纪数
-    level_stats = db.session.query(
-        DisciplineRecord.type, func.count(DisciplineRecord.id)
-    ).filter(DisciplineRecord.created_at >= since).group_by(DisciplineRecord.type).all()
-    level_map = {l: c for l, c in level_stats}
+    # 五翼均值
+    wing = get_wing_stats()
 
-    # 五翼评分均值
-    wing_avg = db.session.query(func.avg(WingsScore.score)).scalar() or 0
+    # 班级得分排行
+    class_scores_data = get_class_score_ranking()
 
-    # 班级得分排行 (routine) — 含 class_id 供前端点击穿透
-    class_scores = db.session.query(
-        Class.id, Class.name, func.avg(RoutineScore.score).label("avg_score")
-    ).join(RoutineScore, RoutineScore.class_id == Class.id)\
-     .filter(Class.is_active == True)\
-     .group_by(Class.id, Class.name).order_by(func.avg(RoutineScore.score).desc()).limit(10).all()
-
-    # 通知统计
-    notice_count = Notice.query.count()
-    total_receipts = NoticeReceipt.query.count()
-    notice_read_rate = 0
-    if total_receipts > 0:
-        read_count = NoticeReceipt.query.filter(
-            NoticeReceipt.status.in_(["read", "signed"])
-        ).count()
-        notice_read_rate = round(read_count / total_receipts * 100, 1)
+    # 通知阅读率
+    notice = get_notice_read_rate()
 
     # 家访统计
-    visit_count = HomeVisit.query.count()
+    visit = get_visit_stats()
 
-    # ─── 新增维度 ───
-
-    # 成绩概览: 最近一次考试的平均分
-    latest_exam = Exam.query.order_by(Exam.exam_date.desc()).first()
-    score_avg = 0
-    score_pass_rate = 0
-    if latest_exam:
-        total_scores = db.session.query(func.avg(Score.score)).filter(
-            Score.exam_id == latest_exam.id
-        ).scalar()
-        score_avg = round(float(total_scores), 1) if total_scores else 0
-        # 及格率 (>=60分)
-        pass_count = db.session.query(func.count(Score.id)).filter(
-            Score.exam_id == latest_exam.id,
-            Score.score >= 60
-        ).scalar() or 0
-        total_count = db.session.query(func.count(Score.id)).filter(
-            Score.exam_id == latest_exam.id
-        ).scalar() or 0
-        score_pass_rate = round(pass_count / total_count * 100, 1) if total_count > 0 else 0
+    # 成绩概览
+    score_overview = get_score_overview()
 
     # 心理健康风险分布
-    mh_high = MentalHealthAssessment.query.filter_by(risk_level="high").count()
-    mh_medium = MentalHealthAssessment.query.filter_by(risk_level="medium").count()
-    mh_low = MentalHealthAssessment.query.filter_by(risk_level="low").count()
+    mh = get_mental_health_stats()
+
+    # 考勤概况
+    att = get_attendance_stats(since=since)
+
+    # 7天趋势
+    trend = get_trend_data()
 
     # ==================== Phase 4 - 刀 1: 数据供给侧清洗与战略扩容 ====================
     # 1. 动态获取最新扫描日期，确保度量衡对齐最新批次
@@ -185,94 +159,36 @@ def data():
     risk_yellow = risk_counts["yellow"]
     risk_green = risk_counts["green"]
 
-    # 考勤概况 (近30天) - 优化: 1条 GROUP BY 替代4条独立查询
-    att_stats = db.session.query(
-        Attendance.status,
-        func.count(Attendance.id)
-    ).filter(
-        Attendance.record_date >= since
-    ).group_by(Attendance.status).all()
-    att_dict = {s: c for s, c in att_stats}
-    att_present = att_dict.get("present", 0)
-    att_absent = att_dict.get("absent", 0)
-    att_late = att_dict.get("late", 0)
-    att_leave = att_dict.get("leave", 0)
-    att_total = att_present + att_absent + att_late + att_leave
-    att_rate = round(att_present / att_total * 100, 1) if att_total > 0 else 0
+    # 考勤概况 — 已由 get_attendance_stats 计算
 
-    # 7天趋势 - 优化: 3条批量GROUP BY替代28条逐日查询
-    days = [(get_local_now() - timedelta(days=i)).date() for i in range(6, -1, -1)]
-    d0, d6 = days[0], days[-1]
-
-    disc_trend_map = dict(db.session.query(
-        func.date(DisciplineRecord.created_at),
-        func.count(DisciplineRecord.id)
-    ).filter(
-        func.date(DisciplineRecord.created_at) >= d0,
-        func.date(DisciplineRecord.created_at) <= d6
-    ).group_by(func.date(DisciplineRecord.created_at)).all())
-
-    rout_trend_map = dict(db.session.query(
-        RoutineScore.record_date,
-        func.avg(RoutineScore.score)
-    ).filter(
-        RoutineScore.record_date >= d0,
-        RoutineScore.record_date <= d6
-    ).group_by(RoutineScore.record_date).all())
-
-    att_trend_raw = db.session.query(
-        Attendance.record_date,
-        Attendance.status,
-        func.count(Attendance.id)
-    ).filter(
-        Attendance.record_date >= d0,
-        Attendance.record_date <= d6
-    ).group_by(Attendance.record_date, Attendance.status).all()
-
-    att_by_day = {}
-    for d, s, c in att_trend_raw:
-        if d not in att_by_day:
-            att_by_day[d] = {"present": 0, "total": 0}
-        att_by_day[d][s] = c
-        att_by_day[d]["total"] += c
-
-    trend = []
-    for day in days:
-        t = att_by_day.get(day, {"present": 0, "total": 0})
-        day_att_rate = round(t["present"] / t["total"] * 100, 1) if t["total"] > 0 else 100
-        trend.append({
-            "date": day.strftime("%m-%d"),
-            "discipline": disc_trend_map.get(day, 0),
-            "routine": rout_trend_map.get(day, 0),
-            "attendance": day_att_rate,
-        })
+    # 7天趋势 — 已由 get_trend_data 计算
 
     return jsonify({
-        "total_students": total_students,
-        "total_classes": total_classes,
-        "total_teachers": total_teachers,
-        "discipline_count": discipline_count,
-        "level_warning": level_map.get("warning", 0),
-        "level_minor": level_map.get("minor", 0),
-        "level_major": level_map.get("major", 0),
-        "wing_avg": round(float(wing_avg), 1),
-        "class_scores": [{"id": cid, "name": n, "score": round(float(s) if s else 0, 1)} for cid, n, s in class_scores],
-        "notice_count": notice_count,
-        "notice_read_rate": notice_read_rate,
-        "visit_count": visit_count,
+        "total_students": basic["total_students"],
+        "total_classes": basic["total_classes"],
+        "total_teachers": basic["total_teachers"],
+        "discipline_count": disc["total_count"],
+        "level_warning": disc["by_type"].get("warning", 0),
+        "level_minor": disc["by_type"].get("minor", 0),
+        "level_major": disc["by_type"].get("major", 0),
+        "wing_avg": round(float(wing["avg"]), 1),
+        "class_scores": class_scores_data,
+        "notice_count": notice["notice_count"],
+        "notice_read_rate": notice["read_rate"],
+        "visit_count": visit["total_count"],
         "trend": trend,
         # 新增
-        "score_avg": score_avg,
-        "score_pass_rate": score_pass_rate,
-        "latest_exam_name": latest_exam.name if latest_exam else "暂无考试",
-        "mh_high": mh_high,
-        "mh_medium": mh_medium,
-        "mh_low": mh_low,
+        "score_avg": score_overview["avg_score"],
+        "score_pass_rate": score_overview["pass_rate"],
+        "latest_exam_name": score_overview["exam_name"],
+        "mh_high": mh["high"],
+        "mh_medium": mh["medium"],
+        "mh_low": mh["low"],
         "risk_red": risk_red,
         "risk_yellow": risk_yellow,
         "risk_green": risk_green,
-        "att_rate": att_rate,
-        "att_total": att_total,
+        "att_rate": att["attendance_rate"],
+        "att_total": att["total"],
         # 🚀 Phase 4 增量核心武器库
         "risk_by_type": dict(type_distribution),
         "risk_top_n": risk_top_10,

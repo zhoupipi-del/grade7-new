@@ -1,14 +1,9 @@
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h4 class="mb-0"><i class="bi bi-megaphone me-2"></i>系统公告</h4>
-  {% if session.role == 'ms_admin' %}
-  <a href="{{ url_for('common.manage_announcements') }}" class="btn btn-outline-primary btn-sm">
-    <i class="bi bi-gear me-1"></i> 管理公告
-  </a>
-  {% endif %}
 </div>
 
-{% if announcements %}
-{% for a in announcements %}
+{% if items and items.items %}
+{% for a in items.items %}
 <div class="card mb-3 {% if a.is_pinned %}border-warning{% endif %}">
   <div class="card-header d-flex justify-content-between align-items-center">
     <h5 class="mb-0">

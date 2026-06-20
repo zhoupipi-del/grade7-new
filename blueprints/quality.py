@@ -39,6 +39,35 @@ DIMENSION_WEIGHTS = {
     "social": 0.15,    # 社会实践 15%
 }
 
+# ── Wings→Quality 维度映射（五翼合流）──
+# Wings 中文维度 → Quality 英文维度标识
+WINGS_TO_QUALITY_DIM = {
+    "德": "moral",
+    "智": "academic",
+    "体": "health",
+    "美": "art",
+    "劳": "social",
+}
+
+# 反向映射：Quality 英文 → Wings 中文
+QUALITY_TO_WINGS_DIM = {v: k for k, v in WINGS_TO_QUALITY_DIM.items()}
+
+
+def get_quality_indicator_id_by_dim(dimension_key: str) -> int | None:
+    """根据 Quality 维度键(如 'moral')查找一级指标 ID（parent_id==0）"""
+    indicator = QualityIndicator.query.filter_by(
+        dimension=dimension_key, parent_id=0, is_active=True
+    ).first()
+    return indicator.id if indicator else None
+
+
+def get_quality_indicator_id_for_wings(wings_dim: str) -> int | None:
+    """根据 Wings 中文维度名(如 '德')查找对应 Quality 一级指标 ID"""
+    quality_key = WINGS_TO_QUALITY_DIM.get(wings_dim)
+    if not quality_key:
+        return None
+    return get_quality_indicator_id_by_dim(quality_key)
+
 # 平衡补偿系数：当某维度分 > 其他维度均值 × BALANCE_THRESHOLD 时触发惩罚
 BALANCE_THRESHOLD = 1.5   # 触发阈值
 BALANCE_PENALTY = 0.85    # 惩罚系数

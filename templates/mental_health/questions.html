@@ -19,8 +19,8 @@
             <input type="text" class="form-control" placeholder="搜索量表或问题..." id="searchInput">
         </div>
         <div class="col-md-6 text-right">
-            <button class="btn btn-primary" onclick="showAddScaleModal()">
-                <i class="fas fa-plus"></i> 添加量表
+            <button class="btn btn-primary" onclick="showAddQuestionModal()">
+                <i class="fas fa-plus"></i> 添加量表/问题
             </button>
             <button class="btn btn-success" onclick="showAddQuestionModal()">
                 <i class="fas fa-plus-circle"></i> 添加问题
@@ -145,37 +145,9 @@
     </div>
 </div>
 
-<!-- 添加量表模态框 -->
-<div class="modal fade" id="addScaleModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">添加量表</h5>
-                <button type="button" class="close" data-dismiss="modal">&times;</button>
-            </div>
-            <form method="POST" action="{{ url_for('mental_health.add_scale') }}">
-                <div class="modal-body">
-                    <div class="form-group">
-                        <label>量表名称 *</label>
-                        <input type="text" class="form-control" name="scale_name" required>
-                    </div>
-                    <div class="form-group">
-                        <label>说明</label>
-                        <textarea class="form-control" name="description" rows="3"></textarea>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
-                    <button type="submit" class="btn btn-primary">保存</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
 <script>
 function showAddScaleModal() {
-    $('#addScaleModal').modal('show');
+    alert('添加量表功能开发中...');
 }
 
 function showAddQuestionModal() {
@@ -195,7 +167,11 @@ function editQuestion(qid) {
 
 function deleteQuestion(qid) {
     if (confirm('确定删除此问题？')) {
-        window.location.href = '/mental-health/questions/delete/' + qid;
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/mental-health/' + qid + '/delete';
+        document.body.appendChild(form);
+        form.submit();
     }
 }
 

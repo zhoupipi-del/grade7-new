@@ -20,6 +20,10 @@
                 </h5>
                 <div>
                     {% if session.role in ['ms_admin', 'grade_leader', 'class_teacher'] %}
+                    <a href="{{ url_for('mental_health.intervention_timeline', student_id=assessment.student_id) }}"
+                       class="btn btn-sm btn-outline-success me-2">
+                        <i class="bi bi-shield-heart"></i> 干预追踪
+                    </a>
                     <a href="{{ url_for('mental_health.edit', aid=assessment.id) }}" 
                        class="btn btn-sm btn-outline-primary me-2">
                         <i class="bi bi-pencil"></i> 编辑

@@ -140,6 +140,7 @@ def _send_mental_health_notification(stu, assessment):
 # ── 心理筛查列表 ──
 @survey_bp.route("/psych")
 @login_required
+@require_role("ms_admin", "grade_leader", "class_teacher")
 def psych_list():
     grade_id = session.get("grade_id")
     class_id = session.get("class_id")
@@ -154,12 +155,14 @@ def psych_list():
 
 @survey_bp.route("/psych/form")
 @login_required
+@require_role("ms_admin", "grade_leader", "class_teacher")
 def psych_form():
     return render_template("survey/psych_form.html")
 
 
 @survey_bp.route("/psych/submit", methods=["POST"])
 @login_required
+@require_role("ms_admin", "grade_leader", "class_teacher")
 def psych_submit():
     data = request.get_json()
     answers = data.get("answers", [])
@@ -194,6 +197,7 @@ def psych_submit():
 # ── 心理筛查统计 ──
 @survey_bp.route("/psych/stats")
 @login_required
+@require_role("ms_admin", "grade_leader", "class_teacher")
 def psych_stats():
     grade_id = session.get("grade_id")
     class_id = session.get("class_id")
@@ -218,6 +222,7 @@ def psych_stats():
 # ── 家长问卷调查（PCE-55）──
 @survey_bp.route("/parent")
 @login_required
+@require_role("ms_admin", "grade_leader", "class_teacher")
 def parent_survey():
     grade_id = session.get("grade_id")
     class_id = session.get("class_id")
@@ -232,6 +237,7 @@ def parent_survey():
 
 @survey_bp.route("/analysis")
 @login_required
+@require_role("ms_admin", "grade_leader", "class_teacher")
 def survey_analysis():
     """心理多维分析 — 雷达图 + AI白皮书"""
     role = session.get("role")
@@ -258,6 +264,7 @@ def survey_analysis():
 
 @survey_bp.route("/analysis/dimension-data")
 @login_required
+@require_role("ms_admin", "grade_leader", "class_teacher")
 def dimension_data():
     """JSON API: 返回 MSSMHS-55 十维度聚合数据供 ECharts 雷达图渲染"""
     role = session.get("role")
@@ -332,11 +339,12 @@ def dimension_data():
                 dim_max[dim_name] = score
                 dim_max_students[dim_name] = stu_info
 
-        # 风险分布（基于总分）
+        # 风险分布（双轨判定：总分 OR 因子均分）
         total = survey.total_score or 0
+        factor_triggered = any(float(dims.get(d, 0)) >= 3.0 for d in MSSMHS_DIMENSIONS)
         if total >= 160:
             risk_dist["high"] += 1
-        elif total >= 120:
+        elif total >= 120 or factor_triggered:
             risk_dist["medium"] += 1
         else:
             risk_dist["low"] += 1

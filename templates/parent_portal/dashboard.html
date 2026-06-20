@@ -27,6 +27,11 @@
                 <span class="badge bg-info">{{ class_obj.name if class_obj else '-' }}</span>
                 <span class="badge bg-secondary">{{ student.gender }}</span>
             </div>
+            <div class="mt-2">
+                <a href="{{ url_for('report_pdf.student_report', student_id=student.id) }}" class="btn btn-outline-danger btn-sm">
+                    <i class="bi bi-file-pdf"></i> 德育报告单
+                </a>
+            </div>
         </div>
     </div>
     <div class="col-md-3">

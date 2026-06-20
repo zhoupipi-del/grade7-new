@@ -2,7 +2,7 @@
 from flask import Blueprint, render_template, jsonify, request, session
 from decorators import login_required, require_role
 from models import db, Student, Class, Grade, Score, Exam, DisciplineRecord, Attendance, MentalHealthAssessment, WingsScore
-from sqlalchemy import func
+from sqlalchemy import func, case
 from sqlalchemy.orm import joinedload
 from utils import get_local_now
 from datetime import datetime, timedelta
@@ -86,7 +86,7 @@ def api_classes_comparison():
     att_rows = db.session.query(
         Attendance.class_id,
         func.count(Attendance.id).label("total"),
-        func.sum(func.IIF(Attendance.status == 'present', 1, 0)).label("present"),
+        func.sum(case((Attendance.status == 'present', 1), else_=0)).label("present"),
     ).filter(
         Attendance.class_id.in_(class_ids),
         Attendance.record_date >= since

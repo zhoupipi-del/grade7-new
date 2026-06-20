@@ -25,6 +25,10 @@
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-info-circle me-2"></i>基本信息</span>
                     <div>
+                        <a href="{{ url_for('report_pdf.student_report', student_id=student.id) }}"
+                           class="btn btn-sm btn-outline-danger me-1">
+                            <i class="bi bi-file-pdf"></i> 报告单
+                        </a>
                         <a href="{{ url_for('student_profile.detail', sid=student.id) }}" 
                            class="btn btn-sm btn-primary me-1">
                             <i class="bi bi-person-badge"></i> 学生画像

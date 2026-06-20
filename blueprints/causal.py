@@ -9,7 +9,7 @@ from utils import get_local_now
 from blueprints.audit_log import audit_log
 from sqlalchemy import func
 import json as _json
-import requests
+from utils.llm_client import call_llm_json, LLMAvailabilityError
 
 causal_bp = Blueprint("causal", __name__)
 
@@ -39,35 +39,6 @@ CAUSAL_SYSTEM_PROMPT = """你是一位拥有30年经验的初中教育数据分�
   "intervention_plan": "100-200字具体干预方案",
   "risk_level": "low/medium/high/critical"
 }"""
-
-
-def _call_llm_api(system_prompt, user_content):
-    """调用大模型API"""
-    api_key = current_app.config.get("LLM_API_KEY", "")
-    api_url = current_app.config.get("LLM_API_URL", "https://api.deepseek.com/v1/chat/completions")
-    model = current_app.config.get("LLM_MODEL", "deepseek-chat")
-    timeout = current_app.config.get("LLM_TIMEOUT", 60)
-
-    if not api_key:
-        raise RuntimeError("LLM_API_KEY 未配置")
-
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
-        ],
-        "temperature": 0.5,  # 更确定性的输出
-        "max_tokens": 2048,
-        "response_format": {"type": "json_object"}
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    resp = requests.post(api_url, json=payload, headers=headers, timeout=timeout)
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
 
 
 def _build_evidence_chain(student_id, class_id, grade_id, exam_id, subject_id, prev_score, curr_score, score_drop):
@@ -340,8 +311,7 @@ def diagnose():
     )
 
     try:
-        llm_output = _call_llm_api(CAUSAL_SYSTEM_PROMPT, context)
-        data = _json.loads(llm_output)
+        data = call_llm_json(CAUSAL_SYSTEM_PROMPT, context, temperature=0.5, max_tokens=2048, timeout=60)
 
         diagnosis = CausalDiagnosis(
             student_id=student_id,

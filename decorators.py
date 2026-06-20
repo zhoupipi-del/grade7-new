@@ -422,8 +422,9 @@ def require_role(*roles):
             if session.get("role") not in roles:
                 if request.path.startswith("/api/"):
                     return jsonify({"error": "权限不足"}), 403
-                flash("您没有权限访问此页面", "danger")
-                return redirect(url_for("index"))
+                # 非API路由：用abort(403)返回403状态码，方便自动化测试识别越权
+                from flask import abort
+                abort(403)
             return f(*args, **kwargs)
         return decorated
     return decorator

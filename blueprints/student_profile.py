@@ -395,6 +395,7 @@ def process_risk(sid, rid):
 # ── 成绩趋势 API（Chart.js 用） ──
 @student_profile_bp.route("/<int:sid>/api/trend")
 @login_required
+@require_role("ms_admin", "grade_leader", "class_teacher")
 def api_trend(sid):
     student = _check_access(sid)
     if student is None:

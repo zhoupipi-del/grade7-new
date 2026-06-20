@@ -4,7 +4,12 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <h4 class="mb-0"><i class="bi bi-people me-2"></i>本班评价结果</h4>
-  <span class="text-muted small">共 {{ student_results|length }} 名学生</span>
+  <div>
+    <a href="{{ url_for('report_pdf.class_reports', class_id=session.class_id) }}" class="btn btn-outline-danger btn-sm me-2">
+      <i class="bi bi-file-pdf"></i> 批量报告单
+    </a>
+    <span class="text-muted small">共 {{ student_results|length }} 名学生</span>
+  </div>
 </div>
 
 <!-- 班级总体雷达图 -->

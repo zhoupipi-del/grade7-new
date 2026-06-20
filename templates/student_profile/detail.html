@@ -100,7 +100,10 @@
         <a href="{{ url_for('class.student_detail', sid=student.id) }}" class="btn btn-outline-light btn-sm me-1" title="基本信息">详情</a>
         <a href="{{ url_for('ai_analysis.dashboard_detail', sid=student.id) }}" class="btn btn-outline-light btn-sm me-1" title="AI分析">AI分析</a>
         <a href="{{ url_for('quality.report', sid=student.id) }}" class="btn btn-outline-light btn-sm me-1" title="素质评价">素质报告</a>
-        <a href="{{ url_for('wings.portfolio_detail', sid=student.id) }}" class="btn btn-outline-light btn-sm" title="五翼档案">五翼档案</a>
+        <a href="{{ url_for('wings.portfolio_detail', sid=student.id) }}" class="btn btn-outline-light btn-sm me-1" title="五翼档案">五翼档案</a>
+        <a href="{{ url_for('report_pdf.student_report', student_id=student.id) }}" class="btn btn-outline-warning btn-sm" title="下载PDF德育报告单">
+          <i class="bi bi-file-pdf"></i> 报告单
+        </a>
       </div>
     </div>
   </div>

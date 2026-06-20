@@ -85,6 +85,13 @@
             </div>
         </a>
     </div>
+    <div class="col-md-2">
+        <a href="{{ url_for('report_pdf.class_reports', class_id=session.class_id) }}" class="text-decoration-none">
+            <div class="card border-0 shadow-sm p-3 text-center">
+                <i class="bi bi-file-pdf fs-2 text-danger"></i><div class="mt-2 small">报告单导出</div>
+            </div>
+        </a>
+    </div>
 </div>
 
 <!-- 重点关注学生 -->

@@ -8,7 +8,7 @@
         <p class="text-muted">选择两个学期进行数据对比，查看变化趋势</p>
     </div>
     <div class="col-auto">
-        <a href="{{ url_for('semester_archive.list_archives') }}" class="btn btn-outline-secondary">
+        <a href="{{ url_for('semester_archive.archive_list') }}" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left"></i> 返回列表
         </a>
     </div>
@@ -204,7 +204,8 @@ function loadComparison() {
         document.getElementById('comparisonResult').style.display = 'none';
         
         // 调用API
-        fetch(`{{ url_for('semester_archive.api_compare', semester1='') }}${semester1}/${semester2}`)
+        const apiUrl = "{{ url_for('semester_archive.api_compare', s1='__S1__', s2='__S2__') }}".replace('__S1__', semester1).replace('__S2__', semester2);
+        fetch(apiUrl)
             .then(response => response.json())
             .then(data => {
                 document.getElementById('loadingIndicator').style.display = 'none';

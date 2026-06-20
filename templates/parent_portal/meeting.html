@@ -31,7 +31,7 @@
             </div>
             <div class="card-body">
                 <p class="mb-1"><i class="bi bi-calendar"></i> {{ m.meeting_date.strftime('%Y-%m-%d') }}</p>
-                <p class="mb-1"><i class="bi bi-clock"></i> {{ m.meeting_time or '-' }}</p>
+                <p class="mb-1"><i class="bi bi-clock"></i> {{ m.start_time or '-' }}{% if m.end_time %} - {{ m.end_time }}{% endif %}</p>
                 <p class="mb-1"><i class="bi bi-geo-alt"></i> {{ m.location or '-' }}</p>
                 {% if m.description %}
                 <p class="text-muted small mt-2">{{ m.description }}</p>
@@ -40,7 +40,7 @@
                 {% if m.id in signed_meetings %}
                 <div class="mt-2 text-success small">
                     <i class="bi bi-check-circle"></i>
-                    签到时间：{{ signed_meetings[m.id].signed_at.strftime('%H:%M') }}
+                    签到时间：{{ signed_meetings[m.id].signin_time.strftime('%H:%M') if signed_meetings[m.id].signin_time else '-' }}
                     {% if signed_meetings[m.id].is_late %}<span class="text-warning">（迟到）</span>{% endif %}
                 </div>
                 {% else %}

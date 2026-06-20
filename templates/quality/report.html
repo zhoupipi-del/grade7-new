@@ -28,6 +28,12 @@
           {% endif %}
         </div>
       </div>
+      <div class="col-auto">
+        <a href="{{ url_for('report_pdf.student_report', student_id=student.id) }}"
+           class="btn btn-outline-danger">
+          <i class="bi bi-file-pdf"></i> 下载报告单
+        </a>
+      </div>
     </div>
   </div>
 </div>
