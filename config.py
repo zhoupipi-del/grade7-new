@@ -100,3 +100,11 @@ class Config:
                 "  - DATABASE_URL（数据库连接串）\n"
                 "然后重新启动应用。"
             )
+
+    # ── Celery 异步任务队列 ──
+    CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
+    CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/0")
+    CELERY_ACCEPT_CONTENT = ["json"]
+    CELERY_RESULT_SERIALIZER = "json"
+    CELERY_TASK_SERIALIZER = "json"
+    CELERY_TIMEZONE = "Asia/Shanghai"
