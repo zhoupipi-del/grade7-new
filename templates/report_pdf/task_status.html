@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}PDF生成中 - 梨江中学{% endblock %}
+
+{% block extra_css %}
+<style>
+.progress-container {
+    max-width: 600px;
+    margin: 100px auto;
+    padding: 40px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    text-align: center;
+}
+.progress-title {
+    font-size: 24px;
+    font-weight: 600;
+    color: #1a237e;
+    margin-bottom: 30px;
+}
+.progress {
+    height: 30px;
+    margin-bottom: 20px;
+    border-radius: 15px;
+    overflow: hidden;
+}
+.progress-bar {
+    background: linear-gradient(90deg, #1a237e, #3949ab);
+    transition: width 0.5s ease;
+    font-size: 14px;
+    line-height: 30px;
+    color: #fff;
+}
+.status-text {
+    font-size: 16px;
+    color: #666;
+    margin-bottom: 20px;
+}
+.spinner {
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    border: 4px solid #e0e0e0;
+    border-top: 4px solid #1a237e;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+.btn-download {
+    display: none;
+    margin-top: 30px;
+    padding: 12px 40px;
+    background: #1a237e;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    text-decoration: none;
+}
+.btn-download:hover {
+    background: #3949ab;
+}
+.error-message {
+    display: none;
+    margin-top: 20px;
+    padding: 15px;
+    background: #ffebee;
+    color: #c62828;
+    border-radius: 8px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="progress-container">
+    <div class="progress-title">
+        <i class="bi bi-file-pdf text-danger"></i> PDF生成中
+    </div>
+    
+    <div class="spinner" id="spinner"></div>
+    
+    <div class="progress">
+        <div class="progress-bar" id="progress-bar" role="progressbar" style="width: 0%">0%</div>
+    </div>
+    
+    <div class="status-text" id="status-text">正在提交任务...</div>
+    
+    <a href="#" class="btn-download" id="download-btn" target="_blank">
+        <i class="bi bi-download"></i> 下载PDF
+    </a>
+    
+    <div class="error-message" id="error-message"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const taskId = "{{ task_id }}";
+let pollInterval;
+
+function updateProgress() {
+    fetch(`/report-pdf/task/${taskId}`, {
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        const progressBar = document.getElementById('progress-bar');
+        const statusText = document.getElementById('status-text');
+        const spinner = document.getElementById('spinner');
+        const downloadBtn = document.getElementById('download-btn');
+        const errorMessage = document.getElementById('error-message');
+        
+        // 更新进度条
+        if (data.percent >= 0) {
+            progressBar.style.width = data.percent + '%';
+            progressBar.textContent = data.percent + '%';
+        }
+        
+        // 更新状态文本
+        statusText.textContent = data.status;
+        
+        if (data.state === 'PENDING') {
+            statusText.textContent = '任务排队中...';
+        } else if (data.state === 'PROGRESS') {
+            spinner.style.display = 'block';
+        } else if (data.state === 'SUCCESS') {
+            // 成功
+            spinner.style.display = 'none';
+            progressBar.style.width = '100%';
+            progressBar.textContent = '100%';
+            statusText.textContent = 'PDF生成完成！';
+            downloadBtn.href = data.download_url;
+            downloadBtn.style.display = 'inline-block';
+            clearInterval(pollInterval);
+        } else if (data.state === 'FAILURE') {
+            // 失败
+            spinner.style.display = 'none';
+            errorMessage.textContent = data.status;
+            errorMessage.style.display = 'block';
+            clearInterval(pollInterval);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+    });
+}
+
+// 每3秒轮询一次
+pollInterval = setInterval(updateProgress, 3000);
+
+// 立即执行一次
+updateProgress();
+</script>
+{% endblock %}

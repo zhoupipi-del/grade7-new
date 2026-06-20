@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True)
-def generate_class_pdf_async(self, class_id, user_id=None):
+def generate_class_pdf_async(self, class_id, semester=None):
     """Async PDF generation task."""
     try:
         self.update_state(
@@ -33,7 +33,7 @@ def generate_class_pdf_async(self, class_id, user_id=None):
         with app.app_context():
             # Generate PDF
             # Returns: (pdf_bytes, filename)
-            pdf_bytes, filename = generate_class_reports_pdf(class_id, semester=None)
+            pdf_bytes, filename = generate_class_reports_pdf(class_id, semester)
             
             # Save to file
             output_dir = os.path.join(PROJECT_ROOT, 'static', 'pdf_exports')

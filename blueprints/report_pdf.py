@@ -5,7 +5,8 @@
 from io import BytesIO
 
 from flask import (
-    Blueprint, render_template, request, send_file, session, flash, redirect, url_for
+    Blueprint, render_template, request, send_file, session, flash, redirect, url_for,
+    jsonify
 )
 from models import Student
 
@@ -135,12 +136,12 @@ def student_report(student_id):
 @login_required
 @require_role("ms_admin", "grade_leader", "class_teacher", "teacher")
 def class_reports(class_id):
-    """下载全班学生的德育报告单合集 PDF
-
-    Query params:
-        semester: 学期（可选，默认自动推断当前学期）
+    """异步生成全班学生的德育报告单合集 PDF
+    
+    立即提交Celery任务，返回任务状态页面
     """
     from models import Class
+    from tasks import generate_class_pdf_async
 
     # 权限检查
     role = session.get("role", "")
@@ -163,19 +164,62 @@ def class_reports(class_id):
 
     semester = request.args.get("semester", None)
 
-    try:
-        from utils.pdf_utils import generate_class_reports_pdf
-        pdf_bytes, filename = generate_class_reports_pdf(class_id, semester)
-    except ValueError as e:
-        flash(str(e), "danger")
-        return redirect(request.referrer or url_for("class.student_list"))
-    except Exception as e:
-        flash(f"PDF 生成失败: {e}", "danger")
-        return redirect(request.referrer or url_for("class.student_list"))
+    # 提交Celery异步任务
+    task = generate_class_pdf_async.delay(class_id, semester)
+    
+    # 重定向到任务状态页面
+    flash("PDF生成任务已提交，请在下方页面查看进度", "info")
+    return redirect(url_for("report_pdf.task_status", task_id=task.id))
 
-    return send_file(
-        BytesIO(pdf_bytes),
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=filename,
-    )
+
+@report_pdf_bp.route("/task/<task_id>")
+@login_required
+def task_status(task_id):
+    """查询Celery任务状态（支持AJAX轮询）"""
+    from tasks import celery_app
+    from celery.result import AsyncResult
+    
+    task = AsyncResult(task_id, app=celery_app)
+    
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        # AJAX请求：返回JSON
+        if task.state == 'PENDING':
+            response = {
+                'state': task.state,
+                'status': '任务排队中...',
+                'percent': 0
+            }
+        elif task.state == 'PROGRESS':
+            response = {
+                'state': task.state,
+                'status': task.info.get('status', '正在生成...'),
+                'percent': task.info.get('percent', 50)
+            }
+        elif task.state == 'SUCCESS':
+            response = {
+                'state': task.state,
+                'status': '生成完成！',
+                'percent': 100,
+                'download_url': task.result.get('download_url')
+            }
+        else:  # FAILURE
+            response = {
+                'state': task.state,
+                'status': f"生成失败: {task.info}",
+                'percent': -1
+            }
+        return jsonify(response)
+    else:
+        # 普通请求：渲染状态页面
+        return render_template("report_pdf/task_status.html", task_id=task_id)
+
+
+@report_pdf_bp.route("/download/<filename>")
+@login_required
+def download(filename):
+    """下载已生成的PDF文件"""
+    import os
+    from flask import send_from_directory
+    
+    output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'pdf_exports')
+    return send_from_directory(output_dir, filename, as_attachment=True)
