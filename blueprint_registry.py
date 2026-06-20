@@ -39,10 +39,10 @@ from blueprints.ai_inference import bp as ai_inference_bp
 from blueprints.markov import bp as markov_bp
 from blueprints.fission import bp as fission_bp
 from blueprints.causal import causal_bp
-from blueprints.ms_flag_report import ms_flag_report_bp
-from blueprints.ai_prescription import ai_prescription_bp
+# from blueprints.ms_flag_report import ms_flag_report_bp  # 临时注释（文件未推送）
+# from blueprints.ai_prescription import ai_prescription_bp  # 临时注释（文件未推送）
 from blueprints.report_pdf import report_pdf_bp
-from blueprints.dashboard_teacher import dashboard_teacher_bp
+# from blueprints.dashboard_teacher import dashboard_teacher_bp  # 临时注释（文件未推送）
 
 # ── 所有蓝图注册表 ──
 # 格式: (blueprint, url_prefix, 说明)
@@ -57,7 +57,7 @@ BLUEPRINTS = [
     (miniapp_bp,   "/api/v1",    "小程序专用API"),
     (notices_bp,   "/notices",   "通知公告 — 发布通知/回执追踪"),
     (backup_bp,    "/backup",    "数据备份 — 备份/恢复/下载/删除"),
-    (ai_comment_bp, "/ai-comment", "AI评语引擎 — 期末评语(正式+AI生成)/增值评价(隐形好学生+温暖评语)"),
+    # (ai_comment_bp, "/ai-comment", "AI评语引擎 — 期末评语(正式+AI生成)/增值评价(隐形好学生+温暖评语)"),  # 临时注释（文件未推送）
     (parent_meeting_bp, "/parent-meeting", "家长会 — 创建/签到/统计/批量签到"),
     (scores_bp,    "/scores",     "成绩管理 — 考试/科目/成绩录入/排名/分析"),
     (home_visit_bp, "/home-visits", "家访记录 — 记录/筛选/导出"),
@@ -87,10 +87,10 @@ BLUEPRINTS = [
     (markov_bp,      "/api/markov", "数学学力事件视界 — Markov链状态转移/教学熔断预警"),
     (fission_bp,     "/api/fission", "群体违纪链式核裂变溯源引擎"),
     (causal_bp,      "/causal",      "因果链诊断 — 成绩下滑跨表归因/AI干预方案"),
-    (ms_flag_report_bp, "/ms/leaderboard", "流动红旗归档 — 物理快照/趋势分析/历史回溯"),
-    (ai_prescription_bp, "/ai-prescription", "AI德育大秘 — 班级月度德育处方/考前心理安抚话术"),
+    # (ms_flag_report_bp, "/ms/leaderboard", "流动红旗归档 — 物理快照/趋势分析/历史回溯"),  # 临时注释（文件未推送）
+    # (ai_prescription_bp, "/ai-prescription", "AI德育大秘 — 班级月度德育处方/考前心理安抚话术"),  # 临时注释（文件未推送）
     (report_pdf_bp, "/report-pdf", "德育报告单PDF — 单生报告(评语+成绩走势+五维雷达)/班级批量导出"),
-    (dashboard_teacher_bp, "/teacher", "班主任四维工作台 — 学业趋势/纪律红黄牌/考勤预警/心理风险雷达"),
+    # (dashboard_teacher_bp, "/teacher", "班主任四维工作台 — 学业趋势/纪律红黄牌/考勤预警/心理风险雷达"),  # 临时注释（文件未推送）
 ]
 
 
