@@ -18,13 +18,18 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL", "")
 
     # ── 连接池（Gunicorn --preload 模式必须配置）──
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        "pool_pre_ping": True,
-        "pool_recycle": 300,
-        "pool_size": 5,
-        "max_overflow": 10,
-        "pool_timeout": 30,
-    }
+    # 自适应：SQLite 不需要连接池参数
+    _uri = os.environ.get("DATABASE_URL", "")
+    if _uri.startswith("sqlite://"):
+        SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True, "pool_recycle": 300}
+    else:
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            "pool_pre_ping": True,
+            "pool_recycle": 300,
+            "pool_size": 5,
+            "max_overflow": 10,
+            "pool_timeout": 30,
+        }
 
     # ── Session / Cookie 安全 ──
     SESSION_COOKIE_HTTPONLY = True

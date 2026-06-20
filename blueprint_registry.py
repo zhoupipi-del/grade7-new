@@ -9,7 +9,7 @@ from blueprints.survey import survey_bp
 from blueprints.api_miniapp import miniapp_bp
 from blueprints.notices import notices_bp
 from blueprints.backup import backup_bp
-from blueprints.endterm_comment import endterm_comment_bp
+from blueprints.ai_comment import ai_comment_bp
 from blueprints.parent_meeting import parent_meeting_bp
 from blueprints.scores import scores_bp
 from blueprints.home_visit import home_visit_bp
@@ -38,8 +38,11 @@ from blueprints.comparison import comparison_bp
 from blueprints.ai_inference import bp as ai_inference_bp
 from blueprints.markov import bp as markov_bp
 from blueprints.fission import bp as fission_bp
-from blueprints.value_added import value_added_bp
 from blueprints.causal import causal_bp
+from blueprints.ms_flag_report import ms_flag_report_bp
+from blueprints.ai_prescription import ai_prescription_bp
+from blueprints.report_pdf import report_pdf_bp
+from blueprints.dashboard_teacher import dashboard_teacher_bp
 
 # ── 所有蓝图注册表 ──
 # 格式: (blueprint, url_prefix, 说明)
@@ -48,13 +51,13 @@ BLUEPRINTS = [
     (ms_bp,        "/ms",        "德育处工作台 — 规则配置/任务下发/问题学生建档/全校总览"),
     (grade_bp,     "/grade",     "年级组工作台 — 接收任务/分配班主任/年级数据/审批"),
     (class_bp,     "/class",     "班主任工作台 — 本班纪律/考勤/评分/重点关注/通知"),
-    (wings_bp,     "/wings",     "五翼评价 — 评分/勋章/档案/排名（跨角色共用）"),
+    (wings_bp,     "/wings",     "五翼→素质兼容重定向（Phase 3 合流，仅302跳转）"),
     (common_bp,    "/common",    "公共模块 — 消息中心/系统公告/文件上传"),
     (survey_bp,    "/survey",    "问卷与心理 — 心理筛查/家长问卷"),
     (miniapp_bp,   "/api/v1",    "小程序专用API"),
     (notices_bp,   "/notices",   "通知公告 — 发布通知/回执追踪"),
     (backup_bp,    "/backup",    "数据备份 — 备份/恢复/下载/删除"),
-    (endterm_comment_bp, "/endterm-comment", "期末评语 — 撰写/批量录入/查看/导出"),
+    (ai_comment_bp, "/ai-comment", "AI评语引擎 — 期末评语(正式+AI生成)/增值评价(隐形好学生+温暖评语)"),
     (parent_meeting_bp, "/parent-meeting", "家长会 — 创建/签到/统计/批量签到"),
     (scores_bp,    "/scores",     "成绩管理 — 考试/科目/成绩录入/排名/分析"),
     (home_visit_bp, "/home-visits", "家访记录 — 记录/筛选/导出"),
@@ -83,8 +86,11 @@ BLUEPRINTS = [
     (ai_inference_bp, "/ai-api", "AI 线上推理 — 学生风险实时预测 API"),
     (markov_bp,      "/api/markov", "数学学力事件视界 — Markov链状态转移/教学熔断预警"),
     (fission_bp,     "/api/fission", "群体违纪链式核裂变溯源引擎"),
-    (value_added_bp, "/value-added", "增值评价 — AI识别隐形好学生/温暖评语"),
     (causal_bp,      "/causal",      "因果链诊断 — 成绩下滑跨表归因/AI干预方案"),
+    (ms_flag_report_bp, "/ms/leaderboard", "流动红旗归档 — 物理快照/趋势分析/历史回溯"),
+    (ai_prescription_bp, "/ai-prescription", "AI德育大秘 — 班级月度德育处方/考前心理安抚话术"),
+    (report_pdf_bp, "/report-pdf", "德育报告单PDF — 单生报告(评语+成绩走势+五维雷达)/班级批量导出"),
+    (dashboard_teacher_bp, "/teacher", "班主任四维工作台 — 学业趋势/纪律红黄牌/考勤预警/心理风险雷达"),
 ]
 
 

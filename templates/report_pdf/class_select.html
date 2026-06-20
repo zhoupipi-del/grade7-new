@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}批量导出德育报告单 - 梨江中学{% endblock %}
+
+{% block extra_css %}
+<style>
+  .select-card {
+    cursor: pointer; transition: all 0.2s;
+    border: 2px solid #e0e0e0; border-radius: 12px;
+    padding: 20px 24px; margin-bottom: 12px;
+    background: #fff; text-decoration: none; color: inherit; display: block;
+  }
+  .select-card:hover {
+    border-color: #1a237e; background: #f5f5ff;
+    transform: translateY(-2px); box-shadow: 0 4px 12px rgba(26,35,126,0.1);
+  }
+  .select-card .class-name { font-size: 18px; font-weight: 600; color: #1a237e; }
+  .select-card .class-info { font-size: 13px; color: #888; margin-top: 4px; }
+  .select-card .bi { font-size: 28px; color: #c41e3a; margin-right: 12px; }
+  .grade-section { margin-bottom: 32px; }
+  .grade-section .grade-title {
+    font-size: 16px; font-weight: 600; color: #333;
+    padding-bottom: 8px; border-bottom: 2px solid #1a237e; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .student-count { font-size: 12px; color: #1a237e; background: #e8eaf6; padding: 2px 10px; border-radius: 10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="mb-4">
+    <h4><i class="bi bi-file-pdf text-danger"></i> 批量导出德育报告单</h4>
+    <p class="text-muted">选择班级，一键生成全班学生的德育综合素质报告单（含AI评语 + 成绩走势图 + 五维雷达图）</p>
+  </div>
+
+  {% if classes %}
+    {% set grouped = {} %}
+    {% for cls in classes %}
+      {% set _ = grouped.setdefault(cls.grade_id, []).append(cls) %}
+    {% endfor %}
+
+    {% for grade_id_key, cls_list in grouped.items() %}
+      <div class="grade-section">
+        <div class="grade-title">
+          <i class="bi bi-building"></i>
+          {% set first_cls = cls_list[0] %}
+          {% for g in grades if g.id == grade_id_key %}
+            {{ g.name }}
+          {% endfor %}
+          <span class="student-count">
+            {% set total = namespace(val=0) %}
+            {% for c in cls_list %}
+              {% set total.val = total.val + (student_count_map.get(c.id, 0)) %}
+            {% endfor %}
+            {{ cls_list | length }} 个班级 · {{ total.val }} 名学生
+          </span>
+        </div>
+        <div class="row">
+          {% for cls in cls_list %}
+            <div class="col-md-4 col-lg-3">
+              <a href="{{ url_for('report_pdf.class_reports', class_id=cls.id) }}"
+                 class="select-card d-flex align-items-center">
+                <i class="bi bi-file-pdf"></i>
+                <div>
+                  <div class="class-name">{{ cls.name }}</div>
+                  <div class="class-info">
+                    班主任: {{ cls.teacher.display_name if cls.teacher else '未分配' }}
+                    &nbsp;·&nbsp; {{ student_count_map.get(cls.id, 0) }} 名学生
+                  </div>
+                </div>
+              </a>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="text-center py-5 text-muted">
+      <i class="bi bi-inbox" style="font-size:48px"></i>
+      <p class="mt-3">暂无可导出的班级</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
