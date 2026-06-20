@@ -26,7 +26,16 @@ def generate_class_pdf_async(self, class_id, semester=None):
         )
         
         # Lazy import (avoid import errors at startup)
-        from app import create_app
+        # 使用 importlib 显式导入 app.py，避免与 celery.app 包冲突
+        import importlib.util
+        import os
+        
+        app_path = os.path.join(PROJECT_ROOT, 'app.py')
+        app_spec = importlib.util.spec_from_file_location('app_module', app_path)
+        app_module = importlib.util.module_from_spec(app_spec)
+        app_spec.loader.exec_module(app_module)
+        create_app = app_module.create_app
+        
         from utils.pdf_utils import generate_class_reports_pdf
         
         # Create Flask app context (needed for Model.query)
