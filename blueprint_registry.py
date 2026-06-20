@@ -9,7 +9,7 @@ from blueprints.survey import survey_bp
 from blueprints.api_miniapp import miniapp_bp
 from blueprints.notices import notices_bp
 from blueprints.backup import backup_bp
-from blueprints.ai_comment import ai_comment_bp
+# from blueprints.ai_comment import ai_comment_bp  # 临时注释（文件未推送）
 from blueprints.parent_meeting import parent_meeting_bp
 from blueprints.scores import scores_bp
 from blueprints.home_visit import home_visit_bp
