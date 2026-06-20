@@ -77,12 +77,34 @@ for name, candidates in _FONT_CANDIDATES.items():
             break
 
 # ReportLab 字体注册
-for name, path in _FONT_PATHS.items():
-    if os.path.exists(path):
-        try:
-            pdfmetrics.registerFont(TTFont(name, path))
-        except Exception:
-            pass  # 已注册则跳过
+# 优先使用 TTF 字体，失败则使用内置 CID 字体（不需要外部文件）
+_font_registered = False
+
+def _ensure_chinese_font():
+    """确保中文支持已注册（TTF优先，CID字体兜底）"""
+    global _font_registered
+    if _font_registered:
+        return
+    
+    # 1. 尝试注册 TTF 字体
+    for name, path in _FONT_PATHS.items():
+        if os.path.exists(path):
+            try:
+                pdfmetrics.registerFont(TTFont(name, path))
+            except Exception:
+                pass
+    
+    # 2. 无论TTF是否成功，都注册内置CID中文字体（兜底）
+    try:
+        pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+        # 用CID字体覆盖常用名称，供样式表引用
+        # 这样即使TTF失败，中文也能正常显示
+        _FONT_PATHS['STSong'] = '__cid__'
+    except Exception as e:
+        print(f"警告：无法注册CID中文字体: {e}")
+    
+    _font_registered = True
+
 
 # matplotlib 中文字体
 _matplotlib_setup_done = False
@@ -93,7 +115,7 @@ def _setup_matplotlib_chinese():
     if _matplotlib_setup_done:
         return
     for name, path in _FONT_PATHS.items():
-        if os.path.exists(path):
+        if path != '__cid__' and os.path.exists(path):
             try:
                 fm.fontManager.addfont(path)
             except Exception:
@@ -474,11 +496,18 @@ def _init_styles():
     global _styles_initialized
     if _styles_initialized:
         return
-
-    # ReportLab 字体选择（按优先级：SimHei/SimSun > WenQuanYi > NotoSansCJK > Helvetica）
+    
+    # 确保中文字体已注册
+    _ensure_chinese_font()
+    
+    # ReportLab 字体选择（按优先级：TTF > CID内置中文字体 > Helvetica）
     _registered = set(pdfmetrics._fonts.keys()) if hasattr(pdfmetrics, '_fonts') else set()
+    
+    # 标题字体优先级: SimHei > STSong-Light > Helvetica-Bold
     if "SimHei" in _registered:
         font_title = "SimHei"
+    elif "STSong-Light" in _registered:
+        font_title = "STSong-Light"
     elif "WenQuanYi" in _registered:
         font_title = "WenQuanYi"
     elif "NotoSansCJK" in _registered:
@@ -486,8 +515,11 @@ def _init_styles():
     else:
         font_title = "Helvetica-Bold"
 
+    # 正文字体优先级: SimSun > STSong-Light > Helvetica
     if "SimSun" in _registered:
         font_body = "SimSun"
+    elif "STSong-Light" in _registered:
+        font_body = "STSong-Light"
     elif "WenQuanYi" in _registered:
         font_body = "WenQuanYi"
     elif "NotoSansCJK" in _registered:
@@ -495,8 +527,11 @@ def _init_styles():
     else:
         font_body = "Helvetica"
 
+    # 楷体（评语用）优先级: SimKai > STSong-Light > 正文字体
     if "SimKai" in _registered:
         font_kai = "SimKai"
+    elif "STSong-Light" in _registered:
+        font_kai = "STSong-Light"
     else:
         font_kai = font_body  # 无楷体时回退到正文字体
 
