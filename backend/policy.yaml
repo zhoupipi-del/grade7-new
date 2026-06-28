@@ -1,0 +1,267 @@
+# =============================================================================
+# policy.yaml — 梨江中学德育评价"数字宪法"
+# 版本: 2.0.0 | 生效日期: 2026-07-01
+# Policy as Code: 修改此文件即可调整政策，无需触碰 Python 代码
+# =============================================================================
+
+policy_engine:
+  version: "2.0.0"
+  description: "梨江中学德育无因次评价政策引擎 — 双模态基准 + 分层审批 + 幂律回血"
+
+  # ==========================================================================
+  # 一、归一化管道 — 5步无因次评价
+  # ==========================================================================
+  normalization:
+    dimensions:
+      academic_moral:
+        label: "学业品德"
+        weight: 0.35
+        sub_dimensions:
+          - code: classroom_discipline
+            label: "课堂纪律"
+            weight: 0.40
+            source_events: [behavior_record]
+          - code: homework_ethics
+            label: "作业诚信"
+            weight: 0.30
+            source_events: [behavior_record, score_log]
+          - code: peer_conduct
+            label: "同伴行为"
+            weight: 0.30
+            source_events: [behavior_record]
+
+      discipline:
+        label: "纪律处分"
+        weight: 0.30
+        sub_dimensions:
+          - code: sanction_level
+            label: "处分等级"
+            weight: 0.60
+            source_events: [discipline_sanction]
+          - code: violation_frequency
+            label: "违纪频次"
+            weight: 0.40
+            source_events: [behavior_record]
+
+      attendance:
+        label: "考勤表现"
+        weight: 0.20
+        sub_dimensions:
+          - code: absence_rate
+            label: "缺勤率"
+            weight: 0.50
+            source_events: [attendance_record]
+          - code: lateness_rate
+            label: "迟到率"
+            weight: 0.50
+            source_events: [attendance_record]
+
+      activity:
+        label: "活动参与"
+        weight: 0.15
+        sub_dimensions:
+          - code: participation
+            label: "参与度"
+            weight: 1.0
+            source_events: [score_log]
+
+    # 双模态滚动基准（总指挥决策1）
+    baseline:
+      short_window:
+        days: 30
+        label: "短周期基准"
+        purpose: "即时性增长向量的动态分母 — 捕捉阶段性冲刺"
+      long_window:
+        start_anchor: "semester_start"
+        label: "长周期基准"
+        purpose: "Winsorized稳定性参考 — 拉平极端个体影响"
+
+    winsorizing:
+      enabled: true
+      clip_sigma: 2.0
+      reference_window: "long"
+
+    softmax:
+      temperature: 1.0
+      min_samples_for_normalization: 10
+
+    growth_vector:
+      enabled: true
+      comparison_window_days: 7
+
+  # ==========================================================================
+  # 二、审批路由 — 分层串并行混合（总指挥决策2）
+  # ==========================================================================
+  approval_routing:
+    rules:
+      # 日常行为 — 并行OR：班主任或德育干事任一方确认即生效
+      - event_types:
+          - lateness
+          - absence
+          - good_job
+        severity: "minor"
+        mode: "parallel_or"
+        approvers:
+          - role: "class_teacher"
+            label: "班主任"
+          - role: "moral_education_staff"
+            label: "德育干事"
+        auto_approve_if_creator: false
+        timeout_hours: 48
+
+      # 严重违纪 — 串行AND：班主任→级组长→德育处长
+      - event_types:
+          - fighting
+          - smoking
+        severity: "major"
+        mode: "serial_and"
+        chain:
+          - role: "class_teacher"
+            label: "班主任"
+            timeout_hours: 24
+          - role: "grade_leader"
+            label: "年级组长"
+            timeout_hours: 48
+          - role: "dean"
+            label: "德育处长"
+            timeout_hours: 72
+        escalation_on_timeout: "auto_approve"
+
+      # 重大处分 — 串行AND+升级：班主任→级组长→德育处长→校长
+      - event_types:
+          - cheating
+          - academic_dishonesty
+        severity: "critical"
+        mode: "serial_and"
+        chain:
+          - role: "class_teacher"
+            label: "班主任"
+            timeout_hours: 12
+          - role: "grade_leader"
+            label: "年级组长"
+            timeout_hours: 24
+          - role: "dean"
+            label: "德育处长"
+            timeout_hours: 48
+          - role: "principal"
+            label: "校长"
+            timeout_hours: 72
+        escalation_on_timeout: "escalate"
+
+    # 兜底规则
+    default_rule:
+      mode: "parallel_or"
+      approvers:
+        - role: "class_teacher"
+          label: "班主任"
+
+  # ==========================================================================
+  # 三、回血衰减模型 — 幂律衰减（总指挥决策3）
+  # ==========================================================================
+  recovery_model:
+    type: "power_law"
+    parameters:
+      k: 0.5                      # 幂律指数
+      min_observation_days: 7         # 最短观察期（7天内不回血）
+      max_recovery_ratio: 0.85       # 最大回血比例（永不完全消除）
+      half_life_indicator: 30        # 半衰参考：约30天恢复一半
+
+    per_severity:
+      warning:
+        recovery_enabled: true
+        tag_on_apply: "repairable"
+        tag_on_full_recovery: "recovered"
+
+      serious_warning:
+        recovery_enabled: true
+        tag_on_apply: "repairable"
+        tag_on_full_recovery: "recovered"
+        k_override: 0.7             # 严重警告回血更慢
+        min_observation_days_override: 14
+
+      demerit:
+        recovery_enabled: true
+        tag_on_apply: "repairable"
+        tag_on_full_recovery: "recovered"
+        k_override: 1.0
+        min_observation_days_override: 30
+
+      probation:
+        recovery_enabled: false
+        tag_on_apply: "non_repairable"
+
+      expulsion:
+        recovery_enabled: false
+        tag_on_apply: "permanent"
+
+    # 三通道回血
+    channels:
+      - code: "revocation"
+        label: "撤销回血"
+        trigger: "sanction_revoked"
+        recovery_ratio: 1.0   # 100%回血
+
+      - code: "behavioral"
+        label: "行为回血"
+        trigger: "positive_behavior_streak"
+        streak_days: 14
+        recovery_ratio: 0.05  # 每连续14天回血5%
+
+      - code: "temporal"
+        label: "时间回血"
+        trigger: "time_elapsed"
+        # 参数由 parameters.k 控制
+
+  # ==========================================================================
+  # 四、事件分类映射表（运营级热调整）
+  # ==========================================================================
+  event_classification:
+    behavior_types:
+      fighting:
+        severity: "major"
+        dimension: "discipline"
+        sub_dimension: "violation_frequency"
+        base_penalty: 15
+        weight_multiplier: 2.0
+
+      smoking:
+        severity: "major"
+        dimension: "discipline"
+        sub_dimension: "violation_frequency"
+        base_penalty: 10
+        weight_multiplier: 1.5
+
+      cheating:
+        severity: "critical"
+        dimension: "academic_moral"
+        sub_dimension: "homework_ethics"
+        base_penalty: 20
+        weight_multiplier: 2.5
+
+      lateness:
+        severity: "minor"
+        dimension: "attendance"
+        sub_dimension: "lateness_rate"
+        base_penalty: 3
+        weight_multiplier: 1.0
+
+      absence:
+        severity: "minor"
+        dimension: "attendance"
+        sub_dimension: "absence_rate"
+        base_penalty: 5
+        weight_multiplier: 1.0
+
+      good_job:
+        severity: "minor"
+        dimension: "academic_moral"
+        sub_dimension: "classroom_discipline"
+        base_penalty: -5     # 负值 = 加分
+        weight_multiplier: 1.0
+
+    default_mapping:
+      dimension: "academic_moral"
+      sub_dimension: "classroom_discipline"
+      severity: "minor"
+      base_penalty: 5
+      weight_multiplier: 1.0
