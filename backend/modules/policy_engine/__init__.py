@@ -6,7 +6,7 @@ Policy as Code: 改 YAML 即改政策，零代码变更。
 """
 from __future__ import annotations
 
-import logging
+import structlog
 from typing import Optional
 
 from .config import PolicyConfig
@@ -22,7 +22,22 @@ from .normalizer import NormalizationPipeline
 from .recovery import RecoveryCalculator
 from .router import ApprovalRouter
 
-logger = logging.getLogger("policy_engine")
+logger = structlog.get_logger("policy_engine")
+
+# ── 模块级单例 ──
+_engine_instance: Optional["PolicyEngine"] = None
+
+
+def set_engine(engine: "PolicyEngine") -> None:
+    """启动时注入 PolicyEngine 单例（app.py lifespan 调用）"""
+    global _engine_instance
+    _engine_instance = engine
+    logger.info("policy_engine.singleton_set", version=engine.config.version)
+
+
+def get_engine() -> Optional["PolicyEngine"]:
+    """获取 PolicyEngine 单例（Service 层 Hook 调用）"""
+    return _engine_instance
 
 
 class PolicyEngine:

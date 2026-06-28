@@ -163,6 +163,18 @@ async def lifespan(app: FastAPI):
             logger.error(f"模块加载异常: {e}", exc_info=True)
 
     logger.info("Wings 3.0 全部引擎就绪 ✓")
+
+    # 6. PolicyEngine 启动注入 — 数字宪法加载
+    try:
+        from modules.policy_engine import PolicyEngine, set_engine
+        policy_yaml_path = str(BACKEND_DIR / "policy.yaml")
+        pe = PolicyEngine.from_yaml(policy_yaml_path)
+        set_engine(pe)
+        app.state.policy_engine = pe
+        logger.info(f"PolicyEngine 数字宪法已加载: {policy_yaml_path}")
+    except Exception as e:
+        logger.error(f"PolicyEngine 加载失败(降级模式，Hook将跳过): {e}", exc_info=True)
+
     logger.info("═" * 50)
 
     yield  # ← 应用运行中
@@ -417,6 +429,19 @@ app.include_router(core_router)
 # ═══════════════════════════════════════════════════════════════
 # 全局异常处理
 # ═══════════════════════════════════════════════════════════════
+
+# 模块领域异常的顶层导入（供全局异常处理器使用）
+from modules.attendance.exceptions import AttendanceError
+
+
+@app.exception_handler(AttendanceError)
+async def attendance_global_handler(request: Request, exc: AttendanceError):
+    """AttendanceError → HTTP 统一翻译器（覆盖所有模块）"""
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={"detail": str(exc)},
+    )
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

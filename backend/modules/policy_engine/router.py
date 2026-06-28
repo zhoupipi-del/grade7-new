@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-import logging
+import structlog
 
 from .config import ApprovalRoutingConfig, ApprovalRule
 from .models import ApprovalChain, ApprovalNode, ApprovalAction
 
-logger = logging.getLogger("policy_engine.router")
+logger = structlog.get_logger("policy_engine.router")
 
 
 class ApprovalRouter:

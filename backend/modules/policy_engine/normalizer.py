@@ -15,7 +15,7 @@ import math
 from datetime import date, datetime
 from typing import Optional
 
-import logging
+import structlog
 
 from .config import NormalizationConfig, PolicyConfig
 from .models import (
@@ -27,7 +27,7 @@ from .models import (
     ScoreSnapshot,
 )
 
-logger = logging.getLogger("policy_engine.normalizer")
+logger = structlog.get_logger("policy_engine.normalizer")
 
 
 class NormalizationPipeline:
