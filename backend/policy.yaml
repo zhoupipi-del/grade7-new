@@ -1,12 +1,16 @@
 # =============================================================================
 # policy.yaml — 梨江中学德育评价"数字宪法"
-# 版本: 2.0.0 | 生效日期: 2026-07-01
+# 版本: 2.3.0 | 生效日期: 2026-07-07
 # Policy as Code: 修改此文件即可调整政策，无需触碰 Python 代码
+#
+# v2.3.0: 心理×RDI 四维桥接 — 权重四维重组 + 3σ 一票否决互锁 + 30天大退潮保护
+# v2.2.0: 风险预警权重调优 (ω₁↑ ω₂↓) + 考勤高敏感抑制 + PenaltyExplainer 文本模板
+# v2.1.0: 风险预警雷达 (risk_warning) + 判罚透明化引擎 (penalty_explanation)
 # =============================================================================
 
 policy_engine:
-  version: "2.0.0"
-  description: "梨江中学德育无因次评价政策引擎 — 双模态基准 + 分层审批 + 幂律回血"
+  version: "2.3.0"
+  description: "梨江中学德育无因次评价政策引擎 — 双模态基准 + 分层审批 + 幂律回血 + 四维风险预警雷达"
 
   # ==========================================================================
   # 一、归一化管道 — 5步无因次评价
@@ -265,3 +269,245 @@ policy_engine:
       severity: "minor"
       base_penalty: 5
       weight_multiplier: 1.0
+
+  # ==========================================================================
+  # 五、四维风险预警雷达 — SPC 统计过程控制 (v2.3.0 四维升级)
+  # ==========================================================================
+  risk_warning:
+    enabled: true
+    description: "基于 SPC + Z-Score 离群检测的四维 RDI 预警系统 (behavior + attendance + score + psych)"
+
+    # ── v2.3.0: 四维权重重组 ──
+    # 总指挥决策: 引入心理维度后权重重组
+    # behavior: 0.55→0.45 (下降10pp，让出空间给psych)
+    # attendance: 0.15 (不变)
+    # score: 0.30→0.20 (下降10pp，让出空间给psych)
+    # psych: ↑0.20 (新增，极端维度驱动模型)
+    #
+    # 解释: 心理学研究表明，心理健康问题常为师生产生行为异常的根本原因
+    # 通过引入 psych 维度，我们不再仅仅追逐行为的表象，而是深入到心灵的根源
+    rdi_weights:
+      behavior: 0.45      # 行为维度权重 (v2.3.0: 0.55→0.45)
+      attendance: 0.15    # 考勤维度权重 (不变，避免数据稀疏误报)
+      score: 0.20         # 评价维度权重 (v2.3.0: 0.30→0.20)
+      psych: 0.20         # 心理维度权重 (v2.3.0: 新增，极端维度驱动模型)
+
+    # ── 心理维度计算引擎 (v2.3.0 新增) ──
+    psych_calculation:
+      enabled: true
+      description: "极端维度驱动模型: Psych Deviation = α·Z_total + (1-α)·max(Z_dim1...dim10)"
+      alpha: 0.6            # 总体Z权重: Z_total 占 60%
+      max_dim_weight: 0.4   # 极端维度权重: max(Z_dim1...dim10) 占 40%
+      min_z_for_max_dim: 2.0  # 极端维度判定阈值: 至少 Z >= 2.0 才被认定为"驱动维度"
+      dimension_keys:       # 参与计算的10维标准Key
+        - obsessive_compulsive_score
+        - paranoid_score
+        - hostility_score
+        - interpersonal_sensitivity_score
+        - depression_score
+        - anxiety_score
+        - learning_pressure_score
+        - maladjustment_score
+        - emotional_imbalance_score
+        - psychological_imbalance_score
+      source_table: "psych_surveys"       # 数据源: 心理问卷原始数据
+      source_column: "dimension_scores"   # JSON 字段: 10维标准分数
+      baseline_type: "psych"             # 基线类型: risk_baselines.baseline_type='psych'
+
+    # ── v2.3.0: 一票否决强触发互锁 ──
+    # 总指挥决策: 当某个单维度 Z-Score 超过绝对阈值 (3σ) 时，
+    # 无论其他三维表现如何，直接挂红灯 (intervention)，与处分一票否决并列互锁
+    veto_trigger:
+      enabled: true
+      description: "3σ 一票否决强触发互锁 — 单项维度极端偏离直接红灯"
+      absolute_threshold: 3.0            # 绝对阈值 (σ): 超过此值触发一票否决
+      applies_to_dimensions:             # 适用维度 (全部4维)
+        - behavior
+        - attendance
+        - score
+        - psych
+      psych_sub_dimension_veto: true     # 心理子维度一票否决 (如 depression_score 单项 > 3σ)
+      interlock_with_discipline: true    # 与处分一票否决并列互锁
+      effect: "override_rdi"             # 触发效果: override_rdi (直接挂红灯，忽略加权RDI)
+
+    # ── v2.3.0: 大退潮保护 ──
+    # 总指挥决策: 权重重组后，原有红灯学生可能因 Behavior 权重 0.55→0.45
+    # 而静默熄灭。30天大退潮保护期防止此情况
+    backslide_protection:
+      enabled: true
+      description: "权重重组后30天大退潮保护 — 防止已有红灯因权重变更静默熄灭"
+      window_days: 30                   # 保护窗口天数: 从 policy 生效日起 30 天
+      effective_from: "2026-07-07"      # 政策生效日
+      protected_risk_levels:            # 受保护的历史风险等级
+        - intervention                  # 红灯 (intervention) 在大退潮保护期内不可降为 attention
+      min_rdi_during_protection: 1.5    # 保护期内维持的最低 RDI (即使实际计算 < 1.5)
+      auto_resolve_after_window: true   # 保护期满后自动由引擎重新判定
+
+    # 三级预警阈值 (Z-Score)
+    risk_levels:
+      normal:
+        max_rdi: 1.0
+        label: "🟢 正常"
+        description: "风险偏离在安全范围内，无需干预"
+      attention:
+        min_rdi: 1.0
+        max_rdi: 2.0
+        label: "🟡 关注"
+        description: "轻度偏离，建议班主任谈心提醒"
+      intervention:
+        min_rdi: 2.0
+        label: "🔴 干预"
+        description: "严重偏离，需级组长介入 + 行为矫正方案"
+
+    # 预警抑制阈值 (防止预警疲劳)
+    warning_suppression:
+      enabled: true
+      min_rdi_to_warn: 1.0               # RDI < 1.0 不生成预警
+      max_warnings_per_day: 3            # 每教师每天最多推送 3 条预警 (总指挥调整：保证关注质量)
+      suppress_repeated_warnings: true   # 同学生重复预警抑制
+      repeated_warning_cooldown_hours: 48  # 48小时内不重复预警
+
+      # v2.2.0 新增: 考勤高敏感抑制模式
+      # 当某个班级/年级出现大量考勤异常时 (集体活动/恶劣天气)，
+      # 自动抑制该班级/年级的考勤维度预警，防止 Dashboard 被淹没
+      attendance_suppression:
+        enabled: true
+        mode: "high_sensitivity"          # 高敏感模式: 低阈值触发抑制
+        class_outlier_threshold: 0.20     # 班级迟到率超过 20% 视为集体异常
+        grade_outlier_threshold: 0.15     # 年级迟到率超过 15% 视为集体异常
+        suppression_ratio: 0.80           # 抑制比例: 删除 80% 的考勤预警
+        cooldown_hours: 24                # 抑制冷却期: 24h 后恢复正常
+        exceptions:                       # 不抑制的例外
+          - "consecutive_absence_gt_3"    # 连续缺勤 >3 天 (个人真实问题)
+          - "truancy"                     # 旷课 (非集体事件)
+
+    # 推荐处置动作
+    configured_actions:
+      attention_stable: "monitor"
+      attention_escalating: "heart_to_heart"
+      intervention: "intervention_plan"
+      psych_veto_action: "psych_intervention"  # v2.3.0: 心理一票否决专属处置动作
+
+    # EWMA 参数
+    ewma:
+      lambda: 0.3          # 平滑系数 (0<λ≤1, 越小越平滑)
+      escalation_threshold: 3  # 连续3个点上升判定为 escalation
+
+    # 滑动窗口配置
+    sliding_windows:
+      short: 7             # 短窗口 (天)
+      medium: 30           # 中窗口 (天)
+      long: 90             # 长窗口 (天)
+
+  # ==========================================================================
+  # 六、判罚透明化引擎 — 可解释性审计报告 (Phase 2 新增, v2.3.0 兼容)
+  # ==========================================================================
+  penalty_explanation:
+    enabled: true
+    description: "生成判罚透明度报告，解决家长质疑公平性痛点"
+
+    # 报告模板
+    report_template:
+      sections:
+        - "event_description"       # 事件描述
+        - "rule_citation"           # 规则引用 (校规条文)
+        - "penalty_calculation"     # 扣分计算逻辑
+        - "historical_context"      # 历史类似案例
+        - "recovery_path"           # 回血路径说明
+
+    # 校规解析 (PDF/Word/Markdown)
+    school_regulations:
+      source_type: "markdown"       # pdf/word/markdown
+      source_path: "docs/school_regulations.md"
+      auto_parse: true              # 自动切片 + 向量化
+
+    # 历史案例分布可视化
+    distribution_visualizer:
+      enabled: true
+      show_percentile: true         # 显示学生扣分在年级百分位数
+      show_similar_cases: 5         # 展示最近5个类似案例
+
+    # 推送配置
+    delivery:
+      to_parent: true               # 推送给家长
+      to_student: false             # 不推送给学生 (由家长转达)
+      delivery_method: "in_app"     # in_app / sms / email
+
+    # v2.3.0 新增: PenaltyExplainer 文本模板 (支持 Z-Score 量化)
+    # 语气规范: 必须使用"建议性"语气，禁止"指令性"语气
+    # 模板变量: {student_name}, {event_type}, {rdi_score}, {risk_level}, {dimension}, {recommended_action}, {z_score}, {percentile}, {baseline_mean}
+    text_templates:
+      tone_guideline: "建议性"       # 全局语气约束: 建议性/中性/严肃
+      prohibited_phrases:           # 禁止用语
+        - "必须"
+        - "立即"
+        - "强制"
+        - "要求"
+        - "责令"
+
+      attention:
+        label: "🟡 轻度关注"
+        template: >
+          我们发现 {student_name} 同学近期在 {dimension} 维度的表现出现了轻微波动
+          (RDI={rdi_score})。相比全校水平，行为偏差 Z={z_score}，处于第 {percentile}
+          百分位，目前仍处于正常范围的边界。建议班主任在方便的时候与孩子进行一次轻松的
+          谈心，了解近期的学习生活状态，或许可以帮助孩子获得更好的体验。
+        tone: "温和提醒"
+        suggested_actions:
+          - "建议与孩子轻松谈心，了解近期状态"
+          - "无需特殊干预，保持观察即可"
+          - "建议关注孩子在校情绪变化"
+
+      attention_escalating:
+        label: "🟡 持续关注 (上升趋势)"
+        template: >
+          我们注意到 {student_name} 同学在 {dimension} 维度的风险指标出现了持续
+          上升的趋势 (RDI={rdi_score})。相比全校水平，行为偏差 Z={z_score}，处于
+          第 {percentile} 百分位。建议班主任酌情安排一次一对一的谈心交流，
+          侧重倾听和心理疏导而非批评教育。也建议关注孩子在同伴关系和学习动力方面
+          可能存在的困难，给予适当的支持和鼓励。
+        tone: "建议性关注"
+        suggested_actions:
+          - "建议班主任一对一谈心，侧重倾听"
+          - "建议关注同伴关系和学习动力变化"
+          - "可考虑联系家长，以合作方式共同支持"
+
+      intervention:
+        label: "🔴 需要干预"
+        template: >
+          {student_name} 同学在 {dimension} 维度的表现出现了较为明显的偏离
+          (RDI={rdi_score})。相比全校水平，行为偏差 Z={z_score}，处于第 {percentile}
+          百分位，已触发三级预警中的最高级别。建议年级组长与班主任共同制定一份
+          个性化的行为矫正方案，同时建议通知家长参与协同支持。
+          我们理解每个孩子都有自己独特的成长节奏，理性看待数据波动，
+          建议侧重正向引导而非单一惩戒。
+        tone: "建议性干预"
+        suggested_actions:
+          - "建议年级组长与班主任共同制定行为矫正方案"
+          - "建议通知家长，建立家校协同支持机制"
+          - "建议侧重正向引导，配合 AI 处方模块推荐策略"
+
+      # v2.3.0 新增: 心理隐患干预模板
+      psych_intervention:
+        label: "🔴 心理隐患预警"
+        template: >
+          {student_name} 同学在心理筛查中 {veto_dimension_cn} 维度的表现出现了
+          较为明显的偏离 (Z={psych_deviation})，已触发 RDI 预警系统的最高级别。
+          心理健康的波动可能是学生行为异常的根本原因。建议年级组长与心理辅导老师
+          共同关注，优先进行温和的心理沟通而非直接纪律干预。
+          我们理解每个孩子都有自己独特的成长节奏，理性看待数据波动，
+          建议侧重心理关怀和正向支持。
+        tone: "建议性心理关怀"
+        suggested_actions:
+          - "建议心理辅导老师进行一对一心理评估"
+          - "建议班主任关注学生情绪状态和同伴关系"
+          - "必要时与家长沟通，建议寻求专业心理咨询"
+          - "不建议直接施加纪律处分"
+
+      suppression_explanation:
+        label: "预警已抑制"
+        template: >
+          由于 {suppression_reason}，系统自动暂缓了本次预警推送。
+          这不代表 {student_name} 同学没有问题，只是系统为避免预警疲劳
+          而做出的保护性决策。建议在 {cooldown_hours} 小时后重新评估。
+        tone: "解释性"

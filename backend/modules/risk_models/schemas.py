@@ -1,13 +1,152 @@
 """
-modules/risk_models/schemas.py — 风险预警雷达 Pydantic 数据模型
+modules/risk_models/schemas.py — 风险预警雷达 Pydantic 数据模型 (v3.1 四维版本)
+
+v3.1 新增:
+  - DimensionScores: 10维英文标准Key Pydantic v2 强校验模型
+  - PsychSurveyOut / MentalHealthAssessmentOut / PsychCrossAnalysisOut
+  - RiskWarningOut / MonitorStudentCard / RDICalculateResponse 升级为四维
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime, date
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
-# ── 风险预警 ──
+# =============================================================================
+# v3.1 核心: 10维心理标准Key Pydantic v2 强校验模型
+# =============================================================================
+
+# 10维标准Key定义 (ETL v3.1 已标准化，100% 英文Key)
+DIMENSION_KEYS = {
+    "obsessive_compulsive_score":     "强迫症状",
+    "paranoid_score":                 "偏执",
+    "hostility_score":                "敌对",
+    "interpersonal_sensitivity_score": "人际敏感",
+    "depression_score":               "抑郁",
+    "anxiety_score":                  "焦虑",
+    "learning_pressure_score":        "学习压力",
+    "maladjustment_score":            "适应不良",
+    "emotional_imbalance_score":      "情绪不平衡",
+    "psychological_imbalance_score":  "心理不平衡",
+}
+
+
+class DimensionScores(BaseModel):
+    """
+    10维心理标准分数 Pydantic v2 强校验模型
+
+    类型约束: 每维 Float, 边界 [-5.0, 10.0]
+    逻辑约束: 所有字段必须为 10 维标准英文 Key
+    序列化仅允许 10 个字段，拒绝任意额外字段
+    """
+    obsessive_compulsive_score:     Optional[float] = Field(None, ge=-5.0, le=10.0, description="强迫症状")
+    paranoid_score:                 Optional[float] = Field(None, ge=-5.0, le=10.0, description="偏执")
+    hostility_score:                Optional[float] = Field(None, ge=-5.0, le=10.0, description="敌对")
+    interpersonal_sensitivity_score: Optional[float] = Field(None, ge=-5.0, le=10.0, description="人际敏感")
+    depression_score:               Optional[float] = Field(None, ge=-5.0, le=10.0, description="抑郁")
+    anxiety_score:                  Optional[float] = Field(None, ge=-5.0, le=10.0, description="焦虑")
+    learning_pressure_score:        Optional[float] = Field(None, ge=-5.0, le=10.0, description="学习压力")
+    maladjustment_score:            Optional[float] = Field(None, ge=-5.0, le=10.0, description="适应不良")
+    emotional_imbalance_score:      Optional[float] = Field(None, ge=-5.0, le=10.0, description="情绪不平衡")
+    psychological_imbalance_score:  Optional[float] = Field(None, ge=-5.0, le=10.0, description="心理不平衡")
+
+    model_config = {"extra": "forbid"}  # 拒绝任意额外字段
+
+    @classmethod
+    def all_dimension_keys(cls) -> List[str]:
+        """返回10维标准Key列表"""
+        return list(cls.model_fields.keys())
+
+    @classmethod
+    def max_dimension(cls, scores: dict) -> tuple:
+        """
+        极端维度驱动: 返回偏离分数最大的维度名和值
+
+        Args:
+            scores: {"depression_score": 5.086, "anxiety_score": 2.1, ...}
+
+        Returns:
+            (dimension_key, max_value) — 如 ("depression_score", 5.086)
+        """
+        if not scores:
+            return (None, 0.0)
+        dim_scores = {k: v for k, v in scores.items()
+                      if k in cls.model_fields and v is not None}
+        if not dim_scores:
+            return (None, 0.0)
+        max_dim = max(dim_scores, key=lambda k: abs(dim_scores[k]))
+        return (max_dim, dim_scores[max_dim])
+
+
+# =============================================================================
+# 心理筛查三表 Schema
+# =============================================================================
+
+class PsychSurveyOut(BaseModel):
+    """心理筛查问卷输出"""
+    id: int
+    student_id: int
+    student_name: Optional[str] = None
+    class_id: int
+    class_name: Optional[str] = None
+    grade_id: int
+    survey_type: str
+    total_score: Optional[float] = None
+    dimension_scores: Optional[dict] = None
+    is_valid: bool = True
+    verify_status: str = "PENDING"
+    completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    source_id: Optional[int] = None
+
+    model_config = {"from_attributes": True}
+
+
+class MentalHealthAssessmentOut(BaseModel):
+    """心理健康评估输出"""
+    id: int
+    student_id: int
+    student_name: Optional[str] = None
+    class_id: int
+    class_name: Optional[str] = None
+    grade_id: int
+    assessment_type: str
+    assessment_date: Optional[date] = None
+    scale_name: Optional[str] = None
+    total_score: Optional[int] = None
+    risk_level: Optional[str] = None
+    dimension_scores: Optional[dict] = None
+    conclusion: Optional[str] = None
+    recommendations: Optional[str] = None
+    need_intervention: bool = False
+    intervention_plan: Optional[str] = None
+    status: str = "DRAFT"
+    assessed_by: int
+    created_at: Optional[datetime] = None
+    source_id: Optional[int] = None
+    source_survey_id: Optional[int] = None
+
+    model_config = {"from_attributes": True}
+
+
+class PsychCrossAnalysisOut(BaseModel):
+    """跨维度交叉分析输出"""
+    id: int
+    student_id: int
+    student_name: Optional[str] = None
+    class_id: int
+    grade_id: int
+    analysis_type: str
+    details_json: Optional[dict] = None
+    created_at: Optional[datetime] = None
+    source_id: Optional[int] = None
+
+    model_config = {"from_attributes": True}
+
+
+# =============================================================================
+# 风险预警 (四维升级)
+# =============================================================================
 
 class RiskWarningCreate(BaseModel):
     """创建风险预警 (系统自动触发，不开放手动创建)"""
@@ -17,6 +156,9 @@ class RiskWarningCreate(BaseModel):
     behavior_deviation: float = 0.0
     attendance_deviation: float = 0.0
     score_deviation: float = 0.0
+    psych_deviation: float = Field(0.0, description="心理维度偏离度 (Z-Score, v3.1)")
+    psych_veto_triggered: bool = Field(False, description="心理一票否决触发 (v3.1)")
+    veto_dimension: Optional[str] = Field(None, description="触发一票否决的具体维度名 (v3.1)")
     trigger_event_type: Optional[str] = None
     trigger_event_id: Optional[int] = None
 
@@ -29,7 +171,7 @@ class RiskWarningUpdate(BaseModel):
 
 
 class RiskWarningOut(BaseModel):
-    """风险预警输出"""
+    """风险预警输出 (v3.1 四维版)"""
     id: int
     student_id: int
     student_name: Optional[str] = None
@@ -43,6 +185,11 @@ class RiskWarningOut(BaseModel):
     behavior_deviation: float
     attendance_deviation: float
     score_deviation: float
+    psych_deviation: float = Field(0.0, description="心理维度偏离度 (v3.1)")
+
+    # 一票否决标记 (v3.1)
+    psych_veto_triggered: bool = False
+    veto_dimension: Optional[str] = None
 
     ewma_trend: float
     is_escalating: bool
@@ -57,7 +204,9 @@ class RiskWarningOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── 预警反馈 ──
+# =============================================================================
+# 预警反馈
+# =============================================================================
 
 class WarningFeedbackCreate(BaseModel):
     warning_id: int
@@ -79,7 +228,9 @@ class WarningFeedbackOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── RDI 计算请求/响应 ──
+# =============================================================================
+# RDI 计算请求/响应 (四维升级)
+# =============================================================================
 
 class RDICalculateRequest(BaseModel):
     """RDI 计算请求"""
@@ -89,43 +240,63 @@ class RDICalculateRequest(BaseModel):
     window_long: int = Field(90, ge=30, le=180, description="长窗口天数")
     include_trend: bool = True
     suppress_low_rdi: bool = True
+    include_psych: bool = Field(True, description="是否包含心理维度 (v3.1, 默认True)")
 
 
 class RDICalculateResponse(BaseModel):
-    """RDI 计算结果"""
+    """RDI 计算结果 (v3.1 四维版)"""
     student_id: int
     rdi_score: float
     risk_level: str
 
-    # 三维度偏离
+    # 四维度偏离
     behavior_deviation: float
     attendance_deviation: float
     score_deviation: float
+    psych_deviation: float = Field(0.0, description="心理维度偏离度 (极端维度驱动模型)")
+
+    # 一票否决互锁 (v3.1)
+    psych_veto_triggered: bool = False
+    veto_dimension: Optional[str] = None  # 触发一票否决的具体维度名
 
     # 各维度原始值
     behavior_count: int
     attendance_rate: float
     score_avg: float
+    psych_raw_z_total: Optional[float] = Field(None, description="心理Z_total (v3.1)")
+    psych_raw_max_dim: Optional[float] = Field(None, description="心理max(Z_dim1..dim10) (v3.1)")
 
     # 基线对比 (Z-Score 分母)
     behavior_baseline_mean: float
     behavior_baseline_std: float
     attendance_baseline_mean: float
     attendance_baseline_std: float
+    score_baseline_mean: float
+    score_baseline_std: float
+    psych_baseline_mean: Optional[float] = Field(None, description="心理基线均值 (v3.1)")
+    psych_baseline_std: Optional[float] = Field(None, description="心理基线标准差 (v3.1)")
 
     # EWMA 趋势
     ewma_trend: float
     is_escalating: bool
+
+    # 大退潮保护 (v3.1)
+    backslide_protected: bool = Field(False, description="是否触发大退潮保护 (30天内禁止降级)")
 
     # 预警建议
     warning_suppressed: bool
     suppression_reason: Optional[str] = None
     recommended_action: Optional[str] = None
 
+    # 复合RDI分解 (v3.1)
+    rdi_breakdown: Optional[Dict[str, float]] = Field(None, description="四维RDI贡献分解 {behavior: 0.5, attendance: 0.1, score: 0.3, psych: 1.2}")
+
     calculated_at: datetime
 
 
-# ── 风险看板 ──
+# =============================================================================
+# 风险看板
+# =============================================================================
 
 class RiskDashboardOut(BaseModel):
     """风险看板输出 (班主任/级组长首页)"""
@@ -141,10 +312,12 @@ class RiskDashboardOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── 风险监控面板 (Monitor Panel) ──
+# =============================================================================
+# 风险监控面板 (Monitor Panel) — 四维升级
+# =============================================================================
 
 class MonitorStudentCard(BaseModel):
-    """监控面板学生卡片 — 仅展示黄/红预警学生 (RDI > 1.0)"""
+    """监控面板学生卡片 — 仅展示黄/红预警学生 (RDI > 1.0) (v3.1 四维版)"""
     student_id: int
     student_name: str
     student_no: Optional[str] = None
@@ -159,7 +332,12 @@ class MonitorStudentCard(BaseModel):
     behavior_deviation: float
     attendance_deviation: float
     score_deviation: float
-    top_dimension: str  # behavior / attendance / score — 偏离最大的维度
+    psych_deviation: float = Field(0.0, description="心理维度偏离度 (v3.1)")
+    top_dimension: str  # behavior / attendance / score / psych — 偏离最大的维度
+
+    # 一票否决 (v3.1)
+    psych_veto_triggered: bool = False
+    veto_dimension: Optional[str] = None
 
     is_escalating: bool
     ewma_trend: float
@@ -188,7 +366,9 @@ class MonitorPanelOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── PenaltyExplainer 判罚透明化解释 ──
+# =============================================================================
+# PenaltyExplainer 判罚透明化解释
+# =============================================================================
 
 class PenaltyExplanationRequest(BaseModel):
     """判罚解释请求 — 三段式解释的输入参数"""
@@ -222,7 +402,7 @@ class PenaltyRule(BaseModel):
     sub_dimension: str = Field(..., description="子维度")
     base_penalty: float = Field(..., description="基础扣分")
     weight_multiplier: float = Field(..., description="权重乘数")
-    effective_penalty: float = Field(..., description="实际有效扣分 (= base_penalty × weight_multiplier)")
+    effective_penalty: float = Field(..., description="实际有效扣分 (= base_penalty x weight_multiplier)")
 
 
 class PenaltyGrowth(BaseModel):
@@ -265,7 +445,9 @@ class PenaltyExplanationResponse(BaseModel):
     generated_at: datetime = Field(..., description="生成时间")
 
 
-# ── 异步任务投递 ──
+# =============================================================================
+# 异步任务投递
+# =============================================================================
 
 class TaskDispatchResponse(BaseModel):
     """异步任务投递响应 — fire-and-forget 模式"""
