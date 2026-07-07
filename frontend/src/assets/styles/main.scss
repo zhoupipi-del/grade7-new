@@ -1,0 +1,81 @@
+/* ===========================
+   Wings 3.0 Global Styles
+   =========================== */
+
+:root {
+  /* Sidebar theme */
+  --wings-sidebar-bg: #1f2c3f;
+  --wings-sidebar-text: #bfcbd9;
+  --wings-sidebar-active: #409eff;
+
+  /* Header */
+  --wings-header-height: 60px;
+  --wings-sidebar-width: 240px;
+  --wings-sidebar-collapsed-width: 64px;
+
+  /* Brand colors */
+  --wings-primary: #409eff;
+  --wings-success: #67c23a;
+  --wings-warning: #e6a23c;
+  --wings-danger: #f56c6c;
+  --wings-info: #909399;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  width: 100%;
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', Arial, sans-serif;
+  font-size: 14px;
+  color: #303133;
+  background-color: #f0f2f5;
+}
+
+a {
+  text-decoration: none;
+  color: var(--wings-primary);
+}
+
+/* Fade-transform route transition */
+.fade-transform-leave-active,
+.fade-transform-enter-active {
+  transition: all 0.3s;
+}
+
+.fade-transform-enter-from {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.fade-transform-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c0c4cc;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Element Plus overrides */
+.el-menu {
+  border-right: none !important;
+}

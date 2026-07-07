@@ -153,6 +153,24 @@
 <div class="text-center text-muted" style="font-size: 11px; margin-top: 1rem;">
   数据源：Wings 3.0 · dashboard 模块 · 跨库桥接 wings3 × grade7_new · 更新时间 <span id="update-time"></span>
 </div>
+
+<!-- 班级下钻弹窗 -->
+<div class="modal fade" id="drillModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="drill-title">班级违纪详情</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="drill-loading" style="text-align:center;padding:2rem;color:#9ca3af;">
+          <div class="spinner-border spinner-border-sm text-primary"></div> 加载中...
+        </div>
+        <div id="drill-content" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -163,6 +181,7 @@ const SEVERITY_COLORS = { '轻微违纪': '#f59e0b', '普通违纪': '#f97316', 
 
 let radarChart, trendChart, scatterChart;
 let currentTimeframe = '30d';
+let drillDownClassId = null;
 
 // ═══ 工具函数 ═══
 async function fetchAPI(url) {
@@ -235,6 +254,16 @@ async function loadRadar() {
       label: { show: true, position: 'right', fontSize: 11, formatter: '{c}' },
       barWidth: '60%'
     }]
+  });
+
+  // 点击红黑榜柱状条 → 下钻班级详情
+  radarChart.off('click');
+  radarChart.on('click', async (params) => {
+    if (params.componentType !== 'series') return;
+    const idx = params.dataIndex;
+    if (idx === undefined || !sortedRows[idx]) return;
+    const cls = sortedRows[idx];
+    await openDrillDown(cls.class_id, cls.class_name);
   });
 }
 
@@ -344,5 +373,93 @@ async function init() {
 }
 
 init();
+
+// ═══ 班级下钻 ═══
+async function openDrillDown(classId, className) {
+  drillDownClassId = classId;
+  document.getElementById('drill-title').textContent = `${className} — 违纪详情下钻`;
+  document.getElementById('drill-loading').style.display = 'block';
+  document.getElementById('drill-content').style.display = 'none';
+  new bootstrap.Modal(document.getElementById('drillModal')).show();
+
+  try {
+    const [behaviorRes, scatterRes] = await Promise.all([
+      fetchAPI(`/api/v1/behavior/records?class_id=${classId}&per_page=50`),
+      fetchAPI(`/api/v1/dashboard/correlation-scatter`)
+    ]);
+
+    const behaviors = behaviorRes.items || [];
+    const classStudents = (scatterRes.data?.points || []).filter(p => {
+      // 散点图无class_id字段，用behavior记录里的student_id匹配
+      return behaviors.some(b => b.student_id === p.student_id);
+    });
+
+    let html = '';
+
+    // 统计卡片
+    const seriousCnt = behaviors.filter(b => b.type === 'serious').length;
+    const majorCnt = behaviors.filter(b => b.type === 'major').length;
+    const minorCnt = behaviors.filter(b => b.type === 'minor').length;
+    const warnCnt = behaviors.filter(b => b.type === 'warning').length;
+    html += `<div class="metric-row">
+      <div class="metric-box"><div class="num">${behaviors.length}</div><div class="label">违纪总数</div></div>
+      <div class="metric-box"><div class="num" style="color:#dc2626">${seriousCnt}</div><div class="label">严重</div></div>
+      <div class="metric-box"><div class="num" style="color:#f97316">${majorCnt}</div><div class="label">普通</div></div>
+      <div class="metric-box"><div class="num" style="color:#f59e0b">${minorCnt}</div><div class="label">轻微</div></div>
+      <div class="metric-box"><div class="num">${warnCnt}</div><div class="label">警告</div></div>
+    </div>`;
+
+    // 高危学生散点
+    if (classStudents.length > 0) {
+      const高危 = classStudents.filter(p => p.quadrant === 'Q3' || p.quadrant === 'Q2');
+      html += `<h6 class="mt-3 mb-2" style="font-size:14px;color:#1f2937;">
+        <i class="bi bi-exclamation-triangle text-danger"></i> 高危学生 (${高危.length}人)
+      </h6>`;
+      if (高危.length > 0) {
+        html += '<div class="table-responsive"><table class="table table-sm" style="font-size:12px;">';
+        html += '<thead><tr><th>姓名</th><th>德育分</th><th>成绩</th><th>象限</th></tr></thead><tbody>';
+        高危.sort((a,b) => a.x_moral_score - b.x_moral_score).forEach(s => {
+          const qColor = s.quadrant === 'Q3' ? '#ef4444' : '#f59e0b';
+          const qLabel = s.quadrant === 'Q3' ? '高危双困' : '聪明违纪';
+          html += `<tr><td>${s.student_name}</td><td>${s.x_moral_score}</td><td>${s.y_math_score}</td><td style="color:${qColor}">${qLabel}</td></tr>`;
+        });
+        html += '</tbody></table></div>';
+      } else {
+        html += '<p class="text-success" style="font-size:12px;">无高危学生</p>';
+      }
+    }
+
+    // 违纪流水列表
+    if (behaviors.length > 0) {
+      html += `<h6 class="mt-3 mb-2" style="font-size:14px;color:#1f2937;">
+        <i class="bi bi-list-ul text-primary"></i> 违纪流水 (${behaviors.length}条)
+      </h6>`;
+      html += '<div class="table-responsive" style="max-height:300px;overflow-y:auto;">';
+      html += '<table class="table table-sm table-hover" style="font-size:12px;">';
+      html += '<thead><tr><th>日期</th><th>学生</th><th>类型</th><th>类别</th><th>描述</th><th>扣分</th></tr></thead><tbody>';
+      const typeColor = { serious: '#dc2626', major: '#f97316', minor: '#f59e0b', warning: '#6b7280' };
+      const typeLabel = { serious: '严重', major: '普通', minor: '轻微', warning: '警告' };
+      behaviors.forEach(b => {
+        html += `<tr>
+          <td>${(b.incident_date||'').substring(0,10)}</td>
+          <td>${b.student_name||'-'}</td>
+          <td style="color:${typeColor[b.type]||'#888'}">${typeLabel[b.type]||b.type}</td>
+          <td>${b.category||'-'}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">${b.description||'-'}</td>
+          <td>-${b.points||0}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+    } else {
+      html += '<p class="text-muted text-center" style="font-size:13px;padding:1rem;">该班级暂无违纪记录</p>';
+    }
+
+    document.getElementById('drill-loading').style.display = 'none';
+    document.getElementById('drill-content').style.display = 'block';
+    document.getElementById('drill-content').innerHTML = html;
+  } catch (e) {
+    document.getElementById('drill-loading').innerHTML = `<span class="text-danger">下钻失败: ${e.message}</span>`;
+  }
+}
 </script>
 {% endblock %}

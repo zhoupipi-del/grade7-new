@@ -1,0 +1,76 @@
+# === Grade7-New / Wings3 Project .gitignore ===
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# --- Node / Vue Frontend ---
+# frontend/ has its own .gitignore (node_modules, dist, .local, etc.)
+# These are safety fallbacks for root-level npm artifacts
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- IDE / Editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- WorkBuddy / CodeBuddy ---
+.codebuddy/
+.workbuddy/
+
+# --- OS / Temp ---
+*.tmp
+*.bak
+*.bak_*
+screenshots/
+*.log
+
+# --- Data dumps (generated, not source) ---
+*_full.json
+*_smoke_*.sh
+_extract_*.py
+_gen_*.py
+_verify_*.json
+
+# --- Reports / docs (generated outputs, not tracked) ---
+# Keep: 汇报材料/ as it's curated content
+AUDIT_REPORT_*.md
+DEPLOYMENT_SUMMARY.md
+MANUAL_DEPLOY_GUIDE.md
+QUESTIONNAIRE_DEPLOYMENT.md
+VANGUARD_ISSUES.md
+VNC_SANDBOX_*.md
+VNC_SANDBOX_*.md
+系统性能分析报告_*.md
+德育安保系统独立性与完整性审查报告.md
+功能重叠分析报告.md
+梨江中学德育管理平台系统报告.md
+
+# --- Deployment scripts (one-shot, not source) ---
+add_missing_features.py
+add_version_stamp*.py
+auto_deploy.py
+batch_bind_parents.py
+build_payload.py
+check_and_import.py
+
+# --- Excel data files (student data, PII) ---
+*.xls
+*.xlsx
+
+# --- Misc junk files ---
+" + str(e))*
