@@ -133,6 +133,31 @@ async def lifespan(app: FastAPI):
     import modules.notifications.models   # noqa: F401
     import modules.dashboard.models        # noqa: F401  (纯聚合，不建表)
     import modules.growth.models          # noqa: F401  (只读融合模块，不建表)
+    import modules.approval.models        # noqa: F401
+    import modules.teach_math.models     # noqa: F401
+    import modules.risk_models.models    # noqa: F401
+    import modules.parent_portal.models  # noqa: F401
+    import modules.grades.models         # noqa: F401
+    import modules.lineage.models       # noqa: F401
+    import modules.data_adapter.models  # noqa: F401
+    # ── P0 新模块：学籍 + 班级管理（数据铁三角）──
+    import modules.student_registry.models  # noqa: F401
+    import modules.class_mgmt.models       # noqa: F401
+    import modules.teacher_mgmt.models    # noqa: F401
+    import modules.timetable.models      # noqa: F401
+    # ── Phase 2 心理关怀：咨询预约 + 工作台 + 心理档案 + 双轨预警 ──
+    import modules.psych_counseling.models  # noqa: F401
+    import modules.psych_profiles.models   # noqa: F401
+    # ── Phase 2 教研铁三角：集体备课 + 听课评课 + 教研活动 (100%合围) ──
+    import modules.research_lesson_prep.models  # noqa: F401
+    import modules.research_observation.models  # noqa: F401
+    import modules.research_activities.models   # noqa: F401
+    # ── Phase 3 教务板块：作业管理 + 错题断层漏斗 ──
+    import modules.homework_mgmt.models   # noqa: F401
+    import modules.error_funnel.models    # noqa: F401
+    # ── 三级组织架构模型（Organization/Branch/CascadingConfig/ScopeType）──
+    # 已通过 `from core.models import Base` 的模块级加载注册到 Base.metadata
+    # create_all 将自动建表: organizations / branches / cascading_configs
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -150,14 +175,54 @@ async def lifespan(app: FastAPI):
     if missing:
         logger.warning(f"缺失依赖: {missing}")
 
-    # 5. 为默认学校 (school_id=1) 加载模块
+    # 5. 全局模块加载 + 级联配置感知（多租户 SaaS 底座）
+    #    FastAPI 路由注册是进程级的，不可按租户拆分 → 并集模式全局注册
+    #    各 endpoint 内部用 TenantContext.get_config() 或 build_scope_filter() 做开关校验
     async with AsyncSessionLocal() as session:
         try:
-            results = await module_loader.load_for_school(
-                school_id=1,
-                db_session=session,
-                fastapi_app=app,
+            from core.models import School, SchoolModule
+            from sqlalchemy import select
+
+            # 查询所有活跃学校
+            schools_result = await session.execute(
+                select(School).where(School.is_active == True)
             )
+            schools = schools_result.scalars().all()
+
+            # 收集所有学校的启用模块并集（全局路由注册）
+            all_enabled_modules: set = set()
+            for school in schools:
+                mods_result = await session.execute(
+                    select(SchoolModule.module_code).where(
+                        SchoolModule.school_id == school.id,
+                        SchoolModule.enabled == True,
+                    )
+                )
+                all_enabled_modules.update(row[0] for row in mods_result.all())
+
+            logger.info(
+                f"多租户模块加载: {len(schools)} 活跃学校 "
+                f"({[s.name for s in schools]}), 模块并集: {all_enabled_modules}"
+            )
+
+            # ── 全局路由注册 + 级联配置解析（委托给 module_loader）──
+            if all_enabled_modules:
+                results = await module_loader.load_for_school(
+                    school_id=0,  # sentinel: 全局路由注册（进程级不可拆分）
+                    db_session=session,
+                    fastapi_app=app,
+                    enabled_module_codes=all_enabled_modules,
+                    resolve_configs=True,  # 级联配置解析 + 日志输出
+                )
+            else:
+                # Fallback: 至少加载 school_id=1
+                results = await module_loader.load_for_school(
+                    school_id=1,
+                    db_session=session,
+                    fastapi_app=app,
+                    resolve_configs=True,
+                )
+
             logger.info("\n" + module_loader.get_load_report())
         except Exception as e:
             logger.error(f"模块加载异常: {e}", exc_info=True)
@@ -190,23 +255,98 @@ async def lifespan(app: FastAPI):
 # ═══════════════════════════════════════════════════════════════
 
 async def _seed_default_data():
-    """创建默认学校和管理员账号（幂等）"""
+    """创建默认组织/片区/学校和管理员账号（幂等，支持三级架构初始化）"""
     from sqlalchemy import select
-    from core.models import School, User, UserRole, SchoolModule
+    from core.models import (
+        School, User, UserRole, SchoolModule,
+        Organization, Branch, ScopeType,
+    )
     from core.services import AuthService
 
     async with AsyncSessionLocal() as session:
-        # 检查默认学校是否存在
+        # ── Step 1: 默认集团/教育集团 ──
+        result = await session.execute(
+            select(Organization).where(Organization.code == "lijiang-edu")
+        )
+        org = result.scalar_one_or_none()
+
+        if not org:
+            org = Organization(
+                id=1,
+                name="梨江教育集团",
+                code="lijiang-edu",
+                is_active=True,
+            )
+            session.add(org)
+            await session.commit()
+            logger.info("默认集团已创建: 梨江教育集团 (id=1, code=lijiang-edu)")
+
+        # ── Step 2: 默认片区/校区（幂等：优先按 code 查找，兜底按 id=1 查找）──
+        result = await session.execute(
+            select(Branch).where(
+                Branch.org_id == org.id,
+                Branch.code == "changsha-xingsha",
+            )
+        )
+        branch = result.scalar_one_or_none()
+
+        if not branch:
+            # 迁移脚本可能已插入 id=1 但 code 不同，兜底查找
+            result2 = await session.execute(
+                select(Branch).where(Branch.id == 1)
+            )
+            branch = result2.scalar_one_or_none()
+
+        if not branch:
+            branch = Branch(
+                id=1,
+                org_id=org.id,
+                name="长沙县星沙片区",
+                code="changsha-xingsha",
+                is_active=True,
+            )
+            session.add(branch)
+            await session.commit()
+            logger.info(f"默认片区已创建: 长沙县星沙片区 (id=1, org_id={org.id})")
+        elif branch.code != "changsha-xingsha":
+            # 统一 code 命名
+            old_code = branch.code
+            branch.code = "changsha-xingsha"
+            await session.commit()
+            logger.info(f"默认片区 code 已统一: {old_code} → changsha-xingsha")
+
+        # ── Step 3: 默认学校 ──
         result = await session.execute(select(School).where(School.id == 1))
         school = result.scalar_one_or_none()
 
         if not school:
-            school = School(id=1, name="梨江中学", is_active=True)
+            school = School(
+                id=1,
+                name="梨江中学",
+                school_phase="junior",
+                is_active=True,
+                org_id=org.id,
+                branch_id=branch.id,
+            )
             session.add(school)
             await session.commit()
-            logger.info("默认学校已创建: 梨江中学 (id=1)")
+            logger.info(f"默认学校已创建: 梨江中学 (id=1, phase=junior, org_id={org.id}, branch_id={branch.id})")
+        else:
+            # 向下兼容: 补齐已有学校的 org_id/branch_id/phase（旧数据可能为 None）
+            needs_commit = False
+            if school.org_id is None or school.branch_id is None:
+                school.org_id = org.id
+                school.branch_id = branch.id
+                needs_commit = True
+            if not school.school_phase:
+                school.school_phase = "junior"
+                needs_commit = True
+                logger.info(f"学校梨江中学 school_phase 已补齐: junior (默认值)")
+            if needs_commit:
+                await session.commit()
+                logger.info(f"学校梨江中学 org_id/branch_id 已补齐: org={org.id}, branch={branch.id}")
 
-        # 检查默认管理员
+        # ── Step 4: 默认管理员 ──
         result = await session.execute(
             select(User).where(User.username == "admin")
         )
@@ -221,6 +361,8 @@ async def _seed_default_data():
                 display_name="系统管理员",
                 role=UserRole.MS_ADMIN,
                 school_id=1,
+                org_id=org.id,
+                branch_id=branch.id,
                 is_active=True,
                 password_change_required=True,
             )
@@ -230,6 +372,13 @@ async def _seed_default_data():
             logger.info(f"默认管理员已创建: admin / {admin_pw}")
             logger.info("⚠️  请立即登录并修改此密码！首次登录将强制要求改密。")
             logger.info("=" * 60)
+        else:
+            # 向下兼容: 补齐已有管理员 org_id/branch_id
+            if admin.org_id is None or admin.branch_id is None:
+                admin.org_id = org.id
+                admin.branch_id = branch.id
+                await session.commit()
+                logger.info(f"管理员 admin org_id/branch_id 已补齐: org={org.id}, branch={branch.id}")
 
         # 确保 attendance 模块配置存在
         result = await session.execute(
@@ -374,6 +523,60 @@ async def _seed_default_data():
             session.add(sm)
             await session.commit()
             logger.info("默认模块已配置: notifications (已启用)")
+
+        # ── teach_math 模块 ──────────────────────
+        result = await session.execute(
+            select(SchoolModule).where(
+                SchoolModule.school_id == 1,
+                SchoolModule.module_code == "teach_math",
+            )
+        )
+        sm = result.scalar_one_or_none()
+        if not sm:
+            sm = SchoolModule(
+                school_id=1,
+                module_code="teach_math",
+                enabled=True,
+            )
+            session.add(sm)
+            await session.commit()
+            logger.info("默认模块已配置: teach_math (已启用)")
+
+        # ── grades 模块 ──────────────────────
+        result = await session.execute(
+            select(SchoolModule).where(
+                SchoolModule.school_id == 1,
+                SchoolModule.module_code == "grades",
+            )
+        )
+        sm = result.scalar_one_or_none()
+        if not sm:
+            sm = SchoolModule(
+                school_id=1,
+                module_code="grades",
+                enabled=True,
+            )
+            session.add(sm)
+            await session.commit()
+            logger.info("默认模块已配置: grades (已启用)")
+
+        # ── lineage 模块 ──────────────────────
+        result = await session.execute(
+            select(SchoolModule).where(
+                SchoolModule.school_id == 1,
+                SchoolModule.module_code == "lineage",
+            )
+        )
+        sm = result.scalar_one_or_none()
+        if not sm:
+            sm = SchoolModule(
+                school_id=1,
+                module_code="lineage",
+                enabled=True,
+            )
+            session.add(sm)
+            await session.commit()
+            logger.info("默认模块已配置: lineage (已启用)")
 
 
 # ═══════════════════════════════════════════════════════════════

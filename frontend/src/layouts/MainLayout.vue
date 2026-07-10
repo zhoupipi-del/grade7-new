@@ -78,8 +78,13 @@
           <div class="school-highlight">
             <el-icon><School /></el-icon>
             <span class="school-name">{{ tenantStore.currentSchoolName }}</span>
-            <el-tag size="small" type="info" effect="dark" class="school-tag">
-              多租户
+            <el-tag
+              size="small"
+              :type="(phaseTagTypes[userStore.currentPhase] || 'info') as any"
+              effect="dark"
+              class="school-tag"
+            >
+              {{ phaseLabels[userStore.currentPhase] || '未知学段' }}
             </el-tag>
           </div>
         </div>
@@ -176,6 +181,10 @@ interface MenuItem {
   title: string
   icon: string
   roles: UserRole[]
+  /** 🎯 千人千面: 该菜单项对哪些学段可见，缺省=全学段 */
+  phases?: string[]
+  /** 🎯 千人千面: 依赖的插件开关名，对应 plugin_config 的 key */
+  plugin?: string
 }
 
 interface MenuGroup {
@@ -184,12 +193,33 @@ interface MenuGroup {
   items: MenuItem[]
 }
 
-// 菜单分组定义 — 与 router/index.ts 的 meta.roles 保持 1:1 对齐
-// 分组解决"审题助手割裂感"：德育管理 vs 教学辅助物理隔离
+// ── 学段标签映射 ──
+const phaseLabels: Record<string, string> = {
+  primary: '小学',
+  junior: '初中',
+  senior: '高中',
+  integrated: '完中',
+}
+
+// ── 学段标签颜色 ──
+const phaseTagTypes: Record<string, string> = {
+  primary: 'success',
+  junior: 'warning',
+  senior: 'danger',
+  integrated: 'primary',
+}
+
+// ─────────────────────────────────────────────────────────────
+// 菜单分组定义 — 五域分类（Phase A 重组）
+// 与 router/index.ts 的 meta.roles 保持 1:1 对齐
+// 分组策略：公共底座 → 德育管理 → 教导管理 → 教研工具 → 心理关怀 → 家长门户
+// 教师角色看到前5组，家长只看到"家长门户"
+// ─────────────────────────────────────────────────────────────
 const allMenuGroups: MenuGroup[] = [
+  // ── 1. 公共底座：跨业务域的基础设施 ──
   {
-    title: '德育管理中心',
-    icon: 'Shield',
+    title: '公共底座',
+    icon: 'Platform',
     items: [
       {
         index: '/dashboard',
@@ -198,10 +228,64 @@ const allMenuGroups: MenuGroup[] = [
         roles: ['MS_ADMIN', 'GRADE_LEADER'],
       },
       {
+        index: '/notifications',
+        title: '通知中心',
+        icon: 'Bell',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
+      {
+        index: '/growth',
+        title: '成长时间轴',
+        icon: 'Timer',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
+      {
+        index: '/grades/profile',
+        title: '全息档案',
+        icon: 'UserFilled',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
+      // 数据铁三角: 学籍 + 班级管理
+      {
+        index: '/student-registry',
+        title: '学籍管理',
+        icon: 'User',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
+      {
+        index: '/class-mgmt',
+        title: '班级管理',
+        icon: 'Grid',
+        roles: ['MS_ADMIN', 'GRADE_LEADER'],
+      },
+      {
+        index: '/teacher-mgmt',
+        title: '教师管理',
+        icon: 'Avatar',
+        roles: ['MS_ADMIN', 'GRADE_LEADER'],
+      },
+    ],
+  },
+  // ── 2. 德育管理中心：违纪→处分→评价→风险→处方闭环 ──
+  {
+    title: '德育管理中心',
+    icon: 'Shield',
+    items: [
+      {
         index: '/rdi-radar',
         title: 'RDI 风险雷达',
         icon: 'Monitor',
         roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['junior', 'senior', 'integrated'],
+        plugin: 'enable_rdi',
+      },
+      {
+        index: '/rdi-dashboard',
+        title: 'RDI 风险看板',
+        icon: 'Odometer',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['junior', 'senior', 'integrated'],
+        plugin: 'enable_rdi',
       },
       {
         index: '/approval-center',
@@ -226,6 +310,7 @@ const allMenuGroups: MenuGroup[] = [
         title: 'AI 德育处方',
         icon: 'MagicStick',
         roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['junior', 'senior', 'integrated'],
       },
       {
         index: '/evaluation',
@@ -243,13 +328,7 @@ const allMenuGroups: MenuGroup[] = [
         index: '/evaluation/positive-ranking',
         title: '正能量排行榜',
         icon: 'Histogram',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'STUDENT', 'PARENT'],
-      },
-      {
-        index: '/evaluation/positive-view',
-        title: '我的正能量',
-        icon: 'Trophy',
-        roles: ['STUDENT', 'PARENT'],
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
       },
       {
         index: '/reports',
@@ -258,41 +337,109 @@ const allMenuGroups: MenuGroup[] = [
         roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
       },
       {
-        index: '/notifications',
-        title: '通知中心',
-        icon: 'Bell',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'PARENT'],
+        index: '/attendance',
+        title: '考勤管理',
+        icon: 'Calendar',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
       },
       {
-        index: '/growth',
-        title: '成长时间轴',
-        icon: 'Timer',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'PARENT'],
+        index: '/red-flag',
+        title: '流动红旗',
+        icon: 'Flag',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
       },
+      // 🎯 千人千面: 小学萌卡系统入口
+      {
+        index: '/card-system',
+        title: '萌卡系统',
+        icon: 'Box',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['primary'],
+        plugin: 'enable_card',
+      },
+    ],
+  },
+  // ── 3. 教导管理中心：成绩→分析→报告闭环 ──
+  {
+    title: '教导管理中心',
+    icon: 'School',
+    items: [
       {
         index: '/grades/dashboard',
         title: '成绩看板',
         icon: 'DataLine',
         roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['junior', 'senior', 'integrated'],
       },
       {
         index: '/grades/radar',
         title: '成绩雷达',
         icon: 'Aim',
         roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['junior', 'senior', 'integrated'],
       },
       {
-        index: '/grades/profile',
-        title: '全息档案',
-        icon: 'UserFilled',
+        index: '/grades/prescriptions',
+        title: 'AI 处方中心',
+        icon: 'MagicStick',
         roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['junior', 'senior', 'integrated'],
+      },
+      // 🎯 千人千面: 高中高考学情大盘入口
+      {
+        index: '/gaokao-dashboard',
+        title: '高考学情大盘',
+        icon: 'TrophyBase',
+        roles: ['MS_ADMIN', 'GRADE_LEADER'],
+        phases: ['senior', 'integrated'],
+      },
+      {
+        index: '/data-adapter',
+        title: '数据并网',
+        icon: 'Connection',
+        roles: ['MS_ADMIN', 'GRADE_LEADER'],
+        phases: ['junior', 'senior', 'integrated'],
+      },
+      {
+        index: '/timetable',
+        title: '课程表管理',
+        icon: 'Calendar',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
+      {
+        index: '/habit-cards',
+        title: '萌卡荣誉生态',
+        icon: 'Medal',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['primary', 'integrated'],
+      },
+      {
+        index: '/homework',
+        title: '作业管理',
+        icon: 'EditPen',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['junior', 'senior', 'integrated'],
+      },
+      {
+        index: '/error-funnel',
+        title: '错题断层',
+        icon: 'Filter',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['junior', 'senior', 'integrated'],
       },
     ],
   },
+  // ── 4. 教研工具：学科教学辅助 ──
   {
-    title: '教学辅助工具',
+    title: '教研工具',
     icon: 'Tools',
     items: [
+      {
+        index: '/research',
+        title: '教研协同',
+        icon: 'Coordinate',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
       {
         index: '/teach-math/coach',
         title: '审题助手',
@@ -307,6 +454,44 @@ const allMenuGroups: MenuGroup[] = [
       },
     ],
   },
+  // ── 5. 心理关怀：筛查→干预→画像→危机闭环 ──
+  {
+    title: '心理关怀',
+    icon: 'Sunrise',
+    items: [
+      {
+        index: '/psych-screening',
+        title: '心理筛查',
+        icon: 'Sunny',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
+      {
+        index: '/psych-screening/intervention',
+        title: '干预管理',
+        icon: 'FirstAidKit',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
+      {
+        index: '/psych-screening/portrait',
+        title: '画像与交叉分析',
+        icon: 'PieChart',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
+      {
+        index: '/counselor-console',
+        title: '心理咨询工作台',
+        icon: 'ChatDotRound',
+        roles: ['MS_ADMIN', 'GRADE_LEADER'],
+      },
+      {
+        index: '/nexus-board',
+        title: '双轨预警决策看板',
+        icon: 'DataLine',
+        roles: ['MS_ADMIN', 'GRADE_LEADER'],
+      },
+    ],
+  },
+  // ── 6. 家长门户：家长专属只读视图 ──
   {
     title: '家长门户',
     icon: 'HomeFilled',
@@ -353,19 +538,51 @@ const allMenuGroups: MenuGroup[] = [
         icon: 'Histogram',
         roles: ['PARENT'],
       },
+      {
+        index: '/parent/appointment',
+        title: '心理咨询预约',
+        icon: 'Clock',
+        roles: ['PARENT'],
+      },
     ],
   },
 ]
 
-// 按当前用户角色过滤菜单组与菜单项
-// PARENT 角色会被过滤掉所有项 → 触发空状态提示
+// ─────────────────────────────────────────────────────────────
+// 🎯 千人千面: 按角色 + 学段 + 插件配置 三重过滤菜单
+//
+// 1. 角色过滤: MS_ADMIN/GRADE_LEADER/CLASS_TEACHER/PARENT
+// 2. 学段过滤: primary/junior/senior/integrated
+//    - MS_ADMIN 超管跳过学段过滤（可看到所有学段的入口）
+// 3. 插件过滤: plugin_config 中对应 key 必须为 true
+// ─────────────────────────────────────────────────────────────
 const visibleGroups = computed<MenuGroup[]>(() => {
   const role = userStore.currentRole
   if (!role) return []
+  const currentPhase = userStore.currentPhase
+  const pluginConfig = userStore.pluginConfig
+  const isSuperAdmin = role === 'MS_ADMIN'
+
   return allMenuGroups
     .map((g) => ({
       ...g,
-      items: g.items.filter((item) => item.roles.includes(role)),
+      items: g.items.filter((item) => {
+        // 1. 角色过滤
+        if (!item.roles.includes(role)) return false
+
+        // 2. 学段过滤（超管跳过）
+        if (!isSuperAdmin && item.phases && !item.phases.includes(currentPhase)) {
+          return false
+        }
+
+        // 3. 插件开关过滤
+        if (item.plugin) {
+          const enabled = pluginConfig?.[item.plugin] === true
+          if (!enabled) return false
+        }
+
+        return true
+      }),
     }))
     .filter((g) => g.items.length > 0)
 })
@@ -423,11 +640,15 @@ async function validateSession() {
 
   try {
     const freshUserInfo = await getCurrentUser()
-    // setUserInfo 归一化: display_name→real_name, role→大写UserRole
+    // setUserInfo 归一化: display_name→real_name, role→大写UserRole, school_phase→plugin_config
     userStore.setUserInfo(freshUserInfo)
-    // 同步租户信息
+    // 同步租户信息（含学段）
     if (freshUserInfo.school_id && freshUserInfo.school_name) {
-      tenantStore.setSchool(freshUserInfo.school_id, freshUserInfo.school_name)
+      tenantStore.setSchool(
+        freshUserInfo.school_id,
+        freshUserInfo.school_name,
+        freshUserInfo.school_phase,
+      )
     }
   } catch {
     // 401拦截器已自动 clearAuth + 硬跳转login；此处不重复处理
