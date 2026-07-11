@@ -436,7 +436,7 @@ class GrowthAggregationPipeline:
                 select(func.count(AttendanceRecord.id)).where(
                     AttendanceRecord.student_id == student_id,
                     AttendanceRecord.school_id == school_id,
-                    AttendanceRecord.status.in_(["late", "early_leave"]),
+                    AttendanceRecord.status.in_(["late", "early"]),
                 )
             )
             warning_count = warn_result.scalar() or 0

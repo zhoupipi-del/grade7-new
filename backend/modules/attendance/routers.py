@@ -412,6 +412,7 @@ async def approve_leave_request(
         "message": "审批完成",
         "leave_id": leave.id,
         "status": leave.status,
+        "corrected_count": getattr(leave, "_corrected_count", 0),
     }
 
 
@@ -501,4 +502,47 @@ async def batch_approve_leaves(
         "total": len(results),
         "success_count": success_count,
         "fail_count": fail_count,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+#  班级考勤历史聚合矩阵 (GAP-1 & GAP-2 闭合)
+#  CASE WHEN 单次扫描按天归总, 供前端 ECharts 折线大盘消费
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/history/{class_id}")
+async def get_class_attendance_history(
+    class_id: int,
+    start_date: date = Query(..., description="起始日期 YYYY-MM-DD"),
+    end_date: date = Query(..., description="结束日期 YYYY-MM-DD"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    班级考勤历史聚合 — 按天多态状态矩阵
+
+    返回每天的出勤/缺勤/迟到早退/请假人数汇总,
+    一次 SQL CASE WHEN 扫描完成, 支撑前端折线趋势图。
+
+    响应示例:
+    [
+      {"date": "2026-07-01", "total_students": 45, "present_count": 42,
+       "absent_critical_count": 1, "warning_count": 1, "leave_count": 1},
+      ...
+    ]
+    """
+    history = await AttendanceService.get_class_attendance_history(
+        db=db,
+        school_id=current_user.school_id,
+        class_id=class_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    return {
+        "class_id": class_id,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "days": len(history),
+        "history": history,
     }

@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Tuple, Set
 from collections import defaultdict, OrderedDict
 import logging
 
-from sqlalchemy import select, func, and_, or_, delete, desc
+from sqlalchemy import select, func, and_, or_, delete, desc, update, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import AttendanceRecord, LeaveRequest
@@ -266,8 +266,27 @@ class AttendanceService:
                         # 1. 事件分类 → severity / dimension / penalty
                         classification = engine.classify(behavior_type)
 
-                        # 2. 审批路由 → ApprovalChain
-                        chain = engine.route(behavior_type, creator_role)
+                        # 2. 审批链解析: L1 多租户 → L2 PolicyEngine
+                        chain_config = None
+                        approval_mode = "parallel_or"
+
+                        # L1: 尝试多租户审批链
+                        biz_type = "attendance_absence" if behavior_type == "absence" else "attendance_leave"
+                        try:
+                            from modules.approval.services import resolve_chain_async
+                            chain_config = await resolve_chain_async(db, school_id, biz_type)
+                            if chain_config:
+                                approval_mode = chain_config.get("approval_mode", "serial_and")
+                        except Exception as chain_err:
+                            logger.warning(
+                                "[Attendance Hook] 多租户审批链查询失败(降级PolicyEngine): %s", chain_err
+                            )
+
+                        # L2: Fallback — PolicyEngine
+                        if not chain_config:
+                            chain = engine.route(behavior_type, creator_role)
+                            chain_config = chain.model_dump()
+                            approval_mode = chain.mode
 
                         # 3. 写审批工单 (approval_requests)
                         approval_req = ApprovalRequest(
@@ -277,8 +296,8 @@ class AttendanceService:
                             source_type="attendance",
                             source_id=target["record_id"],
                             severity=classification.severity,
-                            approval_mode=chain.mode,
-                            chain_config=chain.model_dump(),
+                            approval_mode=approval_mode,
+                            chain_config=chain_config,
                             current_status="pending",
                             current_step=0,
                         )
@@ -295,11 +314,10 @@ class AttendanceService:
                             discipline_type=classification.severity,
                             discipline_id=target["record_id"],
                             created_by=created_by,
+                            source_type="attendance",
+                            penalty_override=classification.base_penalty,
+                            policy_tag="repairable",
                         )
-
-                        # 5. 给 ScoreLog 打上 policy_tag (考勤异常一律 repairable)
-                        if log:
-                            log.policy_tag = "repairable"
 
                     await db.flush()
                     await db.commit()
@@ -669,7 +687,26 @@ class AttendanceService:
             leave.approved_by_grade = approver_id
             leave.approved_at_grade = now
 
-            # 审批通过后自动创建考勤记录（跳过已有记录）
+            # ── 🔥 逆熵冲正: absent → leave ──
+            # 将请假日期范围内的"旷课"污点冲正为"合规请假"
+            # 精准抹除 GrowthAggregationPipeline 中 CRITICAL(-15分) 惩罚项
+            correction_note = f"请假冲正: {leave.reason[:30]}" if leave.reason else "请假冲正"
+            correct_result = await db.execute(
+                update(AttendanceRecord)
+                .where(
+                    and_(
+                        AttendanceRecord.student_id == leave.student_id,
+                        AttendanceRecord.school_id == leave.school_id,
+                        AttendanceRecord.record_date >= leave.start_date,
+                        AttendanceRecord.record_date <= leave.end_date,
+                        AttendanceRecord.status == "absent",
+                    )
+                )
+                .values(status="leave", note=correction_note)
+            )
+            corrected_count = correct_result.rowcount
+
+            # 审批通过后创建考勤记录（跳过已有记录，含刚冲正的）
             existing_dates_result = await db.execute(
                 select(AttendanceRecord.record_date).where(
                     AttendanceRecord.school_id == leave.school_id,
@@ -701,6 +738,8 @@ class AttendanceService:
 
         await db.commit()
         await db.refresh(leave)
+        # 逆熵冲正计数挂载（非持久化字段，供 router 层读取）
+        leave._corrected_count = corrected_count if approver_role == "grade_leader" else 0
         return leave
 
     @classmethod
@@ -840,7 +879,24 @@ class AttendanceService:
                     leave.approved_by_grade = approver_id
                     leave.approved_at_grade = now
 
-                    # 自动创建考勤记录（跳过已有记录）
+                    # ── 🔥 逆熵冲正: absent → leave ──
+                    correction_note = f"请假冲正: {leave.reason[:30]}" if leave.reason else "请假冲正"
+                    correct_result = await db.execute(
+                        update(AttendanceRecord)
+                        .where(
+                            and_(
+                                AttendanceRecord.student_id == leave.student_id,
+                                AttendanceRecord.school_id == leave.school_id,
+                                AttendanceRecord.record_date >= leave.start_date,
+                                AttendanceRecord.record_date <= leave.end_date,
+                                AttendanceRecord.status == "absent",
+                            )
+                        )
+                        .values(status="leave", note=correction_note)
+                    )
+                    corrected_count = correct_result.rowcount
+
+                    # 创建考勤记录（跳过已有记录，含刚冲正的）
                     existing_dates_result = await db.execute(
                         select(AttendanceRecord.record_date).where(
                             AttendanceRecord.school_id == leave.school_id,
@@ -876,6 +932,7 @@ class AttendanceService:
                         "status": "grade_approved",
                         "student_id": leave.student_id,
                         "attendance_created": len(att_records),
+                        "corrected_count": corrected_count,
                     })
 
         await db.commit()
@@ -1383,3 +1440,68 @@ class AttendanceService:
             })
 
         return rows
+
+    # ═══════════════════════════════════════════════════════════════
+    #  GAP-1 & GAP-2: 班级考勤历史聚合矩阵 (CASE WHEN 单次扫描)
+    # ═══════════════════════════════════════════════════════════════
+
+    @classmethod
+    async def get_class_attendance_history(
+        cls,
+        db: AsyncSession,
+        school_id: int,
+        class_id: int,
+        start_date: date,
+        end_date: date,
+    ) -> List[Dict]:
+        """
+        班级考勤历史聚合 — 按天多态状态矩阵
+
+        利用 CASE WHEN 在数据库端单次扫描完成按天归总：
+        date | total | present | absent_critical | warning | leave
+
+        性能足以支撑前端 ECharts 折线大盘瞬时轰击。
+        """
+        stmt = (
+            select(
+                AttendanceRecord.record_date.label("date"),
+                func.count(AttendanceRecord.id).label("total_students"),
+                func.sum(case(
+                    (AttendanceRecord.status == "present", 1), else_=0
+                )).label("present_count"),
+                func.sum(case(
+                    (AttendanceRecord.status == "absent", 1), else_=0
+                )).label("absent_critical_count"),
+                func.sum(case(
+                    (AttendanceRecord.status.in_(["late", "early"]), 1), else_=0
+                )).label("warning_count"),
+                func.sum(case(
+                    (AttendanceRecord.status == "leave", 1), else_=0
+                )).label("leave_count"),
+            )
+            .where(
+                and_(
+                    AttendanceRecord.school_id == school_id,
+                    AttendanceRecord.class_id == class_id,
+                    AttendanceRecord.record_date >= start_date,
+                    AttendanceRecord.record_date <= end_date,
+                )
+            )
+            .group_by(AttendanceRecord.record_date)
+            .order_by(AttendanceRecord.record_date.desc())
+        )
+
+        res = await db.execute(stmt)
+        rows = res.all()
+
+        return [
+            {
+                "date": str(row.date) if row.date else None,
+                "total_students": int(row.total_students or 0),
+                "present_count": int(row.present_count or 0),
+                "absent_critical_count": int(row.absent_critical_count or 0),
+                "warning_count": int(row.warning_count or 0),
+                "leave_count": int(row.leave_count or 0),
+            }
+            for row in rows
+        ]
