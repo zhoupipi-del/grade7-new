@@ -721,26 +721,43 @@ from .schemas import (
     StudentHolisticProfile, GrowthDashboard,
     GrowthTimelineResponse as LegacyTimelineResponse,
 )
+from .pipeline import GrowthAggregationPipeline
 from sqlalchemy import func, and_, desc
 from core.models import get_local_now
+
+
+def _current_semester_label() -> str:
+    """计算当前学期标签 — 上学期(9月~次年2月) / 下学期(3月~8月)"""
+    now = get_local_now()
+    year, month = now.year, now.month
+    if month >= 9:
+        return f"{year}-{year+1}-1"
+    elif month <= 2:
+        return f"{year-1}-{year}-1"
+    else:
+        return f"{year-1}-{year}-2"
 
 
 async def add_timeline_event(
     db: AsyncSession, school_id: int, data: TimelineEventCreate, reporter_id: int = None,
 ) -> GrowthTimelineEvent:
-    """手动/系统注入成长事件"""
-    event = GrowthTimelineEvent(
-        school_id=school_id,
-        student_id=data.student_id,
-        dimension=data.dimension,
-        severity=data.severity,
-        event_type=data.event_type,
-        title=data.title,
-        occurred_at=data.occurred_at,
-        payload=data.payload,
-        reporter_id=reporter_id,
-    )
-    db.add(event)
+    """
+    手动/系统注入成长事件 — 委托给 pipeline.inject_timeline_event()
+    pipeline 提供枚举校验 (GrowthDimension / EventSeverity) + 多态JSON写入。
+    """
+    pipeline = GrowthAggregationPipeline(db)
+    event_data = {
+        "school_id": school_id,
+        "student_id": data.student_id,
+        "dimension": data.dimension,
+        "severity": data.severity,
+        "event_type": data.event_type,
+        "title": data.title,
+        "occurred_at": data.occurred_at,
+        "payload": data.payload,
+        "reporter_id": reporter_id,
+    }
+    event = await pipeline.inject_timeline_event(event_data)
     await db.commit()
     await db.refresh(event)
     return event
@@ -800,187 +817,57 @@ async def generate_snapshot(
     snapshot_type: str, period_label: str,
 ) -> GrowthPeriodicalSnapshot:
     """
-    生成周期性成长快照 — 五维归一化引擎
+    生成周期性成长快照 — 委托给 GrowthAggregationPipeline.run_semester_snapshot()
 
-    学术指数: 60%考试均分 + 40%错题健康度(100-critical_gap_ratio*50)
-    考勤指数: 100 - 缺勤次数*3 (min 0)
-    行为指数: 100 - 违纪次数*5 + 表彰次数*3 (clamp 0-100)
-    心理指数: green=100/yellow=80/orange=60/red=40, 默认90
-    活动指数: min(参与次数*10, 100)
+    Pipeline 使用 BOSS 钦定归一化公式:
+      学业: α·Avg(exam) + β·(1-Gap_critical_ratio)·100  (α=0.6, β=0.4)
+      考勤: 100 - N_critical×15 - N_warning×5
+      行为: 100 - violations×5 + honors×3
+      心理: risk_level映射 (green=100/yellow=80/orange=60/red=40)
+      活动: min(participations×10, 100)
+
+    7路跨模块聚合(grades/error_funnel/attendance/behavior/habit_cards/
+    psych_profiles/research_activities)，每路 try-except 软失败不阻塞。
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
-    academic_score = 0.0
-    attendance_score = 100.0
-    behavior_score = 100.0
-    psych_score = 90.0
-    activity_score = 0.0
-
-    metrics = {
-        "total_absent_count": 0,
-        "critical_gap_count": 0,
-        "behavior_violation_count": 0,
-        "honor_count": 0,
-    }
-
-    # ── 1. 学业：考试均分 + 错题断层 ──
-    try:
-        from modules.grades.models import GradeRecord, GradeSubject
-        avg_result = await db.execute(
-            select(func.avg(GradeRecord.score))
-            .where(
-                GradeRecord.student_id == student_id,
-                GradeRecord.school_id == school_id,
-            )
-        )
-        avg_val = avg_result.scalar()
-        if avg_val:
-            academic_score = float(avg_val) * 0.6
-
-        try:
-            from modules.error_funnel.models import KnowledgeGap
-            gap_result = await db.execute(
-                select(func.count(KnowledgeGap.id))
-                .where(
-                    KnowledgeGap.student_id == student_id,
-                    KnowledgeGap.gap_level == "critical",
-                )
-            )
-            critical_count = gap_result.scalar() or 0
-            total_gap_result = await db.execute(
-                select(func.count(KnowledgeGap.id))
-                .where(KnowledgeGap.student_id == student_id)
-            )
-            total_gaps = total_gap_result.scalar() or 1
-            gap_ratio = critical_count / total_gaps if total_gaps > 0 else 0
-            academic_score += (100 - gap_ratio * 50) * 0.4
-            metrics["critical_gap_count"] = critical_count
-        except Exception:
-            academic_score += 40.0
-    except Exception as e:
-        logger.warning(f"[growth] 学业数据聚合失败: {e}")
-
-    # ── 2. 考勤：缺勤次数 ──
-    try:
-        from modules.attendance.models import AttendanceRecord
-        absent_result = await db.execute(
-            select(func.count(AttendanceRecord.id))
-            .where(
-                AttendanceRecord.student_id == student_id,
-                AttendanceRecord.school_id == school_id,
-                AttendanceRecord.status != "present",
-            )
-        )
-        absent_count = absent_result.scalar() or 0
-        attendance_score = max(0.0, 100.0 - absent_count * 3)
-        metrics["total_absent_count"] = absent_count
-    except Exception as e:
-        logger.warning(f"[growth] 考勤数据聚合失败: {e}")
-
-    # ── 3. 行为：违纪次数 + 表彰 ──
-    try:
-        from modules.behavior.models import DisciplineRecord
-        violation_result = await db.execute(
-            select(func.count(DisciplineRecord.id))
-            .where(
-                DisciplineRecord.student_id == student_id,
-                DisciplineRecord.school_id == school_id,
-            )
-        )
-        violation_count = violation_result.scalar() or 0
-        behavior_score = max(0.0, 100.0 - violation_count * 5)
-        metrics["behavior_violation_count"] = violation_count
-
-        try:
-            from modules.habit_cards.models import HonorCard
-            honor_result = await db.execute(
-                select(func.count(HonorCard.id))
-                .where(
-                    HonorCard.student_id == student_id,
-                    HonorCard.school_id == school_id,
-                )
-            )
-            honor_count = honor_result.scalar() or 0
-            behavior_score = min(100.0, behavior_score + honor_count * 3)
-            metrics["honor_count"] = honor_count
-        except Exception:
-            pass
-    except Exception as e:
-        logger.warning(f"[growth] 行为数据聚合失败: {e}")
-
-    # ── 4. 心理：psych_profiles risk_level ──
-    try:
-        from modules.psych_profiles.models import PsychProfile
-        psych_result = await db.execute(
-            select(PsychProfile.risk_level)
-            .where(
-                PsychProfile.student_id == student_id,
-                PsychProfile.school_id == school_id,
-            )
-            .order_by(desc(PsychProfile.updated_at))
-            .limit(1)
-        )
-        risk_level = psych_result.scalar()
-        if risk_level:
-            risk_map = {"green": 100.0, "yellow": 80.0, "orange": 60.0, "red": 40.0,
-                        "low": 100.0, "medium": 80.0, "high": 60.0}
-            psych_score = risk_map.get(risk_level.lower() if isinstance(risk_level, str) else "low", 90.0)
-    except Exception as e:
-        logger.warning(f"[growth] 心理数据聚合失败: {e}")
-
-    # ── 5. 活动：教研活动参与 ──
-    try:
-        from modules.research_activities.models import ActivityParticipant
-        act_result = await db.execute(
-            select(func.count(ActivityParticipant.id))
-            .where(ActivityParticipant.student_id == student_id)
-        )
-        act_count = act_result.scalar() or 0
-        activity_score = min(100.0, float(act_count * 10))
-    except Exception as e:
-        logger.warning(f"[growth] 活动数据聚合失败: {e}")
-
-    academic_score = min(100.0, max(0.0, round(academic_score, 1)))
-    attendance_score = min(100.0, max(0.0, round(attendance_score, 1)))
-    behavior_score = min(100.0, max(0.0, round(behavior_score, 1)))
-    psych_score = min(100.0, max(0.0, round(psych_score, 1)))
-    activity_score = min(100.0, max(0.0, round(activity_score, 1)))
-
-    existing = await db.execute(
-        select(GrowthPeriodicalSnapshot)
-        .where(
-            GrowthPeriodicalSnapshot.student_id == student_id,
-            GrowthPeriodicalSnapshot.snapshot_type == snapshot_type,
-            GrowthPeriodicalSnapshot.period_label == period_label,
-        )
+    pipeline = GrowthAggregationPipeline(db)
+    snapshot = await pipeline.run_semester_snapshot(
+        student_id=student_id,
+        semester_label=period_label,
+        school_id=school_id,
+        snapshot_type=snapshot_type,
     )
-    snap = existing.scalar_one_or_none()
-    if snap:
-        snap.academic_score = academic_score
-        snap.attendance_score = attendance_score
-        snap.behavior_score = behavior_score
-        snap.psych_score = psych_score
-        snap.activity_score = activity_score
-        snap.summary_metrics = metrics
-    else:
-        snap = GrowthPeriodicalSnapshot(
-            school_id=school_id, student_id=student_id,
-            snapshot_type=snapshot_type, period_label=period_label,
-            academic_score=academic_score, attendance_score=attendance_score,
-            behavior_score=behavior_score, psych_score=psych_score,
-            activity_score=activity_score, summary_metrics=metrics,
-        )
-        db.add(snap)
     await db.commit()
-    await db.refresh(snap)
-    return snap
+    return snapshot
 
 
 async def get_holistic_profile(
     db: AsyncSession, school_id: int, student_id: int,
+    semester_label: str = None,
 ) -> dict:
-    """全息成长画像 — 快照 + 历史 + 近期事件 + 7路融合时间轴"""
+    """
+    全息成长画像 — 自动生成当期快照 + 历史趋势 + 近期事件 + 7路融合时间轴
+
+    如果传入了 semester_label，会先调用 pipeline.run_semester_snapshot()
+    自动生成/刷新该学期快照，确保 current_snapshot 不为 null。
+    如果未传入，默认计算当前学期标签。
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # ── 0. 自动生成/刷新当期快照 ──
+    effective_label = semester_label or _current_semester_label()
+    try:
+        pipeline = GrowthAggregationPipeline(db)
+        await pipeline.run_semester_snapshot(
+            student_id=student_id,
+            semester_label=effective_label,
+            school_id=school_id,
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"[growth] pipeline快照自动生成失败(不阻塞画像查询): {e}")
+
+    # ── 1. 学生基本信息 ──
     student_result = await db.execute(
         select(Student)
         .options(selectinload(Student.class_))
@@ -992,6 +879,7 @@ async def get_holistic_profile(
 
     class_name = student.class_.name if student.class_ else "未分班"
 
+    # ── 2. 拉取全部历史快照（按创建时间降序，最新在前供 ECharts 折线图）──
     snap_result = await db.execute(
         select(GrowthPeriodicalSnapshot)
         .where(
@@ -1006,6 +894,7 @@ async def get_holistic_profile(
     for s in snapshots:
         snapshot_list.append(_snapshot_to_response(s))
 
+    # ── 3. 近期20条成长事件 ──
     events, event_total = await list_timeline_events(
         db, school_id, student_id=student_id, page=1, page_size=20
     )

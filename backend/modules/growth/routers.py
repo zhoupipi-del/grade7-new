@@ -288,12 +288,20 @@ async def list_events(
 @router.get("/profile/{student_id}", summary="学生全息成长画像")
 async def holistic_profile(
     student_id: int,
+    semester_label: Optional[str] = Query(None, description="学期标签，如 2025-2026-2（不传则自动计算当前学期）"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """全息成长画像 — 快照+历史+近期事件+7路融合"""
+    """
+    全息成长画像 — 自动生成当期快照 + 历史趋势 + 近期事件 + 7路融合时间轴
+
+    请求触发时自动调用 GrowthAggregationPipeline.run_semester_snapshot()
+    归一化五维数据，确保 current_snapshot 始终为最新。
+    """
     await _verify_student_access(student_id, user, db)
-    profile = await growth_svc.get_holistic_profile(db, user.school_id, student_id)
+    profile = await growth_svc.get_holistic_profile(
+        db, user.school_id, student_id, semester_label=semester_label,
+    )
     if not profile:
         raise HTTPException(404, "学生不存在")
     return profile
