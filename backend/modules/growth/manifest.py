@@ -1,13 +1,13 @@
 """
-modules/growth/manifest.py — 家长端成长时间轴模块元信息
+modules/growth/manifest.py — 成长档案模块元信息
 
-Wings 3.0 数据融合只读模块，无自身 DB 表，
-聚合 discipline_records + discipline_sanctions + attendance_records 生成统一时间轴。
+P0 重型母舰模块：双表驱动（timeline_events + periodical_snapshots），
+聚合 7 路数据源 + 五维归一化快照引擎 + 全息画像。
 """
 MODULE_CODE = "growth"
-MODULE_NAME = "成长时间轴"
+MODULE_NAME = "成长档案"
 MODULE_CATEGORY = "engagement"
-MODULE_DEPENDENCIES = ["behavior", "discipline", "attendance"]
+MODULE_DEPENDENCIES = ["behavior", "discipline", "attendance", "grades", "error_funnel", "psych_profiles"]
 ENABLED_BY_DEFAULT = True
 
 

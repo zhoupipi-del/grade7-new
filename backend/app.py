@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
     import modules.ai_prescription.models  # noqa: F401
     import modules.notifications.models   # noqa: F401
     import modules.dashboard.models        # noqa: F401  (纯聚合，不建表)
-    import modules.growth.models          # noqa: F401  (只读融合模块，不建表)
+    import modules.growth.models          # noqa: F401  (P0双表: timeline_events + periodical_snapshots)
     import modules.approval.models        # noqa: F401
     import modules.teach_math.models     # noqa: F401
     import modules.risk_models.models    # noqa: F401

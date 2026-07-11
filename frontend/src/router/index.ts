@@ -226,14 +226,14 @@ const routes: RouteRecordRaw[] = [
           roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'PARENT'] as UserRole[],
         },
       },
-      // 成长时间轴
+      // 成长档案 (P0双表: 时光轴+五维快照+全息画像)
       {
         path: 'growth',
         name: 'GrowthTimeline',
         component: () => import('@/views/growth/Index.vue'),
         meta: {
-          title: '成长时间轴',
-          icon: 'Timer',
+          title: '成长档案',
+          icon: 'TrendCharts',
           roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'PARENT'] as UserRole[],
         },
       },

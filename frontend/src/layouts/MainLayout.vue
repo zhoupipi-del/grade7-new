@@ -235,8 +235,8 @@ const allMenuGroups: MenuGroup[] = [
       },
       {
         index: '/growth',
-        title: '成长时间轴',
-        icon: 'Timer',
+        title: '成长档案',
+        icon: 'TrendCharts',
         roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
       },
       {
@@ -523,7 +523,7 @@ const allMenuGroups: MenuGroup[] = [
       {
         index: '/growth',
         title: '成长时间轴',
-        icon: 'Timer',
+        icon: 'TrendCharts',
         roles: ['PARENT'],
       },
       {
