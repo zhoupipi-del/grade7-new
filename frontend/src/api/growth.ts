@@ -9,7 +9,7 @@
  *   [新] GET /growth/dashboard               — 成长档案看板统计
  *   [新] POST /growth/events                 — 创建成长事件
  *   [新] GET /growth/events                  — 列出成长事件(分页+筛选)
- *   [新] GET /growth/profile/{student_id}    — 学生全息成长画像
+ *   [新] GET /growth/profile/{student_id}    — 学生全息成长画像(支持semester_label)
  *   [新] POST /growth/snapshots/generate     — 生成周期快照(五维引擎)
  *   [新] GET /growth/snapshots               — 列出成长快照
  *   [新] PUT /growth/snapshots/{id}/comment  — 更新班主任评语
@@ -34,17 +34,19 @@ export type GrowthEventType =
   | 'gap_warning'
   | 'honor'
   | 'psych_alert'
+  | 'pipeline_test_event'
 
-export type EventSeverity = 'info' | 'warning' | 'danger' | 'success'
+/** 事件级别 — 与后端 schemas.py 对齐: info/bonus/warning/critical */
+export type EventSeverity = 'info' | 'bonus' | 'warning' | 'critical'
 
 export interface TimelineItem {
   event_id: string
-  event_type: GrowthEventType
+  event_type: GrowthEventType | string
   occurred_at: string
   event_date: string
   title: string
   description: string | null
-  severity: EventSeverity
+  severity: EventSeverity | string
   related_id: number | null
   source_table: string | null
 }
@@ -58,36 +60,50 @@ export interface GrowthTimelineResponse {
 }
 
 // ═══════════════════════════════════════════════════
-// P0 新增类型定义
+// P0 新增类型定义 — 与后端 schemas.py 严格对齐
 // ═══════════════════════════════════════════════════
 
-/** 成长事件维度 */
-export type GrowthDimension = 'academic' | 'attendance' | 'behavior' | 'psych' | 'activity'
+/** 成长事件维度 — 后端用 psychology 不是 psych */
+export type GrowthDimension = 'academic' | 'attendance' | 'behavior' | 'psychology' | 'activity'
 
 /** 快照类型 */
 export type SnapshotType = 'monthly' | 'semester'
 
-/** ── 看板响应 ─────────────────────────────── */
+/** ── 五维雷达得分 (后端 RadarDimensions) ─────────── */
 
-export interface GrowthDashboard {
-  total_students: number
-  total_events: number
-  total_snapshots: number
-  critical_count: number
-  warning_count: number
-  bonus_count: number
-  dimension_distribution: Record<string, number>
-  recent_critical: Array<{
-    student_id: number
-    student_name: string
-    class_name: string
-    dimension: string
-    title: string
-    occurred_at: string
-  }>
+export interface RadarDimensions {
+  academic: number
+  attendance: number
+  behavior: number
+  psychology: number  // 后端用 psychology
+  activity: number
 }
 
-/** ── 成长事件 (P0双表) ────────────────────── */
+/** ── 快照统计摘要 (后端 SnapshotMetricsSummary) ──── */
+
+export interface SnapshotMetricsSummary {
+  total_absent_count: number
+  critical_gap_count: number
+  behavior_violation_count: number
+  honor_count: number
+  additional_info: Record<string, any>
+}
+
+/** ── 周期快照响应 (后端 GrowthSnapshotResponse) ───── */
+
+export interface GrowthSnapshotResponse {
+  id: number
+  student_id: number
+  snapshot_type: SnapshotType | string
+  period_label: string
+  scores: RadarDimensions
+  metrics_summary: SnapshotMetricsSummary
+  teacher_comment: string | null
+  ai_growth_prescription: string | null
+  created_at: string
+}
+
+/** ── 成长事件 (P0双表) ────────────────────────────── */
 
 export interface TimelineEventCreate {
   student_id: number
@@ -95,21 +111,19 @@ export interface TimelineEventCreate {
   severity: EventSeverity
   event_type: string
   title: string
-  occurred_at?: string
+  occurred_at: string  // 后端必填
   payload?: Record<string, any> | null
 }
 
 export interface TimelineEventResponse {
   id: number
-  school_id: number
   student_id: number
-  dimension: GrowthDimension
-  severity: EventSeverity
+  dimension: string
+  severity: string
   event_type: string
   title: string
   occurred_at: string
   payload: Record<string, any> | null
-  reporter_id: number | null
   reporter_name: string | null
   created_at: string
 }
@@ -121,41 +135,7 @@ export interface TimelineEventListResponse {
   page_size: number
 }
 
-/** ── 五维快照 ─────────────────────────────── */
-
-export interface RadarDimensions {
-  academic: number
-  attendance: number
-  behavior: number
-  psych: number
-  activity: number
-}
-
-export interface SnapshotMetricsSummary {
-  absence_count: number
-  gap_count: number
-  violation_count: number
-  honor_count: number
-}
-
-export interface GrowthSnapshotResponse {
-  id: number
-  school_id: number
-  student_id: number
-  student_name: string | null
-  class_name: string | null
-  snapshot_type: SnapshotType
-  period_label: string
-  academic_score: number
-  attendance_score: number
-  behavior_score: number
-  psych_score: number
-  activity_score: number
-  summary_metrics: SnapshotMetricsSummary | null
-  teacher_comment: string | null
-  ai_growth_prescription: string | null
-  created_at: string
-}
+/** ── 快照生成请求 ─────────────────────────────────── */
 
 export interface SnapshotGenerateRequest {
   student_id: number
@@ -166,26 +146,40 @@ export interface SnapshotGenerateRequest {
 export interface SnapshotListResponse {
   items: GrowthSnapshotResponse[]
   total: number
+  page: number
+  page_size: number
 }
 
-/** ── 全息画像 ─────────────────────────────── */
+/** ── 全息画像 (后端 StudentHolisticProfile) ───────── */
+/** 后端返回扁平结构: student_id/student_name/class_name */
 
 export interface StudentHolisticProfile {
-  student: {
-    id: number
-    name: string
-    class_name: string | null
-    grade_name: string | null
-  }
+  student_id: number
+  student_name: string
+  class_name: string
   current_snapshot: GrowthSnapshotResponse | null
   historical_snapshots: GrowthSnapshotResponse[]
   recent_events: TimelineEventResponse[]
 }
 
-/** ── 班主任评语 ───────────────────────────── */
+/** ── 班主任评语 ───────────────────────────────────── */
 
 export interface TeacherCommentUpdate {
   teacher_comment: string
+}
+
+/** ── 看板 (后端 GrowthDashboard) ──────────────────── */
+/** dimension_distribution 后端返回 List[Dict] 非 Dict */
+
+export interface GrowthDashboard {
+  total_students: number
+  total_events: number
+  total_snapshots: number
+  critical_events: number
+  warning_events: number
+  bonus_events: number
+  dimension_distribution: Array<{ dimension: string; count: number }>
+  recent_critical_events: TimelineEventResponse[]
 }
 
 // ═══════════════════════════════════════════════════
@@ -214,8 +208,9 @@ export function getGrowthDashboard() {
 
 // ── P0 新增: 成长事件 ──
 
+/** POST /events 后端返回 {id, title, dimension} 而非完整 TimelineEventResponse */
 export function createTimelineEvent(data: TimelineEventCreate) {
-  return request.post<any, TimelineEventResponse>('/growth/events', data)
+  return request.post<any, { id: number; title: string; dimension: string }>('/growth/events', data)
 }
 
 export function listTimelineEvents(params?: {
@@ -230,8 +225,11 @@ export function listTimelineEvents(params?: {
 
 // ── P0 新增: 全息画像 ──
 
-export function getHolisticProfile(studentId: number) {
-  return request.get<any, StudentHolisticProfile>(`/growth/profile/${studentId}`)
+/** GET /profile/{student_id}?semester_label=2025-2026-2 */
+export function getHolisticProfile(studentId: number, semesterLabel?: string) {
+  return request.get<any, StudentHolisticProfile>(`/growth/profile/${studentId}`, {
+    params: semesterLabel ? { semester_label: semesterLabel } : undefined,
+  })
 }
 
 // ── P0 新增: 快照 ──
@@ -249,8 +247,9 @@ export function listSnapshots(params?: {
   return request.get<any, SnapshotListResponse>('/growth/snapshots', { params })
 }
 
+/** PUT /snapshots/{id}/comment 后端返回 {id, teacher_comment} 而非完整快照 */
 export function updateTeacherComment(snapshotId: number, data: TeacherCommentUpdate) {
-  return request.put<any, GrowthSnapshotResponse>(`/growth/snapshots/${snapshotId}/comment`, data)
+  return request.put<any, { id: number; teacher_comment: string }>(`/growth/snapshots/${snapshotId}/comment`, data)
 }
 
 // ═══════════════════════════════════════════════════
@@ -270,20 +269,26 @@ export const EVENT_TYPE_META: Record<string, { label: string; icon: string; colo
   gap_warning: { label: '断层预警', icon: 'WarningFilled', color: '#e6a23c' },
   honor: { label: '荣誉表彰', icon: 'Trophy', color: '#67c23a' },
   psych_alert: { label: '心理预警', icon: 'Sunny', color: '#db6d28' },
+  pipeline_test_event: { label: '测试事件', icon: 'InfoFilled', color: '#909399' },
 }
 
-export const SEVERITY_TAG_TYPE: Record<EventSeverity, 'primary' | 'success' | 'warning' | 'danger' | 'info'> = {
+/** 后端 severity 枚举: info/bonus/warning/critical (兼容旧版 success/danger) */
+export const SEVERITY_TAG_TYPE: Record<string, 'primary' | 'success' | 'warning' | 'danger' | 'info'> = {
   info: 'info',
+  bonus: 'success',
   warning: 'warning',
-  danger: 'danger',
+  critical: 'danger',
+  // 旧版7路融合时间轴兼容
   success: 'success',
+  danger: 'danger',
 }
 
-export const DIMENSION_META: Record<GrowthDimension, { label: string; color: string; icon: string }> = {
+/** 维度元数据 — psychology 不是 psych */
+export const DIMENSION_META: Record<string, { label: string; color: string; icon: string }> = {
   academic: { label: '学术', color: '#409eff', icon: 'Reading' },
   attendance: { label: '考勤', color: '#67c23a', icon: 'Calendar' },
   behavior: { label: '行为', color: '#e6a23c', icon: 'Warning' },
-  psych: { label: '心理', color: '#8b5cf6', icon: 'Sunny' },
+  psychology: { label: '心理', color: '#8b5cf6', icon: 'Sunny' },
   activity: { label: '活动', color: '#f56c6c', icon: 'Trophy' },
 }
 
@@ -299,6 +304,14 @@ export const DIMENSION_OPTIONS = Object.entries(DIMENSION_META).map(([value, met
   color: meta.color,
 }))
 
+/** Severity 选项 — 对齐后端枚举 */
+export const SEVERITY_OPTIONS: Array<{ value: EventSeverity; label: string; color: string }> = [
+  { value: 'info', label: '信息', color: '#909399' },
+  { value: 'bonus', label: '荣誉', color: '#67c23a' },
+  { value: 'warning', label: '预警', color: '#e6a23c' },
+  { value: 'critical', label: '危机', color: '#f56c6c' },
+]
+
 export function eventTypeLabel(type: string): string {
   return EVENT_TYPE_META[type]?.label || type
 }
@@ -311,20 +324,28 @@ export function eventTypeColor(type: string): string {
   return EVENT_TYPE_META[type]?.color || '#909399'
 }
 
-export function severityTagType(severity: EventSeverity | string): 'primary' | 'success' | 'warning' | 'danger' | 'info' {
-  return SEVERITY_TAG_TYPE[severity as EventSeverity] || 'info'
+export function severityTagType(severity: string): 'primary' | 'success' | 'warning' | 'danger' | 'info' {
+  return SEVERITY_TAG_TYPE[severity] || 'info'
 }
 
-export function dimensionLabel(dim: GrowthDimension | string): string {
-  return DIMENSION_META[dim as GrowthDimension]?.label || dim
+export function severityLabel(severity: string): string {
+  const meta: Record<string, string> = {
+    info: '信息', bonus: '荣誉', warning: '预警', critical: '危机',
+    success: '进步', danger: '严重',  // 旧版兼容
+  }
+  return meta[severity] || severity
 }
 
-export function dimensionColor(dim: GrowthDimension | string): string {
-  return DIMENSION_META[dim as GrowthDimension]?.color || '#909399'
+export function dimensionLabel(dim: string): string {
+  return DIMENSION_META[dim]?.label || dim
+}
+
+export function dimensionColor(dim: string): string {
+  return DIMENSION_META[dim]?.color || '#909399'
 }
 
 /** 快照类型 -> 中文标签 */
-export function snapshotTypeLabel(type: SnapshotType): string {
+export function snapshotTypeLabel(type: string): string {
   return type === 'monthly' ? '月度快照' : '学期快照'
 }
 
@@ -342,6 +363,14 @@ export function scoreLevelTag(score: number): string {
   if (score >= 75) return 'primary'
   if (score >= 60) return 'warning'
   return 'danger'
+}
+
+/** 五维分数 -> 颜色 */
+export function scoreColor(score: number): string {
+  if (score >= 90) return '#67c23a'
+  if (score >= 75) return '#409eff'
+  if (score >= 60) return '#e6a23c'
+  return '#f56c6c'
 }
 
 // ═══════════════════════════════════════════════════
@@ -371,7 +400,7 @@ export function getDemoTimeline(studentId: number): GrowthTimelineResponse {
         event_date: fmtDate(addDays(baseDate, 33)),
         title: '期末综合评价完成',
         description: '2025-2026-2 学期综合评价等级：B（良好）。',
-        severity: 'success',
+        severity: 'bonus',
         related_id: 100,
         source_table: 'evaluation_scores',
       },
@@ -382,7 +411,7 @@ export function getDemoTimeline(studentId: number): GrowthTimelineResponse {
         event_date: fmtDate(addDays(baseDate, 30)),
         title: '回血进展：行为改善中',
         description: '连续 12 天无新的违纪记录，回血进度 60%。',
-        severity: 'success',
+        severity: 'bonus',
         related_id: 42,
         source_table: 'recovery_states',
       },
@@ -393,7 +422,7 @@ export function getDemoTimeline(studentId: number): GrowthTimelineResponse {
         event_date: fmtDate(addDays(baseDate, 22)),
         title: '行政处分：警告',
         description: '因携带手机进校被给予警告处分。',
-        severity: 'danger',
+        severity: 'critical',
         related_id: 42,
         source_table: 'discipline_sanctions',
       },
@@ -404,7 +433,7 @@ export function getDemoTimeline(studentId: number): GrowthTimelineResponse {
         event_date: fmtDate(addDays(baseDate, 22)),
         title: '行为提醒：携带手机进校',
         description: '在上午课堂中被发现使用手机。',
-        severity: 'danger',
+        severity: 'critical',
         related_id: 156,
         source_table: 'discipline_records',
       },
@@ -437,7 +466,7 @@ export function getDemoTimeline(studentId: number): GrowthTimelineResponse {
         event_date: fmtDate(addDays(baseDate, 7)),
         title: '回血完成：历史扣分已恢复',
         description: '5月份行为表现良好，扣分已成功恢复。',
-        severity: 'success',
+        severity: 'bonus',
         related_id: 30,
         source_table: 'recovery_states',
       },
