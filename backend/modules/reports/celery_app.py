@@ -34,6 +34,7 @@ celery_engine = Celery(
         "modules.ai_prescription.tasks",
         "modules.risk_models.tasks",   # Phase 2A: RDI 异步任务骨架
         "modules.approval.tasks",       # Phase 2B: 审批超时扫描器
+        "modules.timetable.tasks",      # Wings 3.1: 时空发电机 (Beat 02:00)
     ],
 )
 
@@ -78,9 +79,10 @@ celery_engine.conf.update(
         "generate_class_moral_report": {"queue": "maintenance"},
         "reports.precompute_snapshots": {"queue": "maintenance"},
         "risk_models.*":               {"queue": "maintenance"},
-        # 🟢 定时任务：审计报表、数据备份 + 审批超时扫描
+        # 🟢 定时任务：审计报表、数据备份 + 审批超时扫描 + 时空发电机
         "reports.periodic_*":          {"queue": "periodic"},
         "approval.*":                  {"queue": "periodic"},  # Phase 2B
+        "timetable.*":                 {"queue": "periodic"},  # Wings 3.1
     },
 
     # ── Celery Beat 调度 (Phase 2B: RDI 每日全量扫描已激活) ──
@@ -106,6 +108,12 @@ celery_engine.conf.update(
         # 每日凌晨 2:00 系统合规审计 (清网迁移: 原 Flask audit_report.py)
         "system-daily-audit": {
             "task": "reports.periodic_audit_report",
+            "schedule": crontab(hour=2, minute=0),
+            "options": {"queue": "periodic"},
+        },
+        # Wings 3.1: 每日凌晨 2:00 时空发电机 — 滚动生成未来 7 天课表实例
+        "timetable-auto-generate-instances": {
+            "task": "timetable.auto_generate_instances",
             "schedule": crontab(hour=2, minute=0),
             "options": {"queue": "periodic"},
         },
