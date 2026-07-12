@@ -149,3 +149,12 @@ class TeacherWeeklyScheduleOut(BaseModel):
     teacher_name: str
     semester: str
     schedule: dict[str, list[TeacherWeeklySlotOut]]
+
+
+# ── 教务变轨 (Wings 3.1 阵地⑦) ──
+
+class TimetableAdjustmentRequest(BaseModel):
+    """教务变轨请求 — 调课/代课"""
+    subject_id: int = Field(..., description="新替换的学科ID")
+    teacher_id: int = Field(..., description="新指派的授课教师ID")
+    adjustment_reason: Optional[str] = Field(None, max_length=255, description="调课/代课原因说明")
