@@ -198,6 +198,100 @@ function generateScanDates(length: number): string[] {
   return dates
 }
 
+// ═════════════════════════════════════════════════════════════════
+// 四维风险看板 Dashboard Metrics API (Step 3 前端拓扑升维)
+// ═════════════════════════════════════════════════════════════════
+
+export interface DashboardRadarData {
+  dimensions: string[]   // ['behavior', 'attendance', 'score', 'psych']
+  avg: number[]          // 四维均值
+  max: number[]          // 四维最大值
+}
+
+export interface DashboardSigmaFunnel {
+  normal: number    // <1σ
+  watch: number     // 1-2σ
+  warning: number   // 2-3σ
+  veto: number      // ≥3σ (一票否决)
+}
+
+export interface DashboardEventItem {
+  student_id: number
+  student_name: string
+  student_no: string | null
+  class_name: string
+  rdi_score: number
+  risk_level: string
+  risk_color: 'green' | 'yellow' | 'orange' | 'red' | 'black'
+  psych_deviation: number
+  psych_veto_triggered: boolean
+  veto_dimension: string | null
+  trigger_factor: string
+  warned_at: string
+  recommended_action: string
+}
+
+export interface DashboardTopStudent {
+  student_id: number
+  student_name: string
+  student_no: string | null
+  class_name: string
+  rdi_score: number
+  risk_level: string
+  behavior_deviation: number
+  attendance_deviation: number
+  score_deviation: number
+  psych_deviation: number
+  top_dimension: string
+  psych_veto_triggered: boolean
+  veto_dimension: string | null
+  is_escalating: boolean
+}
+
+export interface DashboardClassHeatmap {
+  class_id: number
+  class_name: string
+  total: number
+  normal: number
+  watch: number
+  warning: number
+  veto: number
+}
+
+export interface DashboardSummary {
+  total_students: number
+  at_risk_count: number
+  by_risk_level: {
+    normal: number
+    attention: number
+    intervention: number
+  }
+}
+
+export interface DashboardMetricsOut {
+  radar: DashboardRadarData
+  sigma_funnel: DashboardSigmaFunnel
+  event_stream: DashboardEventItem[]
+  top_risk_students: DashboardTopStudent[]
+  class_heatmap: DashboardClassHeatmap[]
+  summary: DashboardSummary
+  generated_at: string
+}
+
+/**
+ * 获取四维风险看板聚合数据
+ *
+ * GET /risk_models/dashboard-metrics
+ * RBAC: class_teacher 强制本班, grade_leader 自动取年级, ms_admin 全校
+ */
+export function getDashboardMetrics(params?: {
+  class_id?: number
+  grade_id?: number
+  limit_events?: number
+}) {
+  return request.get('/risk_models/dashboard-metrics', { params }) as Promise<DashboardMetricsOut>
+}
+
 // ─── Demo Data Generators ────────────────────────────────────────
 
 /** Generate demo RDIDiagnosis for offline fallback */

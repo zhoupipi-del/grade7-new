@@ -1,7 +1,7 @@
 import request from './request'
 
 /**
- * AI 德育处方 API 契约层
+ * AI 德育处方 API 契约层 V2
  *
  * Backend: /api/v1/ai_prescription/
  * - POST /student-intervention  → 202 (async Celery task)
@@ -10,13 +10,17 @@ import request from './request'
  * - GET  /history                → paginated history
  * - GET  /records/{record_id}    → single prescription record
  *
- * Real backend returns Markdown `full_text` (not structured measures[]).
- * This layer adapts async flow → structured AIPrescriptionPayload,
- * with demo-data fallback when backend is unavailable.
+ * V2 架构: Fact→Analysis→Growth 三段式
+ * - Fact段: 临床严谨(σ值精确表达, 禁模糊词)
+ * - Analysis段: 交叉归因(学业×行为×心理)
+ * - Growth段: 三层递进干预(即时→短期→持续)
+ *
+ * 数据源: raw_snapshot.llm_output.fact/analysis/growth
+ * 兜底: full_text Markdown 拼接 + measures[] 旧版兼容
  */
 
 // ═════════════════════════════════════════════════════════════════
-// Spec-defined Types (user specification)
+// V1 Legacy Types (backward compatibility)
 // ═════════════════════════════════════════════════════════════════
 
 export interface InterventionMeasure {
@@ -37,6 +41,28 @@ export interface AIPrescriptionPayload {
   analysis_summary: string
   generated_at: string
   measures: InterventionMeasure[]
+}
+
+// ═════════════════════════════════════════════════════════════════
+// V2 Types — Fact→Analysis→Growth 三段式
+// ═════════════════════════════════════════════════════════════════
+
+export type RiskLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+
+export interface AIPrescriptionPayloadV2 {
+  warning_id: number
+  student_name: string
+  class_name: string
+  rdi_score: number
+  risk_level: RiskLevel
+  generated_at: string
+  // V2 三段核心
+  fact: string       // 临床事实 — σ值、偏离度、EWMA趋势、一票否决标记
+  analysis: string   // 交叉归因 — 学业×行为×心理 诊断叙事
+  growth: string     // 三层递进 — 即时(24h)→短期(72h)→持续(4周)
+  // 兜底兼容
+  analysis_summary: string  // 摘要(兼容旧版 Header 展示)
+  measures?: InterventionMeasure[]  // V1 measures 兜底
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -122,7 +148,7 @@ export function getPrescriptionRecord(recordId: number) {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// Adapter: Real Backend Async Flow → Structured AIPrescriptionPayload
+// Adapter: Real Backend Async Flow → V2 AIPrescriptionPayload
 // ═════════════════════════════════════════════════════════════════
 
 /**
@@ -151,13 +177,106 @@ async function fetchRealPrescription(studentId: number, maxPolls = 20): Promise<
   }
 }
 
+// ═════════════════════════════════════════════════════════════════
+// V2 Parser: raw_snapshot.llm_output → three segments
+// ═════════════════════════════════════════════════════════════════
+
+/**
+ * Extract student_name from raw_snapshot.
+ * Priority: flat field → nested student.name → fallback '学生'
+ */
+function extractStudentName(result: PrescriptionResultOut): string {
+  const snap = result.raw_snapshot
+  if (!snap) return '学生'
+  // Try flat field first (V2 aggregator adds this)
+  if (snap.student_name && typeof snap.student_name === 'string') return snap.student_name
+  // Try nested student object
+  const student = snap.student as Record<string, any> | undefined
+  if (student?.name && typeof student.name === 'string') return student.name
+  return '学生'
+}
+
+/**
+ * Extract class_name from raw_snapshot.
+ * Priority: flat field → nested student.class_name → fallback '--'
+ */
+function extractClassName(result: PrescriptionResultOut): string {
+  const snap = result.raw_snapshot
+  if (!snap) return '--'
+  // Try flat field first (V2 aggregator adds this)
+  if (snap.class_name && typeof snap.class_name === 'string') return snap.class_name
+  // Try nested student.class_name
+  const student = snap.student as Record<string, any> | undefined
+  if (student?.class_name && typeof student.class_name === 'string') return student.class_name
+  // Try nested class object
+  const clazz = snap.class as Record<string, any> | undefined
+  if (clazz?.name && typeof clazz.name === 'string') return clazz.name
+  return '--'
+}
+
+/**
+ * Extract rdi_score from raw_snapshot.
+ * Priority: flat field → nested rdi_diagnosis.rdi_score → fallback 0
+ */
+function extractRdiScore(result: PrescriptionResultOut): number {
+  const snap = result.raw_snapshot
+  if (!snap) return 0
+  // Try flat field first (V2 aggregator adds this)
+  if (typeof snap.rdi_score === 'number') return snap.rdi_score
+  // Try nested rdi_diagnosis.rdi_score
+  const rdi = snap.rdi_diagnosis as Record<string, any> | undefined
+  if (rdi?.rdi_score && typeof rdi.rdi_score === 'number') return rdi.rdi_score
+  return 0
+}
+
+/**
+ * Extract Fact/Analysis/Growth from raw_snapshot.llm_output.
+ * Returns null if V2 structure not found.
+ */
+function parseLlmOutput(result: PrescriptionResultOut): {
+  fact: string
+  analysis: string
+  growth: string
+  risk_level: RiskLevel
+} | null {
+  const llmOutput = result.raw_snapshot?.llm_output
+  if (!llmOutput) return null
+
+  const fact = (llmOutput.fact as string) || ''
+  const analysis = (llmOutput.analysis as string) || ''
+  const growth = (llmOutput.growth as string) || ''
+
+  // At least one segment must have content
+  if (!fact && !analysis && !growth) return null
+
+  // Risk level: prefer llm_output.risk_level, then backend field
+  const rawLevel = (llmOutput.risk_level as string) || result.risk_level || 'MEDIUM'
+  const risk_level = normalizeRiskLevel(rawLevel)
+
+  return { fact, analysis, growth, risk_level }
+}
+
+/** Normalize risk level string to V2 enum */
+function normalizeRiskLevel(raw: string): RiskLevel {
+  const upper = raw.toUpperCase()
+  if (upper === 'CRITICAL') return 'CRITICAL'
+  if (upper === 'HIGH') return 'HIGH'
+  if (upper === 'MEDIUM') return 'MEDIUM'
+  if (upper === 'LOW') return 'LOW'
+  // Fallback: numeric threshold
+  return 'MEDIUM'
+}
+
+// ═════════════════════════════════════════════════════════════════
+// V1 Parser: Markdown full_text → measures[] (backward compat)
+// ═════════════════════════════════════════════════════════════════
+
 /**
  * Parse backend Markdown `full_text` into structured InterventionMeasure[].
  * Best-effort extraction — falls back to a single summary measure if parsing fails.
  */
 function parseMarkdownToMeasures(fullText: string): InterventionMeasure[] {
   const measures: InterventionMeasure[] = []
-  // Split by ## headers (Markdown chapters)
   const chapters = fullText.split(/^##\s+/m).filter(s => s.trim())
 
   chapters.forEach((chapter, idx) => {
@@ -167,13 +286,11 @@ function parseMarkdownToMeasures(fullText: string): InterventionMeasure[] {
     const category = lines[0].trim()
     const body = lines.slice(1).join('\n')
 
-    // Extract action items (lines starting with - or *)
     const actionLines = body.split('\n').filter(l => /^\s*[-*]\s+/.test(l))
     const actionPlan = actionLines.map(l => l.replace(/^\s*[-*]\s+/, '').trim()).filter(Boolean)
 
     if (actionPlan.length === 0) return
 
-    // Determine tag_type by keywords
     let tagType: InterventionMeasure['tag_type'] = 'info'
     if (/危机|心理|自伤|安全/i.test(category)) tagType = 'danger'
     else if (/学业|成绩|补偿/i.test(category)) tagType = 'warning'
@@ -194,7 +311,26 @@ function parseMarkdownToMeasures(fullText: string): InterventionMeasure[] {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// Demo Data (from user specification — realistic student case)
+// Demo Data V2 — 三段式真实案例 (黄泽彬 student204)
+// ═════════════════════════════════════════════════════════════════
+
+export function getDemoPrescriptionV2(warningId: number): AIPrescriptionPayloadV2 {
+  return {
+    warning_id: warningId,
+    student_name: '黄泽彬',
+    class_name: '初一(5)班',
+    rdi_score: 5.23,
+    risk_level: 'HIGH',
+    generated_at: new Date().toISOString(),
+    analysis_summary: '行为×心理×学业三维叠加恶性循环，RDI 5.23 RED级干预',
+    fact: `**RDI 综合偏离指数**: 5.23 (干预阈值 ≥4.5)\n\n**四维偏离度**:\n- 行为维度: Z=+1.8σ (近两周连续3次课堂冲突)\n- 考勤维度: Z=+1.2σ (累计旷课4节)\n- 学业维度: Z=-0.9σ (月考数学下降22分)\n- 心理维度: Z=+2.1σ ⚠️ [焦虑因子得分≥4.0]\n\n**EWMA趋势**: 指数加权移动平均呈持续上行，近7日斜率+0.12/天\n\n**心理一票否决**: psych_veto_triggered=False (无维度超3σ)\n\n**一票否决互锁**: discipline_veto=False, psych_veto=False → 未触发强制RED升级`,
+    analysis: `**交叉归因诊断**: 行为×心理×学业三维叠加恶性循环\n\n该生行为冲突并非单纯纪律问题，而是心理承压过载的外化表现。课堂冲突频率(3次/2周)与焦虑因子Z=+2.1σ高度关联，提示冲突行为可能为焦虑情绪的行为代偿——当内在焦虑无法通过言语表达时，外化为对课堂秩序的对抗性反应。\n\n学业维度Z=-0.9σ与行为维度Z=+1.8σ呈现「负相关耦合」: 学业下滑→课堂回避→冲突升级→处罚加重→焦虑加剧→学业继续下滑。此循环若不加阻断，EWMA预测7日内RDI将突破6.0阈值。\n\n**风险等级判定**: RED (RDI≥5.0 + 心理维度Z>2σ)\n\n**退潮保护**: 30天窗口内min_rdi=1.5，暂不触发大退潮保护`,
+    growth: `**第一层: 即时干预 (24h内启动)**\n1. 安排校心理室专职教师进行一对一评估访谈(非诊断性、非评价性)\n2. 建立心理教师—班主任—家长三方信息同步通道，每日一次状态简报\n3. 暂停一切公开性批评场景，改用课后单独沟通模式\n4. 若评估发现自伤倾向指标，立即启动校危预案并通知区心理援助中心\n\n**第二层: 短期补偿 (72h内启动)**\n1. 数学教师本周完成知识盲点定位(近3次作业错题集中模块)\n2. 安排同伴互助小组: 指定数学前10%学生结对，每周2次课间答疑\n3. 教师办公时间开放: 每周二/四午休12:30-13:00接受个别提问\n\n**第三层: 持续成长 (4周跟踪)**\n1. 班主任48h内完成一次家访或深度电话沟通(非成绩通报性质)\n2. 引导家长签署《家校协同支持公约》——承诺2周内不在公开场合讨论成绩\n3. 每周五推送正向行为记录(至少2条)，重建积极关注\n4. 两周后阶段性小测(仅基础题)检验补偿效果并调整方案`,
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════
+// V1 Demo Data (kept for backward compat)
 // ═════════════════════════════════════════════════════════════════
 
 export function getDemoPrescription(warningId: number): AIPrescriptionPayload {
@@ -257,25 +393,82 @@ export function getDemoPrescription(warningId: number): AIPrescriptionPayload {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// Public API: getAIPrescription (user spec signature)
+// Public API V2: getAIPrescriptionV2
 // ═════════════════════════════════════════════════════════════════
 
 /**
- * Fetch AI prescription by warning_id.
+ * Fetch AI prescription V2 (Fact→Analysis→Growth 三段式).
  *
  * Strategy:
- * 1. Try real backend async flow (trigger → poll → result)
- * 2. If successful, parse Markdown full_text into structured measures
- * 3. If backend unavailable or returns insufficient data, fall back to demo data
- *
- * @param warning_id - RDI warning ID (used as student_id proxy in demo mode)
- * @param student_id - Optional explicit student_id for real backend call
+ * 1. Try real backend → parse raw_snapshot.llm_output for V2 segments
+ * 2. If V2 segments found, return three-segment payload
+ * 3. If V2 not found but full_text exists, fallback to V1 measures[] + raw text
+ * 4. If backend unavailable, fall back to V2 demo data
+ */
+export async function getAIPrescriptionV2(
+  warning_id: number,
+  student_id?: number
+): Promise<AIPrescriptionPayloadV2> {
+  // Try real backend if student_id is provided
+  if (student_id && student_id > 0) {
+    const realResult = await fetchRealPrescription(student_id)
+
+    if (realResult) {
+      // Priority: V2 segments from raw_snapshot.llm_output
+      const llmParsed = parseLlmOutput(realResult)
+      if (llmParsed && (llmParsed.fact || llmParsed.analysis || llmParsed.growth)) {
+        return {
+          warning_id,
+          student_name: extractStudentName(realResult),
+          class_name: extractClassName(realResult),
+          rdi_score: extractRdiScore(realResult),
+          risk_level: llmParsed.risk_level,
+          generated_at: realResult.created_at ?? new Date().toISOString(),
+          fact: llmParsed.fact,
+          analysis: llmParsed.analysis,
+          growth: llmParsed.growth,
+          analysis_summary: llmParsed.analysis || realResult.summary || 'AI 分析完成',
+        }
+      }
+
+      // Fallback 1: V1 measures[] from full_text Markdown
+      if (realResult.full_text) {
+        const measures = parseMarkdownToMeasures(realResult.full_text)
+        if (measures.length > 0) {
+          return {
+            warning_id,
+            student_name: extractStudentName(realResult),
+            class_name: extractClassName(realResult),
+            rdi_score: extractRdiScore(realResult),
+            risk_level: normalizeRiskLevel(realResult.risk_level ?? 'MEDIUM'),
+            generated_at: realResult.created_at ?? new Date().toISOString(),
+            fact: '',
+            analysis: realResult.summary ?? '',
+            growth: realResult.full_text,
+            analysis_summary: realResult.summary ?? 'AI 分析完成',
+            measures,
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback 2: Demo data
+  await sleep(400)
+  return getDemoPrescriptionV2(warning_id)
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Legacy V1 API (kept for backward compat)
+// ═════════════════════════════════════════════════════════════════
+
+/**
+ * @deprecated Use getAIPrescriptionV2 instead
  */
 export async function getAIPrescription(
   warning_id: number,
   student_id?: number
 ): Promise<AIPrescriptionPayload> {
-  // Try real backend if student_id is provided
   if (student_id && student_id > 0) {
     const realResult = await fetchRealPrescription(student_id)
 
@@ -284,9 +477,9 @@ export async function getAIPrescription(
       if (measures.length > 0) {
         return {
           warning_id,
-          student_name: realResult.raw_snapshot?.student_name ?? '学生',
-          class_name: realResult.raw_snapshot?.class_name ?? '--',
-          rdi_score: realResult.raw_snapshot?.rdi_score ?? 0,
+          student_name: (realResult.raw_snapshot?.student_name as string) ?? '学生',
+          class_name: (realResult.raw_snapshot?.class_name as string) ?? '--',
+          rdi_score: (realResult.raw_snapshot?.rdi_score as number) ?? 0,
           analysis_summary: realResult.summary ?? 'AI 分析完成',
           generated_at: realResult.created_at ?? new Date().toISOString(),
           measures,
@@ -295,7 +488,6 @@ export async function getAIPrescription(
     }
   }
 
-  // Fallback to demo data
   await sleep(400)
   return getDemoPrescription(warning_id)
 }
@@ -312,7 +504,7 @@ export function isBreakerActive(warningId: number): boolean {
   const ts = localStorage.getItem(key)
   if (!ts) return false
   const elapsed = Date.now() - parseInt(ts, 10)
-  return elapsed < 72 * 60 * 60 * 1000 // 72 hours
+  return elapsed < 72 * 60 * 60 * 1000
 }
 
 /** Get remaining time (ms) for active breaker */
@@ -329,6 +521,57 @@ export function getBreakerRemaining(warningId: number): number {
 export function activateBreaker(warningId: number): void {
   const key = BREAKER_KEY_PREFIX + warningId
   localStorage.setItem(key, Date.now().toString())
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Lightweight Markdown Renderer (inline, no dependency)
+// ═════════════════════════════════════════════════════════════════
+
+/**
+ * Convert basic Markdown to HTML for segment rendering.
+ * Handles: **bold**, *italic*, - list items, numbered lists, headers
+ * Does NOT handle: links, images, code blocks, tables
+ */
+export function renderSegmentMarkdown(text: string): string {
+  if (!text) return ''
+
+  let html = text
+
+  // Escape HTML entities first (but preserve our own tags later)
+  // Skip full escape — LLM output is trusted internal content
+
+  // Headers: ## → <h3>, ### → <h4>
+  html = html.replace(/^###\s+(.+)$/gm, '<h4 class="seg-h4">$1</h4>')
+  html = html.replace(/^##\s+(.+)$/gm, '<h3 class="seg-h3">$1</h3>')
+
+  // Bold: **text** → <strong>
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+
+  // Italic: *text* → <em> (but not inside bold)
+  html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+
+  // Numbered lists: 1. text → <li>
+  html = html.replace(/^\d+\.\s+(.+)$/gm, '<li class="seg-li">$1</li>')
+
+  // Bullet lists: - text or * text → <li>
+  html = html.replace(/^[-*]\s+(.+)$/gm, '<li class="seg-li">$1</li>')
+
+  // Wrap consecutive <li> into <ul>
+  html = html.replace(/((?:<li class="seg-li">.*<\/li>\n?)+)/g, '<ul class="seg-ul">$1</ul>')
+
+  // Paragraphs: double newline → <p>
+  html = html.replace(/\n\n+/g, '</p><p class="seg-p">')
+
+  // Single newline within paragraph → <br>
+  html = html.replace(/\n/g, '<br>')
+
+  // Wrap in root <div>
+  html = `<div class="seg-content"><p class="seg-p">${html}</p></div>`
+
+  // Clean up empty paragraphs
+  html = html.replace(/<p class="seg-p">\s*<\/p>/g, '')
+
+  return html
 }
 
 // ─── Utility ──────────────────────────────────────────────────────

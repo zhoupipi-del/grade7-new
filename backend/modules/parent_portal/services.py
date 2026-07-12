@@ -138,7 +138,7 @@ class ParentPortalService:
                 select(StudentScore).where(
                     StudentScore.student_id == student_id,
                     StudentScore.school_id == school_id,
-                ).order_by(desc(StudentScore.created_at)).limit(1)
+                ).order_by(desc(StudentScore.updated_at)).limit(1)
             )
             score = score_result.scalar_one_or_none()
             if score:
@@ -158,7 +158,7 @@ class ParentPortalService:
                 select(func.count()).select_from(AttendanceRecord).where(
                     AttendanceRecord.student_id == student_id,
                     AttendanceRecord.school_id == school_id,
-                    AttendanceRecord.status == "normal",
+                    AttendanceRecord.status == "present",
                 )
             )
             overview.attendance_normal_count = normal_result.scalar() or 0
@@ -167,20 +167,20 @@ class ParentPortalService:
                 select(func.count()).select_from(AttendanceRecord).where(
                     AttendanceRecord.student_id == student_id,
                     AttendanceRecord.school_id == school_id,
-                    AttendanceRecord.status != "normal",
+                    AttendanceRecord.status.in_(["late", "early", "absent", "leave"]),
                 )
             )
             overview.attendance_abnormal_count = abnormal_result.scalar() or 0
         except Exception as e:
             logger.warning(f"考勤数据聚合失败 (student={student_id}): {e}")
 
-        # ── 违纪记录数 — 直连 behavior ──
+        # ── 违纪记录数 — 直连 behavior (实际类名: DisciplineRecord) ──
         try:
-            from modules.behavior.models import BehaviorRecord
+            from modules.behavior.models import DisciplineRecord
             behavior_result = await db.execute(
-                select(func.count()).select_from(BehaviorRecord).where(
-                    BehaviorRecord.student_id == student_id,
-                    BehaviorRecord.school_id == school_id,
+                select(func.count()).select_from(DisciplineRecord).where(
+                    DisciplineRecord.student_id == student_id,
+                    DisciplineRecord.school_id == school_id,
                 )
             )
             overview.behavior_record_count = behavior_result.scalar() or 0
@@ -203,19 +203,20 @@ class ParentPortalService:
         except Exception as e:
             logger.warning(f"正面加分聚合失败 (student={student_id}): {e}")
 
-        # ── 风险等级 — 直连 risk_models ──
+        # ── 风险等级 — 直连 risk_models (实际类名: RiskWarning) ──
         try:
-            from modules.risk_models.models import RiskAssessment
+            from modules.risk_models.models import RiskWarning
+            RISK_LEVEL_LABELS = {"normal": "正常", "attention": "关注", "intervention": "干预"}
             risk_result = await db.execute(
-                select(RiskAssessment).where(
-                    RiskAssessment.student_id == student_id,
-                    RiskAssessment.school_id == school_id,
-                ).order_by(desc(RiskAssessment.assessed_at)).limit(1)
+                select(RiskWarning).where(
+                    RiskWarning.student_id == student_id,
+                    RiskWarning.school_id == school_id,
+                ).order_by(desc(RiskWarning.warned_at)).limit(1)
             )
             risk = risk_result.scalar_one_or_none()
             if risk:
                 overview.risk_level = risk.risk_level
-                overview.risk_label = risk.risk_label
+                overview.risk_label = RISK_LEVEL_LABELS.get(risk.risk_level, risk.risk_level)
         except Exception as e:
             logger.warning(f"风险数据聚合失败 (student={student_id}): {e}")
 
@@ -256,28 +257,28 @@ class ParentPortalService:
                     event_id=f"score_log_{log.id}",
                     event_type="score_log",
                     occurred_at=log.created_at.isoformat() if log.created_at else "",
-                    title=f"{log.dimension or '综合'} {log.change_type or '变更'} {log.change_value or ''}",
+                    title=f"{log.dimension or '综合'} {log.source_type or '变更'} {log.change_amount}",
                     description=log.reason or None,
-                    severity="success" if (log.change_value or 0) > 0 else "warning",
+                    severity="success" if (log.change_amount or 0) > 0 else "warning",
                 ))
         except Exception as e:
             logger.warning(f"评价时间轴聚合失败: {e}")
 
-        # ── 违纪事件 ──
+        # ── 违纪事件 — 实际类名: DisciplineRecord ──
         try:
-            from modules.behavior.models import BehaviorRecord
+            from modules.behavior.models import DisciplineRecord
             behavior_result = await db.execute(
-                select(BehaviorRecord).where(
-                    BehaviorRecord.student_id == student_id,
-                    BehaviorRecord.school_id == school_id,
-                ).order_by(desc(BehaviorRecord.recorded_at)).limit(limit)
+                select(DisciplineRecord).where(
+                    DisciplineRecord.student_id == student_id,
+                    DisciplineRecord.school_id == school_id,
+                ).order_by(desc(DisciplineRecord.created_at)).limit(limit)
             )
             for rec in behavior_result.scalars().all():
                 events.append(TimelineEvent(
                     event_id=f"behavior_{rec.id}",
                     event_type="behavior",
-                    occurred_at=rec.recorded_at.isoformat() if rec.recorded_at else "",
-                    title=f"行为记录: {rec.description or rec.type or '违纪'}",
+                    occurred_at=rec.created_at.isoformat() if rec.created_at else "",
+                    title=f"行为记录: {rec.description or rec.category or rec.type or '违纪'}",
                     description=rec.description or None,
                     severity="warning",
                 ))
@@ -291,16 +292,16 @@ class ParentPortalService:
                 select(AttendanceRecord).where(
                     AttendanceRecord.student_id == student_id,
                     AttendanceRecord.school_id == school_id,
-                    AttendanceRecord.status != "normal",
-                ).order_by(desc(AttendanceRecord.recorded_at)).limit(limit)
+                    AttendanceRecord.status.in_(["late", "early", "absent"]),
+                ).order_by(desc(AttendanceRecord.record_date)).limit(limit)
             )
             for att in attendance_result.scalars().all():
                 events.append(TimelineEvent(
                     event_id=f"attendance_{att.id}",
                     event_type="attendance",
-                    occurred_at=att.recorded_at.isoformat() if att.recorded_at else "",
+                    occurred_at=att.record_date.isoformat() if att.record_date else "",
                     title=f"考勤异常: {att.status or '缺勤'}",
-                    description=att.remark or None,
+                    description=att.note or None,
                     severity="danger",
                 ))
         except Exception as e:
@@ -357,7 +358,7 @@ class ParentPortalService:
             from modules.notifications.models import Notification
             notif_result = await db.execute(
                 select(func.count()).select_from(Notification).where(
-                    Notification.user_id == parent_user.id,
+                    Notification.recipient_id == parent_user.id,
                     Notification.school_id == parent_user.school_id,
                     Notification.is_read == False,
                 )
@@ -372,7 +373,7 @@ class ParentPortalService:
             unread_notifications=unread_notifications,
             pending_feedbacks=pending_feedbacks,
             recent_feedbacks=recent_feedbacks,
-            _meta={"elapsed_ms": round(elapsed * 1000, 1)},
+            meta={"elapsed_ms": round(elapsed * 1000, 1)},
         )
         logger.info(f"家长仪表盘聚合完成 (parent={parent_user.id}, elapsed={elapsed:.3f}s)")
         return dashboard
@@ -436,11 +437,12 @@ class FeedbackService:
                     from modules.notifications.models import Notification
                     notification = Notification(
                         school_id=parent_user.school_id,
-                        user_id=cls.head_teacher_id,
+                        recipient_id=cls.head_teacher_id,
                         title=f"家长反馈: {feedback.title}",
-                        content=f"家长 {parent_user.display_name} 提交了关于学生 {student.name} 的反馈，请及时处理。",
+                        body=f"家长 {parent_user.display_name} 提交了关于学生 {student.name} 的反馈，请及时处理。",
                         type="feedback",
-                        reference_id=feedback.id,
+                        entity_type="parent_feedback",
+                        entity_id=feedback.id,
                         is_read=False,
                     )
                     db.add(notification)
@@ -558,11 +560,12 @@ class FeedbackService:
             from modules.notifications.models import Notification
             notification = Notification(
                 school_id=feedback.school_id,
-                user_id=feedback.parent_id,
+                recipient_id=feedback.parent_id,
                 title=f"反馈已处理: {feedback.title}",
-                content=f"您的反馈已被 {handler.display_name} 处理，请查看回复。",
+                body=f"您的反馈已被 {handler.display_name} 处理，请查看回复。",
                 type="feedback_reply",
-                reference_id=feedback.id,
+                entity_type="parent_feedback",
+                entity_id=feedback.id,
                 is_read=False,
             )
             db.add(notification)
@@ -638,21 +641,23 @@ class AppealProxyService:
                 )
                 sanction = sanction_result.scalar_one_or_none()
                 if sanction:
-                    # 路由到审批模块 — 创建审批工单
+                    # 路由到审批模块 — 创建审批工单（字段对齐 ApprovalRequest ORM）
                     try:
-                        from modules.approval.models import ApprovalRequest
+                        from modules.evaluation.models import ApprovalRequest
                         approval = ApprovalRequest(
                             school_id=parent_user.school_id,
-                            business_type="discipline_appeal",
-                            requester_id=parent_user.id,
                             student_id=student_id,
+                            event_type="discipline_appeal",
+                            source_type="discipline",
+                            source_id=sanction.id,
+                            severity="major",
+                            approval_mode="serial_and",
+                            chain_config=[
+                                {"role": "class_teacher", "status": "pending"},
+                                {"role": "grade_leader", "status": "pending"},
+                                {"role": "ms_admin", "status": "pending"},
+                            ],
                             current_status="pending",
-                            request_data={
-                                "sanction_id": sanction.id,
-                                "applicant_name": payload_data["applicant_name"],
-                                "reason": payload_data["reason"],
-                                "proxy_id": proxy.id,
-                            },
                         )
                         db.add(approval)
                         await db.flush()
@@ -674,29 +679,30 @@ class AppealProxyService:
         # ── Facade 路由: behavior ──
         elif target_module == AppealTargetModule.BEHAVIOR.value:
             try:
-                from modules.behavior.models import BehaviorRecord
+                from modules.behavior.models import DisciplineRecord
                 behavior_result = await db.execute(
-                    select(BehaviorRecord).where(
-                        BehaviorRecord.id == target_record_id,
-                        BehaviorRecord.school_id == parent_user.school_id,
+                    select(DisciplineRecord).where(
+                        DisciplineRecord.id == target_record_id,
+                        DisciplineRecord.school_id == parent_user.school_id,
                     )
                 )
                 behavior = behavior_result.scalar_one_or_none()
                 if behavior:
                     try:
-                        from modules.approval.models import ApprovalRequest
+                        from modules.evaluation.models import ApprovalRequest
                         approval = ApprovalRequest(
                             school_id=parent_user.school_id,
-                            business_type="behavior_appeal",
-                            requester_id=parent_user.id,
                             student_id=student_id,
+                            event_type="behavior_appeal",
+                            source_type="behavior",
+                            source_id=behavior.id,
+                            severity="minor",
+                            approval_mode="parallel_or",
+                            chain_config=[
+                                {"role": "class_teacher", "status": "pending"},
+                                {"role": "grade_leader", "status": "pending"},
+                            ],
                             current_status="pending",
-                            request_data={
-                                "behavior_id": behavior.id,
-                                "applicant_name": payload_data["applicant_name"],
-                                "reason": payload_data["reason"],
-                                "proxy_id": proxy.id,
-                            },
                         )
                         db.add(approval)
                         await db.flush()
@@ -724,7 +730,7 @@ class AppealProxyService:
             target_appeal_id=target_appeal_id,
             message=message,
             source_context=proxy.source_context,
-            _meta={"elapsed_ms": round(elapsed * 1000, 1)},
+            meta={"elapsed_ms": round(elapsed * 1000, 1)},
         )
         logger.info(f"申诉代理完成 (proxy={proxy.id}, status={proxy.proxy_status}, elapsed={elapsed:.3f}s)")
         return result

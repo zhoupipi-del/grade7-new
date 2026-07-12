@@ -124,26 +124,68 @@ class BehaviorService:
 
         await db.commit()
 
+        # 🔌 事件总线盲发: 违纪处分 → growth 时光轴 (fire-and-forget)
+        try:
+            from core.event_bus import EventBus
+            EventBus().publish("behavior.disciplined", {
+                "school_id": school_id,
+                "student_id": student.id,
+                "category": data.get("category"),
+                "level": data.get("type"),
+                "deduction": points,
+                "title": f"{TYPE_MAP.get(data.get('type'), '行为记录')}: {data.get('description', '')[:50]}",
+            })
+        except Exception:
+            pass  # 事件总线不可用时静默降级
+
         # ═══ PolicyEngine Hook-2: 违纪→评价决策闭环 ═══
         # 铁律1: 违纪记录已commit，绝对优先
         # 铁律2: try/except隔离，Hook失败不阻塞主业务
         # 铁律3: 审批工单+ScoreLog在同一flush/commit块中
+        # 铁律4: 多租户审批链优先 → PolicyEngine 降级
         try:
             from modules.policy_engine import get_engine
             engine = get_engine()
             if engine:
-                # 行为类型映射: 中文category → PolicyEngine behavior_type code
+                # 1. 事件分类 → severity / dimension / penalty
+                #    优先使用 data["type"] (与 policy.yaml 事件类型一致), 兜底使用 category 映射
                 _CATEGORY_MAP = {
                     "打架": "fighting", "吸烟": "smoking", "作弊": "cheating",
                     "迟到": "lateness", "缺勤": "absence", "表扬": "good_job",
                 }
-                behavior_type = _CATEGORY_MAP.get(data.get("category", ""), "other")
-
-                # 1. 事件分类 → severity / dimension / penalty
+                behavior_type = data.get("type") or _CATEGORY_MAP.get(data.get("category", ""), "other")
                 classification = engine.classify(behavior_type)
 
-                # 2. 审批路由 → ApprovalChain
-                chain = engine.route(behavior_type, creator_role)
+                # 2. 审批链解析: L1 多租户 → L2 PolicyEngine
+                chain_config = None
+                approval_mode = "parallel_or"
+
+                # L1: 尝试多租户审批链
+                biz_type_map = {
+                    "minor": "behavior_minor",
+                    "major": "behavior_major",
+                    "critical": "behavior_critical",
+                }
+                biz_type = biz_type_map.get(classification.severity, "behavior_minor")
+                try:
+                    from modules.approval.services import resolve_chain_async
+                    chain_config = await resolve_chain_async(db, school_id, biz_type)
+                    if chain_config:
+                        approval_mode = chain_config.get("approval_mode", "serial_and")
+                        logger.info(
+                            "[PolicyEngine Hook-2] 使用多租户审批链 | "
+                            "school=%s biz=%s chain_id=%s", school_id, biz_type, chain_config.get("chain_id")
+                        )
+                except Exception as chain_err:
+                    logger.warning(
+                        "[PolicyEngine Hook-2] 多租户审批链查询失败(降级PolicyEngine): %s", chain_err
+                    )
+
+                # L2: Fallback — PolicyEngine
+                if not chain_config:
+                    chain = engine.route(behavior_type, creator_role)
+                    chain_config = chain.model_dump()
+                    approval_mode = chain.mode
 
                 # 3. 写审批工单 (approval_requests)
                 from modules.evaluation.models import ApprovalRequest
@@ -154,14 +196,16 @@ class BehaviorService:
                     source_type="behavior",
                     source_id=record.id,
                     severity=classification.severity,
-                    approval_mode=chain.mode,
-                    chain_config=chain.model_dump(),
+                    approval_mode=approval_mode,
+                    chain_config=chain_config,
                     current_status="pending",
                     current_step=0,
                 )
                 db.add(approval_req)
 
                 # 4. 调 EvaluationService.apply_deduction() — 同事务写 ScoreLog
+                #    discipline_type 传 severity 以匹配 deduction_map keys (warning/minor/major/serious)
+                #    penalty_override 传 PolicyEngine 精确扣分 (base_penalty)
                 from modules.evaluation.services import EvaluationService
                 log = await EvaluationService.apply_deduction(
                     db=db,
@@ -169,20 +213,21 @@ class BehaviorService:
                     class_id=student.class_id,
                     grade_id=student.grade_id,
                     school_id=school_id,
-                    discipline_type=data["type"],
+                    discipline_type=classification.severity,
                     discipline_id=record.id,
                     created_by=created_by,
+                    source_type="behavior",
+                    penalty_override=classification.base_penalty,
+                    policy_tag="repairable",
                 )
-                # 5. 给 ScoreLog 打上 policy_tag (行为违纪一律 repairable)
-                if log:
-                    log.policy_tag = "repairable"
 
                 await db.flush()
                 await db.commit()
                 logger.info(
                     f"[PolicyEngine Hook-2] 违纪→评价闭环成功: "
                     f"student={student.id} type={behavior_type} "
-                    f"severity={classification.severity} mode={chain.mode}"
+                    f"severity={classification.severity} mode={approval_mode} "
+                    f"chain_source={'tenant' if chain_config.get('chain_id') else 'policy_engine'}"
                 )
         except Exception as e:
             # 铁律2: 异常隔离 — rollback Hook写入，违纪记录已commit不受影响

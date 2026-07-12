@@ -63,8 +63,11 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="令牌缺少用户标识")
 
     from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
     result = await db.execute(
-        select(User).where(User.id == int(raw_id), User.is_active == True)
+        select(User).options(selectinload(User.school)).where(
+            User.id == int(raw_id), User.is_active == True
+        )
     )
     user = result.scalar_one_or_none()
     if not user:
@@ -85,6 +88,61 @@ def require_role(*roles: UserRole):
         return current_user
 
     return _guard
+
+
+def require_school_phase(allowed_phases: list[str]):
+    """
+    学段铁闸工厂 — 确保当前用户所属学校的 school_phase 在允许列表中。
+
+    用法:
+        @router.get("/primary-only",
+            dependencies=[Depends(require_school_phase(["primary"]))])
+        async def primary_only():
+            ...
+
+        @router.get("/senior-only",
+            dependencies=[Depends(require_school_phase(["senior", "integrated"]))])
+        async def senior_only():
+            ...
+
+    规则:
+        - MS_ADMIN: 放行（超管不受学段限制）
+        - 当前用户未关联学校 → 401
+        - school_phase 不在 allowed_phases 中 → 403
+    """
+
+    async def _phase_guard(current_user: User = Depends(get_current_user)):
+        # 超管放行
+        user_role = current_user.role
+        if isinstance(user_role, str):
+            user_role = UserRole(user_role)
+        if user_role == UserRole.MS_ADMIN:
+            # 超管: 返回其学校的 phase (如果有), 否则 None
+            if current_user.school and current_user.school.school_phase:
+                return current_user.school.school_phase
+            return "junior"  # 兜底
+
+        # 检查学校关联（get_current_user 已 eager-load school）
+        if not current_user.school:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="当前账户未关联任何学校，无法判定学段",
+            )
+
+        current_phase = current_user.school.school_phase
+        if current_phase not in allowed_phases:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"访问受限：当前功能仅对 "
+                    f"[{', '.join(allowed_phases)}] 学段开放，"
+                    f"您的学校（{current_user.school.name}）属于 "
+                    f"[{current_phase}] 学段。"
+                ),
+            )
+        return current_phase
+
+    return _phase_guard
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -412,3 +470,27 @@ async def list_students(
         items=students, total=total,
         page=page, per_page=per_page, pages=pages,
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# 学段隔离铁闸 — 测试端点（验证 require_school_phase 拦截）
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/test/primary-only",
+    dependencies=[Depends(require_school_phase(["primary"]))])
+async def test_primary_only():
+    """小学专属通道 — 只有 school_phase=primary 的学校可访问"""
+    return {
+        "status": "success",
+        "msg": "成功进入小学萌卡系统底层通道",
+    }
+
+
+@router.get("/test/senior-only",
+    dependencies=[Depends(require_school_phase(["senior", "integrated"]))])
+async def test_senior_only():
+    """高中专属通道 — 只有 school_phase=senior 或 integrated 的学校可访问"""
+    return {
+        "status": "success",
+        "msg": "成功进入高中硬核高考学情大盘",
+    }

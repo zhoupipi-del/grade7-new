@@ -608,7 +608,7 @@ def _resolve_reviewer_role(user: User) -> str:
     elif user.role == UserRole.GRADE_LEADER:
         return "grade_leader"
     else:
-        raise ValueError(f"当前用户角色 {user.role.value} 无权执行审批操作")
+        raise ValueError(f"当前用户角色 {user.role} 无权执行审批操作")
 
 
 def _format(s) -> dict:

@@ -161,10 +161,16 @@ class StudentScore(Base, SchoolMixin):
 
 class ScoreLog(Base, SchoolMixin):
     """
-    评分流水 — 每次分数变更的完整溯源。
+    评分流水 — 每次分数变更的完整溯源（#1193 数据血缘增强版）。
 
     家长质疑"为什么扣了 3 分" → 一条 ScoreLog 精确回溯：
       谁扣的、为什么扣、扣之前多少分、扣之后多少分、关联的违纪记录 ID
+
+    #1193 新增字段:
+      - actor_id: 实际操作者（与 created_by 区分，created_by 可能是委托者）
+      - source_ip: 操作来源 IP（支持 IPv6，用于审计合规）
+      - trace_context_id: 血缘追踪上下文 ID（关联 LineageEvent.trace_id）
+      - diff_snapshot: 变更前后 JSON 对比快照（家长可精确看到"扣了哪项"）
     """
     __tablename__ = "score_logs"
 
@@ -181,6 +187,12 @@ class ScoreLog(Base, SchoolMixin):
     created_by = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=get_local_now)
 
+    # ── #1193 血缘增强字段 ──
+    actor_id = Column(BigInteger, nullable=True, comment="实际操作者（与 created_by 区分，支持委托场景）")
+    source_ip = Column(String(45), nullable=True, comment="操作来源 IP（IPv4/IPv6，审计合规）")
+    trace_context_id = Column(String(36), nullable=True, index=True, comment="血缘追踪上下文 ID（关联 LineageEvent.trace_id）")
+    diff_snapshot = Column(JSON, nullable=True, comment="变更前后 JSON 对比快照 {before:{...}, after:{...}}")
+
     # 关系
     student = relationship("core.models.Student", lazy="selectin")
 
@@ -188,6 +200,7 @@ class ScoreLog(Base, SchoolMixin):
         Index("idx_sl_stu_time", "student_id", "created_at"),
         Index("idx_sl_source", "source_type", "source_id"),
         Index("idx_sl_policy_tag", "student_id", "policy_tag"),
+        Index("idx_sl_trace_context", "trace_context_id"),
     )
 
 

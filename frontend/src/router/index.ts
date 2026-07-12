@@ -294,6 +294,17 @@ const routes: RouteRecordRaw[] = [
           roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'] as UserRole[],
         },
       },
+      // ── 考勤全息历史大盘 ──
+      {
+        path: 'attendance/class-history',
+        name: 'ClassHistoryDashboard',
+        component: () => import('@/views/attendance/ClassHistoryDashboard.vue'),
+        meta: {
+          title: '考勤历史大盘',
+          icon: 'TrendCharts',
+          roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'] as UserRole[],
+        },
+      },
       // ── 流动红旗 (德育域) ──
       {
         path: 'red-flag',

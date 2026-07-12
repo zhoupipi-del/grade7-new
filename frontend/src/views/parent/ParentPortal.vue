@@ -14,6 +14,13 @@
       <el-skeleton :rows="8" animated />
     </div>
 
+    <!-- 加载失败 -->
+    <div v-else-if="!dashboard" class="error-container">
+      <el-empty description="数据加载失败，请稍后刷新重试">
+        <el-button type="primary" @click="fetchData">重新加载</el-button>
+      </el-empty>
+    </div>
+
     <!-- 主体内容 -->
     <div v-else class="portal-content">
       <!-- 概要卡片栏 -->
@@ -168,6 +175,14 @@
               >
                 通知中心
               </el-button>
+              <el-button
+                type="danger"
+                :icon="Present"
+                @click="$router.push('/parent/blindbox')"
+                class="action-btn blindbox-btn"
+              >
+                金色盲盒
+              </el-button>
             </div>
           </el-card>
         </el-col>
@@ -259,21 +274,40 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts/core'
 import {
   getDashboard,
-  getDemoDashboard,
   feedbackStatusTagType,
   formatRelativeTime,
   SCORE_DIMENSIONS,
   type ParentDashboard,
   type ChildOverview,
 } from '@/api/parent_portal'
-import { ChatLineSquare, WarningFilled, Timer, Bell, Operation } from '@element-plus/icons-vue'
+import { ChatLineSquare, WarningFilled, Timer, Bell, Operation, Present } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
 const loading = ref(true)
-const dashboard = ref<ParentDashboard>(getDemoDashboard())
+const dashboard = ref<ParentDashboard | null>(null)
 const radarChartRef = ref<HTMLElement>()
 let chartInstance: echarts.ECharts | null = null
 
-const child = computed<ChildOverview>(() => dashboard.value.child)
+const child = computed<ChildOverview>(() => dashboard.value?.child ?? {
+  student_id: 0,
+  student_name: '--',
+  student_no: '--',
+  class_name: '--',
+  grade_name: '--',
+  total_score: null,
+  moral_score: null,
+  academic_score: null,
+  health_score: null,
+  art_score: null,
+  social_score: null,
+  attendance_normal_count: 0,
+  attendance_abnormal_count: 0,
+  behavior_record_count: 0,
+  positive_score_total: 0,
+  recent_timeline: [],
+  risk_level: null,
+  risk_label: null,
+})
 
 const attendanceRate = computed(() => {
   const total = child.value.attendance_normal_count + child.value.attendance_abnormal_count
@@ -363,8 +397,7 @@ async function fetchData() {
   try {
     dashboard.value = await getDashboard()
   } catch {
-    // 后端不可用 → 降级到Demo数据
-    dashboard.value = getDemoDashboard()
+    ElMessage.error('数据加载失败，请稍后刷新重试')
   } finally {
     loading.value = false
     await nextTick()
@@ -413,6 +446,13 @@ onUnmounted(() => {
   padding: 40px;
   background: #fff;
   border-radius: 8px;
+}
+
+.error-container {
+  padding: 60px 40px;
+  background: #fff;
+  border-radius: 8px;
+  text-align: center;
 }
 
 /* 概要卡片栏 */
@@ -594,6 +634,13 @@ onUnmounted(() => {
 .action-btn {
   height: 44px;
   font-size: 14px;
+}
+
+.blindbox-btn {
+  background: linear-gradient(135deg, #f0b90b, #e8a800) !important;
+  border-color: #f0b90b !important;
+  color: #1a1a2e !important;
+  font-weight: 600;
 }
 
 /* 底部行 */

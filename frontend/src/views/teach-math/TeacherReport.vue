@@ -191,6 +191,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import * as echarts from 'echarts/core'
+import { getClasses } from '@/api/classes'
 import {
   getClassReportKPI,
   getBlindSpots,
@@ -202,20 +203,27 @@ import {
 
 // ── 筛选响应式状态 ──
 const loading = ref<boolean>(false)
-const currentClass = ref<number>(1) // 默认 2501 班 (class_id=1)
+const currentClass = ref<number>(1) // 默认第一个班
 const timeRange = ref<string>('7d')
 
-// 班级选项 — 使用真实 class_id (1-8 对应 2501-2508 班)
-const classOptions = [
-  { value: 1, label: '2501班' },
-  { value: 2, label: '2502班' },
-  { value: 3, label: '2503班' },
-  { value: 4, label: '2504班' },
-  { value: 5, label: '2505班' },
-  { value: 6, label: '2506班' },
-  { value: 7, label: '2507班' },
-  { value: 8, label: '2508班' },
-]
+// 班级选项 — 从真实API动态获取
+const classOptions = ref<Array<{ value: number; label: string }>>([])
+
+async function fetchClassOptions() {
+  try {
+    const res: any = await getClasses()
+    const list = res?.items ?? (Array.isArray(res) ? res : [])
+    classOptions.value = list.map((c: any) => ({
+      value: c.id,
+      label: c.name,
+    }))
+    if (classOptions.value.length > 0) {
+      currentClass.value = classOptions.value[0].value
+    }
+  } catch {
+    classOptions.value = []
+  }
+}
 
 // ── 核心数据集 ──
 const kpiData = ref<MathReportKPI>({
@@ -456,7 +464,8 @@ const handleResize = () => {
   blindSpotChartInstance?.resize()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await fetchClassOptions()
   loadAllDashboardData()
   window.addEventListener('resize', handleResize)
 })

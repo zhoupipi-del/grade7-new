@@ -155,7 +155,7 @@
           </div>
         </div>
 
-        <!-- AI 处方卡片 -->
+        <!-- AI 处方卡片 (V2 三段式: 事实研判→交叉归因→成长处方) -->
         <div v-if="prescription" class="prescription-card">
           <h3 class="card-title">
             <el-icon><FirstAidKit /></el-icon> AI德育处方
@@ -163,22 +163,31 @@
               熔断 {{ breakerRemaining }}h
             </el-tag>
           </h3>
+          <!-- 处方元信息 -->
+          <div class="prescription-meta">
+            <span class="meta-student">{{ prescription.student_name }}</span>
+            <span class="meta-divider">|</span>
+            <span>{{ prescription.class_name }}</span>
+            <span class="meta-divider">|</span>
+            <span>RDI {{ prescription.rdi_score.toFixed(1) }}</span>
+            <el-tag :type="riskTagType(prescription.risk_level)" size="small" effect="plain" class="meta-risk-tag">
+              {{ riskLabel(prescription.risk_level) }}
+            </el-tag>
+          </div>
           <div class="prescription-summary">{{ prescription.analysis_summary }}</div>
-          <div class="measures-grid">
-            <div v-for="m in prescription.measures" :key="m.id" class="measure-card" :class="'measure-' + m.tag_type">
-              <div class="measure-icon-wrap">
-                <el-icon :size="24"><component :is="measureIcon(m.icon_name)" /></el-icon>
-              </div>
-              <div class="measure-body">
-                <div class="measure-header">
-                  <span class="measure-category">{{ m.category }}</span>
-                  <el-tag :type="m.tag_type" size="small">{{ m.timeline }}</el-tag>
-                </div>
-                <div class="measure-issue">{{ m.core_issue }}</div>
-                <ol class="measure-actions">
-                  <li v-for="(a, i) in m.action_plan" :key="i">{{ a }}</li>
-                </ol>
-              </div>
+          <!-- V2 三段式渲染 -->
+          <div class="prescription-segments">
+            <div class="prescription-segment segment-fact">
+              <div class="segment-label">事实研判</div>
+              <div class="segment-content" v-html="renderSegmentMarkdown(prescription.fact)"></div>
+            </div>
+            <div class="prescription-segment segment-analysis">
+              <div class="segment-label">交叉归因</div>
+              <div class="segment-content" v-html="renderSegmentMarkdown(prescription.analysis)"></div>
+            </div>
+            <div class="prescription-segment segment-growth">
+              <div class="segment-label">成长处方</div>
+              <div class="segment-content" v-html="renderSegmentMarkdown(prescription.growth)"></div>
             </div>
           </div>
         </div>
@@ -236,8 +245,8 @@ import {
   EVENT_TYPE_META
 } from '@/api/growth'
 import {
-  getAIPrescription, getDemoPrescription, isBreakerActive, getBreakerRemaining, activateBreaker,
-  type AIPrescriptionPayload
+  getAIPrescriptionV2, getDemoPrescriptionV2, isBreakerActive, getBreakerRemaining, activateBreaker,
+  renderSegmentMarkdown, type AIPrescriptionPayloadV2
 } from '@/api/prescription'
 import { getClasses, getStudents } from '@/api/classes'
 import { MagicStick, FirstAidKit, Loading, User } from '@element-plus/icons-vue'
@@ -281,7 +290,7 @@ const scoresData = ref<ScoreResultItem[]>([])
 const evalData = ref<StudentScoreOut | null>(null)
 const rdiInfo = ref<RDIDiagnosis | null>(null)
 const timelineData = ref<TimelineItem[]>([])
-const prescription = ref<AIPrescriptionPayload | null>(null)
+const prescription = ref<AIPrescriptionPayloadV2 | null>(null)
 
 const dataLoading = ref(false)
 const prescriptionLoading = ref(false)
@@ -410,12 +419,7 @@ async function fetchClasses() {
     const res: any = await getClasses()
     classList.value = res?.items ?? (Array.isArray(res) ? res : [])
   } catch {
-    classList.value = [
-      { id: 2501, name: '初一(1)班' },
-      { id: 2502, name: '初一(2)班' },
-      { id: 2503, name: '初一(3)班' },
-      { id: 2504, name: '初一(4)班' }
-    ]
+    classList.value = []
   }
 }
 
@@ -423,14 +427,11 @@ async function onClassChange() {
   selectedStudentId.value = null
   if (!selectedClassId.value) { studentList.value = []; return }
   try {
-    const res: any = await getStudents({ page: 1, page_size: 100 })
+    const res: any = await getStudents({ class_id: selectedClassId.value, page: 1, page_size: 100 })
     // Axios interceptor 已自动解包；加括号修正 ?? vs ? : 优先级
     studentList.value = res?.items ?? (Array.isArray(res) ? res : [])
   } catch {
-    studentList.value = [
-      { id: 1, name: '陈博裕', class_id: selectedClassId.value, class_name: '初一(1)班', gender: '男' },
-      { id: 2, name: '黎梓萱', class_id: selectedClassId.value, class_name: '初一(1)班', gender: '女' }
-    ]
+    studentList.value = []
   }
 }
 
@@ -525,34 +526,35 @@ async function fetchPrescription() {
     startBreakerTimer()
     return
   }
-  // 尝试从 monitor-panel 获取 warning_id
+  // 🔧 P4 Fix: 字段名 warning_id → latest_warning_id
   try {
     const monitorRes = await getRiskMonitorPanel({ student_id: selectedStudentId.value ?? undefined })
-    const warningId = (monitorRes as any)?.students?.[0]?.warning_id ?? 1
-    await loadPrescription(warningId)
+    const warningId = (monitorRes as any)?.students?.[0]?.latest_warning_id ?? 1
+    await loadPrescriptionV2(warningId)
   } catch {
     // 降级: 尝试 demo 处方
     try {
-      const demo = await getDemoPrescription(selectedStudentId.value ?? 1)
-      prescription.value = demo as AIPrescriptionPayload
+      const demo = await getDemoPrescriptionV2(selectedStudentId.value ?? 1)
+      prescription.value = demo as AIPrescriptionPayloadV2
     } catch {
       prescription.value = null
     }
   }
 }
 
-async function loadPrescription(warningId: number) {
+async function loadPrescriptionV2(warningId: number) {
   try {
-    const res = await getAIPrescription(warningId, selectedStudentId.value ?? undefined)
-    prescription.value = res as AIPrescriptionPayload
+    // 🔧 P3 Fix: V1→V2 getAIPrescriptionV2，直接从llm_output提取三段
+    const res = await getAIPrescriptionV2(warningId, selectedStudentId.value ?? undefined)
+    prescription.value = res as AIPrescriptionPayloadV2
     activateBreaker(warningId)
     breakerActive.value = true
     breakerRemaining.value = 72
     startBreakerTimer()
   } catch {
     try {
-      const demo = await getDemoPrescription(selectedStudentId.value ?? 1)
-      prescription.value = demo as AIPrescriptionPayload
+      const demo = await getDemoPrescriptionV2(selectedStudentId.value ?? 1)
+      prescription.value = demo as AIPrescriptionPayloadV2
     } catch {
       prescription.value = null
     }
@@ -572,13 +574,13 @@ async function triggerPrescription() {
 async function fetchAllData() {
   dataLoading.value = true
   try {
+    // 🔧 P2 Fix: fetchPrescription移出Promise.all — Celery异步轮询约12s不阻塞其余5个API
     await Promise.all([
       fetchExamList(),
       fetchSubjectList(),
       fetchEvalData(),
       fetchRDI(),
       fetchTimeline(),
-      fetchPrescription()
     ])
     // 自动选最近考试
     if (examList.value.length > 0 && !selectedExamId.value) {
@@ -587,6 +589,8 @@ async function fetchAllData() {
     await fetchGradesData()
     await nextTick()
     initAllCharts()
+    // 🔧 处方后台异步加载，不阻塞主渲染
+    fetchPrescription().catch(() => {})
   } catch (e: any) {
     ElMessage.error('数据加载失败: ' + (e.message ?? '未知错误'))
   } finally {
@@ -615,7 +619,7 @@ function useDemoData() {
   rdiInfo.value = getDemoRDI()
   const growthRes = getDemoTimeline(1) as GrowthTimelineResponse
   timelineData.value = growthRes?.timeline ?? []
-  prescription.value = getDemoPrescription(1) as AIPrescriptionPayload
+  prescription.value = getDemoPrescriptionV2(1) as AIPrescriptionPayloadV2
   selectedExamId.value = examList.value[0]?.id ?? null
   nextTick(() => initAllCharts())
 }
@@ -832,6 +836,18 @@ function measureIcon(iconName: string): any {
   return iconMap[iconName] ?? FirstAidKit
 }
 
+// 🔧 V2 处方辅助函数
+function riskTagType(level: string): 'primary' | 'success' | 'warning' | 'danger' {
+  if (level === 'CRITICAL' || level === 'HIGH') return 'danger'
+  if (level === 'MEDIUM') return 'warning'
+  return 'success'
+}
+
+function riskLabel(level: string): string {
+  const m: Record<string, string> = { CRITICAL: '极危', HIGH: '高危', MEDIUM: '中危', LOW: '低危' }
+  return m[level] ?? level
+}
+
 function startBreakerTimer() {
   if (breakerTimer) clearInterval(breakerTimer)
   breakerTimer = setInterval(() => {
@@ -870,6 +886,15 @@ watch(timelineFilter, () => {
 
 onMounted(async () => {
   await fetchClasses()
+  // 🔧 P1 Fix: 自动选第一个班级 → 自动选第一个学生 → 触发 fetchAllData
+  if (classList.value.length > 0) {
+    selectedClassId.value = classList.value[0].id
+    await onClassChange()
+    if (studentList.value.length > 0) {
+      selectedStudentId.value = studentList.value[0].id
+      await fetchAllData()
+    }
+  }
   // 设置 ResizeObserver
   resizeObserver = new ResizeObserver(() => {
     radarChart?.resize()
@@ -1268,6 +1293,75 @@ onBeforeUnmount(() => {
   padding: 20px;
   text-align: center;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+/* V2 处方三段式样式 */
+.prescription-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.prescription-meta .meta-student {
+  font-weight: 600;
+  color: #303133;
+}
+.prescription-meta .meta-divider {
+  color: #c0c4cc;
+}
+.prescription-meta .meta-risk-tag {
+  margin-left: 4px;
+}
+.prescription-segments {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.prescription-segment {
+  background: #f9fafc;
+  border-radius: 8px;
+  padding: 12px 14px;
+  border-left: 3px solid #409eff;
+}
+.segment-fact {
+  border-left-color: #f56c6c;
+}
+.segment-analysis {
+  border-left-color: #e6a23c;
+}
+.segment-growth {
+  border-left-color: #67c23a;
+}
+.segment-label {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #303133;
+}
+.segment-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #606266;
+}
+.segment-content :deep(h4) {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 6px 0 4px;
+  color: #303133;
+}
+.segment-content :deep(strong) {
+  color: #303133;
+}
+.segment-content :deep(ul),
+.segment-content :deep(ol) {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.segment-content :deep(li) {
+  margin-bottom: 2px;
 }
 .prescription-loading {
   background: #fff;

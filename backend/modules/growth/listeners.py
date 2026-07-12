@@ -1,0 +1,400 @@
+"""
+modules/growth/listeners.py - 成长档案 4 路事件接收站
+
+跨模块事件自动注入管道: 4 个事件源的异常事件通过 Redis pub/sub
+流入 growth 模块的时光轴，使成长档案从"被动展示柜"升级为
+"主动汇聚神经中枢"。
+
+4 路接收站:
+  1. error_funnel.critical        - 知识断层 critical → 学业 CRITICAL
+  2. behavior.disciplined         - 违纪处分 → 行为 WARNING/CRITICAL
+  3. psych.risk_changed           - 心理风险等级变更 → 心理维度
+  4. attendance.consecutive_absent - 连续缺勤 → 考勤 CRITICAL
+
+每个接收站:
+  - 开启独立 DB Session (不复用请求生命周期 Session)
+  - 调用 GrowthAggregationPipeline.inject_timeline_event() 写入时光轴
+  - commit + close (异常自动 rollback)
+"""
+
+import logging
+import hashlib
+from datetime import datetime
+from typing import Optional, Any, Dict
+
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from core.event_bus import EventBus
+from core.redis_client import get_redis
+from modules.growth.pipeline import GrowthAggregationPipeline
+from modules.growth.models import GrowthDimension, EventSeverity
+from modules.growth.cep_interceptor import (
+    ComplexEventInterceptor,
+    TRIGGER_ATTENDANCE,
+    TRIGGER_ERROR_FUNNEL,
+)
+
+logger = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════
+#  频道名常量 — 与上游模块 publish 的 channel 保持一致
+# ═══════════════════════════════════════════════════════════════
+
+CH_ERROR_FUNNEL_CRITICAL = "error_funnel.critical"
+CH_BEHAVIOR_DISCIPLINED = "behavior.disciplined"
+CH_PSYCH_RISK_CHANGED = "psych.risk_changed"
+CH_ATTENDANCE_CONSECUTIVE_ABSENT = "attendance.consecutive_absent"
+
+# ═══════════════════════════════════════════════════════════════
+#  Session 工厂 (由 app.py lifespan 注入)
+# ═══════════════════════════════════════════════════════════════
+
+_session_factory: Optional[async_sessionmaker] = None
+
+# CEP 复合事件拦截器实例 (在 initialize_growth_events 中初始化)
+_cep_interceptor: Optional[ComplexEventInterceptor] = None
+
+
+# ═══════════════════════════════════════════════════════════════
+#  分布式去重锁 — 防止 4 Workers pub/sub 广播导致 4x 重复注入
+# ═══════════════════════════════════════════════════════════════
+
+_DEDUP_TTL = 300  # 5 分钟
+
+async def _try_dedup(event_data: Dict[str, Any]) -> bool:
+    """
+    分布式去重: Redis SETNX 锁。
+
+    4 Workers 都会收到 pub/sub 广播，但只有第一个 SETNX 成功的 Worker
+    才执行注入，其余跳过。Redis 不可用时放行 (宁重复不丢失)。
+
+    Returns:
+        True = 首次获取锁, 应该注入
+        False = 重复事件, 跳过
+    """
+    redis = get_redis()
+    if redis is None:
+        return True  # Redis 不可用 → 放行 (降级模式宁重复不丢失)
+
+    # 用关键字段计算唯一指纹 — 不含 occurred_at (各 Worker 独立生成, 微秒不同)
+    fingerprint = "|".join([
+        str(event_data.get("school_id", "")),
+        str(event_data.get("student_id", "")),
+        str(event_data.get("event_type", "")),
+        str(event_data.get("title", "")),
+    ])
+    key = f"growth:dedup:{hashlib.md5(fingerprint.encode()).hexdigest()}"
+
+    try:
+        result = await redis.set(key, "1", ex=_DEDUP_TTL, nx=True)
+        return bool(result)
+    except Exception as e:
+        logger.warning(f"[growth-listeners] 去重锁异常, 放行: {e}")
+        return True
+
+
+# ═══════════════════════════════════════════════════════════════
+#  通用注入器 — 独立 Session 写入时光轴
+# ═══════════════════════════════════════════════════════════════
+
+async def _inject_event(event_data: Dict[str, Any]):
+    """
+    通用事件注入器 — 开启独立 DB Session 写入成长时光轴。
+
+    核心设计:
+      - 使用 _session_factory 创建全新 AsyncSession
+      - 不复用请求生命周期 Session (避免 Session 销毁问题)
+      - 写入成功 commit, 失败 rollback
+    """
+    if not await _try_dedup(event_data):
+        logger.debug(f"[growth-listeners] 去重命中, 跳过: type={event_data.get('event_type')}")
+        return
+
+    if _session_factory is None:
+        logger.warning("[growth-listeners] session_factory 未初始化, 跳过注入")
+        return
+
+    async with _session_factory() as session:
+        try:
+            pipeline = GrowthAggregationPipeline(session)
+            await pipeline.inject_timeline_event(event_data)
+            await session.commit()
+            logger.info(
+                f"[growth-listeners] 事件已注入: "
+                f"type={event_data.get('event_type')} "
+                f"student={event_data.get('student_id')} "
+                f"dim={event_data.get('dimension')} "
+                f"severity={event_data.get('severity')}"
+            )
+        except Exception as e:
+            await session.rollback()
+            logger.error(
+                f"[growth-listeners] 事件注入失败 "
+                f"type={event_data.get('event_type')}: {e}",
+                exc_info=True,
+            )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  4 路接收站
+# ═══════════════════════════════════════════════════════════════
+
+async def on_error_funnel_critical(event: Dict[str, Any]):
+    """
+    接收站 1: 错题断层 critical → 学业维度 CRITICAL
+
+    上游: error_funnel/services.py _aggregate_gaps()
+    触发条件: consecutive_errors >= 3 or error_count >= 5
+
+    事件载荷:
+      school_id, student_id, knowledge_point,
+      consecutive_errors, error_count
+    """
+    await _inject_event({
+        "school_id": event.get("school_id"),
+        "student_id": event.get("student_id"),
+        "dimension": GrowthDimension.ACADEMIC.value,
+        "severity": EventSeverity.CRITICAL.value,
+        "event_type": "gap_critical",
+        "title": f"知识断层预警: {event.get('knowledge_point', '未知知识点')}",
+        "occurred_at": datetime.utcnow(),
+        "payload": {
+            "knowledge_point": event.get("knowledge_point"),
+            "consecutive_errors": event.get("consecutive_errors"),
+            "error_count": event.get("error_count"),
+            "gap_level": "critical",
+            "source": "error_funnel",
+        },
+    })
+
+    # ── CEP 复合事件拦截: 学业断层入站, 探测考勤窗口是否同时亮着 ──
+    if _cep_interceptor:
+        try:
+            await _cep_interceptor.process_event(TRIGGER_ERROR_FUNNEL, event)
+        except Exception as e:
+            logger.warning(
+                "[growth-listeners] CEP触发失败(error_funnel), 不影响主流程: %s", e
+            )
+
+
+async def on_behavior_disciplined(event: Dict[str, Any]):
+    """
+    接收站 2: 违纪处分 → 行为维度
+
+    上游: behavior/services.py create_record() post-commit
+    严重等级映射:
+      serious/major → CRITICAL
+      warning/minor → WARNING
+
+    事件载荷:
+      school_id, student_id, category, level, deduction, title
+    """
+    level = event.get("level", "minor")
+    severity = (
+        EventSeverity.CRITICAL.value
+        if level in ("serious", "major")
+        else EventSeverity.WARNING.value
+    )
+
+    await _inject_event({
+        "school_id": event.get("school_id"),
+        "student_id": event.get("student_id"),
+        "dimension": GrowthDimension.BEHAVIOR.value,
+        "severity": severity,
+        "event_type": "discipline_punish",
+        "title": event.get("title", "行为记录"),
+        "occurred_at": datetime.utcnow(),
+        "payload": {
+            "category": event.get("category"),
+            "level": level,
+            "deduction": event.get("deduction"),
+            "source": "behavior",
+        },
+    })
+
+
+async def on_psych_risk_changed(event: Dict[str, Any]):
+    """
+    接收站 3: 心理风险等级变更 → 心理维度
+
+    上游: psych_profiles/services.py
+      - update_profile() risk_level 变更
+      - recompute_profile_stats() risk_level 变更
+      - create_screening() risk_level 变更
+
+    严重等级映射:
+      red    → CRITICAL
+      orange → WARNING
+      yellow → WARNING
+      green  → BONUS (恢复正常)
+
+    事件载荷:
+      school_id, student_id, previous_level, current_level, source, trigger
+    """
+    risk_level = event.get("current_level", "")
+    severity_map = {
+        "red": EventSeverity.CRITICAL.value,
+        "orange": EventSeverity.WARNING.value,
+        "yellow": EventSeverity.WARNING.value,
+        "green": EventSeverity.BONUS.value,
+        # 兼容 low/medium/high 体系
+        "high": EventSeverity.CRITICAL.value,
+        "medium": EventSeverity.WARNING.value,
+        "low": EventSeverity.BONUS.value,
+    }
+    severity = severity_map.get(
+        risk_level.lower() if isinstance(risk_level, str) else "",
+        EventSeverity.INFO.value,
+    )
+
+    await _inject_event({
+        "school_id": event.get("school_id"),
+        "student_id": event.get("student_id"),
+        "dimension": GrowthDimension.PSYCHOLOGY.value,
+        "severity": severity,
+        "event_type": "psych_risk_change",
+        "title": f"心理风险评估更新: {risk_level}",
+        "occurred_at": datetime.utcnow(),
+        "payload": {
+            "previous_level": event.get("previous_level"),
+            "current_level": risk_level,
+            "source": event.get("source", "psych_profiles"),
+            "trigger": event.get("trigger"),
+        },
+    })
+
+
+async def on_attendance_consecutive_absent(event: Dict[str, Any]):
+    """
+    接收站 4: 连续缺勤 → 考勤维度 CRITICAL
+
+    上游: attendance/services.py batch_record() post-commit
+    监听器内部查询最近 7 天考勤记录，判断连续缺勤 >= 3 天才注入。
+
+    设计: batch_record 只发轻量事件 (school_id + student_id)，
+    监听器负责查 DB 判断连续缺勤天数，避免拖慢请求。
+
+    事件载荷:
+      school_id, student_id, class_id
+    """
+    school_id = event.get("school_id")
+    student_id = event.get("student_id")
+    class_id = event.get("class_id")
+
+    if not school_id or not student_id:
+        return
+
+    if _session_factory is None:
+        logger.warning("[growth-listeners] session_factory 未初始化, 跳过连续缺勤检测")
+        return
+
+    async with _session_factory() as session:
+        try:
+            from modules.attendance.models import AttendanceRecord
+            from sqlalchemy import select, and_, desc
+            from datetime import date, timedelta
+
+            today = date.today()
+            week_ago = today - timedelta(days=7)
+
+            result = await session.execute(
+                select(AttendanceRecord.record_date, AttendanceRecord.status)
+                .where(and_(
+                    AttendanceRecord.school_id == school_id,
+                    AttendanceRecord.student_id == student_id,
+                    AttendanceRecord.record_date >= week_ago,
+                    AttendanceRecord.record_date <= today,
+                ))
+                .order_by(desc(AttendanceRecord.record_date))
+            )
+            records = result.all()
+
+            # 计算从今天往回的连续缺勤天数
+            consecutive = 0
+            absent_dates = []
+            for rec_date, status in records:
+                if status == "absent":
+                    consecutive += 1
+                    absent_dates.append(rec_date.isoformat())
+                else:
+                    break  # 遇到非 absent 记录, 连续中断
+
+            if consecutive >= 3:
+                inject_data = {
+                    "school_id": school_id,
+                    "student_id": student_id,
+                    "dimension": GrowthDimension.ATTENDANCE.value,
+                    "severity": EventSeverity.CRITICAL.value,
+                    "event_type": "consecutive_absent",
+                    "title": f"连续缺勤预警 ({consecutive}天)",
+                    "occurred_at": datetime.utcnow(),
+                    "payload": {
+                        "absent_count": consecutive,
+                        "absent_dates": absent_dates,
+                        "class_id": class_id,
+                        "source": "attendance",
+                    },
+                }
+                if not await _try_dedup(inject_data):
+                    logger.debug(f"[growth-listeners] 连续缺勤去重命中, 跳过: student={student_id}")
+                    return
+                pipeline = GrowthAggregationPipeline(session)
+                await pipeline.inject_timeline_event(inject_data)
+                await session.commit()
+                logger.info(
+                    f"[growth-listeners] 连续缺勤事件已注入: "
+                    f"student={student_id} count={consecutive}"
+                )
+
+                # ── CEP 复合事件拦截: 考勤危机入站, 探测学业断层窗口是否同时亮着 ──
+                if _cep_interceptor:
+                    try:
+                        await _cep_interceptor.process_event(
+                            TRIGGER_ATTENDANCE, inject_data
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "[growth-listeners] CEP触发失败(attendance), 不影响主流程: %s", e
+                        )
+        except Exception as e:
+            await session.rollback()
+            logger.error(
+                f"[growth-listeners] 连续缺勤检测失败 "
+                f"student={student_id}: {e}",
+                exc_info=True,
+            )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  并网函数 — 在 app.py lifespan 中调用
+# ═══════════════════════════════════════════════════════════════
+
+async def initialize_growth_events(
+    session_factory: async_sessionmaker,
+):
+    """
+    挂载 4 路事件监听器 — 在 app.py lifespan 启动时调用。
+
+    Args:
+        session_factory: AsyncSessionLocal 工厂 (来自 app.py)
+    """
+    global _session_factory, _cep_interceptor
+    _session_factory = session_factory
+
+    # 初始化 CEP 复合事件拦截器
+    _cep_interceptor = ComplexEventInterceptor()
+
+    bus = EventBus()
+    await bus.subscribe(CH_ERROR_FUNNEL_CRITICAL, on_error_funnel_critical)
+    await bus.subscribe(CH_BEHAVIOR_DISCIPLINED, on_behavior_disciplined)
+    await bus.subscribe(CH_PSYCH_RISK_CHANGED, on_psych_risk_changed)
+    await bus.subscribe(CH_ATTENDANCE_CONSECUTIVE_ABSENT, on_attendance_consecutive_absent)
+
+    logger.info("[growth-listeners] 4 路事件接收站 + CEP 拦截器已并网")
+
+
+async def shutdown_growth_events():
+    """关闭事件监听 — 在 app.py lifespan shutdown 中调用"""
+    bus = EventBus()
+    await bus.shutdown()
+    logger.info("[growth-listeners] 事件接收站已关闭")

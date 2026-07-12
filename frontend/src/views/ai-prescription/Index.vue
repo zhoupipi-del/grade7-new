@@ -13,7 +13,10 @@
           <div class="patient-name-row">
             <span class="patient-name">{{ prescription?.student_name ?? '--' }}</span>
             <el-tag size="small" effect="plain" round>{{ prescription?.class_name ?? '--' }}</el-tag>
-            <el-tag size="small" type="danger" effect="dark" round>RDI 干预</el-tag>
+            <el-tag size="small" :type="riskTagType" effect="dark" round>
+              <el-icon :size="12" style="margin-right: 4px"><WarningFilled /></el-icon>
+              {{ riskLabel }}
+            </el-tag>
           </div>
           <div class="patient-summary-box">
             <el-icon class="summary-icon"><Notebook /></el-icon>
@@ -56,55 +59,100 @@
       </div>
     </div>
 
-    <!-- ═══ Layer 3: Intervention Measures Grid ═══ -->
-    <el-row :gutter="20" class="measures-grid" v-if="prescription?.measures?.length">
-      <el-col
-        v-for="measure in prescription.measures"
-        :key="measure.id"
-        :xs="24"
-        :sm="12"
-        :md="12"
-        :lg="12"
-      >
-        <el-card shadow="hover" class="measure-card" :class="`card-${measure.tag_type}`">
-          <!-- Card Header -->
-          <div class="measure-header">
-            <div class="measure-icon-wrapper" :class="`icon-${measure.tag_type}`">
-              <el-icon :size="24"><component :is="getIconComponent(measure.icon_name)" /></el-icon>
-            </div>
-            <div class="measure-title-area">
-              <span class="measure-category">{{ measure.category }}</span>
-              <el-tag size="small" :type="measure.tag_type" effect="light" round>
-                {{ measure.timeline }}
-              </el-tag>
-            </div>
+    <!-- ═══ Layer 3 V2: Three-Segment Display (Fact→Analysis→Growth) ═══ -->
+    <template v-if="hasV2Segments">
+      <!-- ══ Segment 1: Fact — Clinical Facts (Blue Calm) ══ -->
+      <div class="segment-card segment-fact">
+        <div class="segment-header">
+          <div class="segment-icon-wrapper icon-fact">
+            <el-icon :size="20"><DataAnalysis /></el-icon>
           </div>
+          <div class="segment-title-area">
+            <span class="segment-title">临床事实</span>
+            <span class="segment-subtitle">Fact · σ值精确 · 临床严谨</span>
+          </div>
+          <el-tag size="small" type="primary" effect="plain" round>冷静蓝</el-tag>
+        </div>
+        <div class="segment-body" v-html="renderedFact"></div>
+      </div>
 
-          <!-- Core Issue -->
-          <div class="measure-section">
-            <div class="section-label">
-              <span class="section-icon">⚠️</span>
-              <span>症结透视</span>
-            </div>
-            <div class="section-content issue-content">{{ measure.core_issue }}</div>
+      <!-- ══ Segment 2: Analysis — Cross-Diagnosis (Orange) ══ -->
+      <div class="segment-card segment-analysis">
+        <div class="segment-header">
+          <div class="segment-icon-wrapper icon-analysis">
+            <el-icon :size="20"><Connection /></el-icon>
           </div>
+          <div class="segment-title-area">
+            <span class="segment-title">交叉归因</span>
+            <span class="segment-subtitle">Analysis · 学业×行为×心理 · 诊断叙事</span>
+          </div>
+          <el-tag size="small" type="warning" effect="plain" round>诊断橙</el-tag>
+        </div>
+        <div class="segment-body" v-html="renderedAnalysis"></div>
+      </div>
 
-          <!-- Action Plan -->
-          <div class="measure-section">
-            <div class="section-label">
-              <span class="section-icon">🚀</span>
-              <span>临床执行步骤</span>
-            </div>
-            <ol class="action-list">
-              <li v-for="(step, idx) in measure.action_plan" :key="idx">{{ step }}</li>
-            </ol>
+      <!-- ══ Segment 3: Growth — Three-Tier Intervention (Green) ══ -->
+      <div class="segment-card segment-growth">
+        <div class="segment-header">
+          <div class="segment-icon-wrapper icon-growth">
+            <el-icon :size="20"><TrendCharts /></el-icon>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+          <div class="segment-title-area">
+            <span class="segment-title">三层递进干预</span>
+            <span class="segment-subtitle">Growth · 即时24h → 短期72h → 持续4周 · 实操话术</span>
+          </div>
+          <el-tag size="small" type="success" effect="plain" round>实操绿</el-tag>
+        </div>
+        <div class="segment-body" v-html="renderedGrowth"></div>
+      </div>
+    </template>
+
+    <!-- ═══ V1 Fallback: Measures Grid (backward compat) ═══ -->
+    <template v-if="!hasV2Segments && prescription?.measures?.length">
+      <el-row :gutter="20" class="measures-grid">
+        <el-col
+          v-for="measure in prescription.measures"
+          :key="measure.id"
+          :xs="24"
+          :sm="12"
+          :md="12"
+          :lg="12"
+        >
+          <el-card shadow="hover" class="measure-card" :class="`card-${measure.tag_type}`">
+            <div class="measure-header">
+              <div class="measure-icon-wrapper" :class="`icon-${measure.tag_type}`">
+                <el-icon :size="24"><WarningFilled /></el-icon>
+              </div>
+              <div class="measure-title-area">
+                <span class="measure-category">{{ measure.category }}</span>
+                <el-tag size="small" :type="measure.tag_type" effect="light" round>
+                  {{ measure.timeline }}
+                </el-tag>
+              </div>
+            </div>
+            <div class="measure-section">
+              <div class="section-label">
+                <span class="section-icon">⚠️</span>
+                <span>症结透视</span>
+              </div>
+              <div class="section-content issue-content">{{ measure.core_issue }}</div>
+            </div>
+            <div class="measure-section">
+              <div class="section-label">
+                <span class="section-icon">🚀</span>
+                <span>临床执行步骤</span>
+              </div>
+              <ol class="action-list">
+                <li v-for="(step, idx) in measure.action_plan" :key="idx">{{ step }}</li>
+              </ol>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+    </template>
 
     <!-- Empty State -->
-    <el-card shadow="never" v-if="!loading && !prescription?.measures?.length" class="empty-card">
+    <el-card shadow="never" v-if="!loading && !hasV2Segments && !prescription?.measures?.length" class="empty-card">
       <el-result icon="warning" title="暂无处方数据" sub-title="请从 RDI 风险雷达选择学生后生成 AI 处方">
         <template #extra>
           <el-button type="primary" @click="goBack">返回风险雷达</el-button>
@@ -115,21 +163,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, type Component as VueComponent } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Timer, Clock, Printer, Check, Notebook,
-  User, HomeFilled, Trophy, WarningFilled,
+  WarningFilled, DataAnalysis, Connection, TrendCharts,
 } from '@element-plus/icons-vue'
-import { getAIPrescription, activateBreaker, isBreakerActive, getBreakerRemaining, type AIPrescriptionPayload } from '@/api/prescription'
+import {
+  getAIPrescriptionV2, activateBreaker, isBreakerActive, getBreakerRemaining,
+  renderSegmentMarkdown, type AIPrescriptionPayloadV2, type RiskLevel,
+} from '@/api/prescription'
 
 const route = useRoute()
 const router = useRouter()
 
 // ─── State ──────────────────────────────────────────────────────
 const loading = ref(true)
-const prescription = ref<AIPrescriptionPayload | null>(null)
+const prescription = ref<AIPrescriptionPayloadV2 | null>(null)
 const breakerActive = ref(false)
 const breakerRemainingMs = ref(0)
 let countdownTimer: ReturnType<typeof setInterval> | null = null
@@ -151,7 +202,6 @@ const avatarText = computed(() => {
 
 const avatarGradient = computed(() => {
   const name = prescription.value?.student_name ?? ''
-  // Deterministic gradient based on name
   const hash = name.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
   const hue = hash % 360
   return `linear-gradient(135deg, hsl(${hue}, 65%, 55%), hsl(${(hue + 40) % 360}, 65%, 45%))`
@@ -185,18 +235,39 @@ const breakerCountdown = computed(() => {
   return `${h}h ${m}m`
 })
 
-// ─── Icon Mapping ───────────────────────────────────────────────
-function getIconComponent(name: string): VueComponent {
-  const map: Record<string, VueComponent> = {
-    User,
-    Notebook,
-    HomeFilled,
-    Trophy,
-    WarningFilled,
-    Timer,
+// V2 segment flags
+const hasV2Segments = computed(() => {
+  const p = prescription.value
+  return p && (!!p.fact || !!p.analysis || !!p.growth)
+})
+
+// V2 rendered segments (Markdown → HTML)
+const renderedFact = computed(() => renderSegmentMarkdown(prescription.value?.fact ?? ''))
+const renderedAnalysis = computed(() => renderSegmentMarkdown(prescription.value?.analysis ?? ''))
+const renderedGrowth = computed(() => renderSegmentMarkdown(prescription.value?.growth ?? ''))
+
+// Risk level display
+const riskLevel = computed<RiskLevel>(() => prescription.value?.risk_level ?? 'MEDIUM')
+
+const riskTagType = computed(() => {
+  switch (riskLevel.value) {
+    case 'CRITICAL': return 'danger'
+    case 'HIGH': return 'danger'
+    case 'MEDIUM': return 'warning'
+    case 'LOW': return 'success'
+    default: return 'info'
   }
-  return map[name] ?? User
-}
+})
+
+const riskLabel = computed(() => {
+  switch (riskLevel.value) {
+    case 'CRITICAL': return '一票否决 ⚠️'
+    case 'HIGH': return 'RED 级干预'
+    case 'MEDIUM': return 'WARNING 级'
+    case 'LOW': return '观察级'
+    default: return '待评估'
+  }
+})
 
 // ─── Data Loading ───────────────────────────────────────────────
 async function loadPrescription() {
@@ -204,7 +275,7 @@ async function loadPrescription() {
   try {
     const wid = warningId.value || 1
     const sid = studentId.value
-    prescription.value = await getAIPrescription(wid, sid || undefined)
+    prescription.value = await getAIPrescriptionV2(wid, sid || undefined)
 
     // Check breaker state
     if (isBreakerActive(wid)) {
@@ -319,6 +390,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 .patient-name {
   font-size: 20px;
@@ -409,7 +481,145 @@ onUnmounted(() => {
   gap: 10px;
 }
 
-/* ═══ Layer 3: Measures Grid ═══ */
+/* ═══ Layer 3 V2: Segment Cards ═══ */
+.segment-card {
+  border-radius: 10px;
+  border: 1px solid var(--el-border-color-light);
+  background: var(--el-bg-color);
+  overflow: hidden;
+  transition: box-shadow 0.3s ease;
+}
+.segment-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* Fact — Blue Calm */
+.segment-fact {
+  border-left: 4px solid #409eff;
+}
+.segment-fact .segment-header {
+  background: linear-gradient(135deg, rgba(64, 158, 255, 0.08), rgba(64, 158, 255, 0.02));
+}
+
+/* Analysis — Orange Diagnosis */
+.segment-analysis {
+  border-left: 4px solid #e6a23c;
+}
+.segment-analysis .segment-header {
+  background: linear-gradient(135deg, rgba(230, 162, 60, 0.08), rgba(230, 162, 60, 0.02));
+}
+
+/* Growth — Green Action */
+.segment-growth {
+  border-left: 4px solid #67c23a;
+}
+.segment-growth .segment-header {
+  background: linear-gradient(135deg, rgba(103, 194, 58, 0.08), rgba(103, 194, 58, 0.02));
+}
+
+/* Segment Header */
+.segment-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.segment-icon-wrapper {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.icon-fact {
+  background: linear-gradient(135deg, #409eff, #79bbff);
+}
+.icon-analysis {
+  background: linear-gradient(135deg, #e6a23c, #f0c78a);
+}
+.icon-growth {
+  background: linear-gradient(135deg, #67c23a, #95d475);
+}
+.segment-title-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.segment-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.segment-subtitle {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  letter-spacing: 0.5px;
+}
+
+/* Segment Body — Markdown Content */
+.segment-body {
+  padding: 20px 24px;
+  line-height: 1.8;
+  color: var(--el-text-color-regular);
+  font-size: 14px;
+}
+
+/* Markdown Rendered Content Styles */
+.segment-body .seg-content {
+  /* root container */
+}
+.segment-body .seg-p {
+  margin-bottom: 12px;
+}
+.segment-body .seg-h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  margin: 16px 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.segment-body .seg-h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin: 12px 0 6px;
+}
+.segment-body strong {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+}
+.segment-body .seg-ul {
+  margin: 8px 0;
+  padding-left: 0;
+  list-style: none;
+}
+.segment-body .seg-li {
+  position: relative;
+  padding-left: 18px;
+  margin-bottom: 6px;
+  line-height: 1.7;
+}
+.segment-body .seg-li::before {
+  content: '•';
+  position: absolute;
+  left: 4px;
+  color: var(--el-text-color-secondary);
+  font-weight: 700;
+}
+
+/* Growth-specific tier highlight */
+.segment-growth .seg-li::before {
+  content: '▸';
+  color: #67c23a;
+}
+
+/* ═══ V1 Fallback: Measures Grid ═══ */
 .measures-grid {
   margin-top: 4px;
 }
@@ -538,6 +748,13 @@ onUnmounted(() => {
   .banner-right {
     justify-content: flex-end;
   }
+  .segment-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .segment-body {
+    padding: 16px;
+  }
 }
 
 /* ═══ Print Styles — Clean Paper Prescription ═══ */
@@ -553,6 +770,7 @@ onUnmounted(() => {
     gap: 8px;
   }
   .patient-header-card,
+  .segment-card,
   .measure-card,
   .empty-card {
     border: 1px solid #ccc !important;
@@ -565,15 +783,25 @@ onUnmounted(() => {
   .rdi-badge {
     border: 1px solid #ccc;
   }
+  .segment-fact {
+    border-left: 4px solid #409eff;
+  }
+  .segment-analysis {
+    border-left: 4px solid #e6a23c;
+  }
+  .segment-growth {
+    border-left: 4px solid #67c23a;
+  }
   body {
     background: #fff !important;
     color: #000 !important;
   }
   .summary-text,
-  .section-content,
+  .segment-body,
   .action-list,
   .patient-name,
-  .measure-category {
+  .measure-category,
+  .segment-title {
     color: #000 !important;
   }
 }

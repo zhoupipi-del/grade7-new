@@ -11,7 +11,7 @@ modules/parent_portal/schemas.py — 家长门户 Pydantic schemas
 
 import enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 
 
@@ -82,6 +82,9 @@ class TimelineEvent(BaseModel):
 # ═══════════════════════════════════════════════════════════════
 
 class FeedbackItem(BaseModel):
+    """反馈条目 — 支持 ORM 对象直转 (from_attributes=True)"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     student_id: int
     parent_id: int
@@ -95,11 +98,11 @@ class FeedbackItem(BaseModel):
     handler_id: Optional[int] = None
     handler_name: Optional[str] = None
     handler_reply: Optional[str] = None
-    handled_at: Optional[str] = None
+    handled_at: Optional[datetime] = None
     attachments: Optional[List[str]] = None
     source_context: Optional[Dict[str, Any]] = None
-    created_at: str
-    updated_at: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 class FeedbackListResponse(BaseModel):
@@ -147,11 +150,13 @@ class ChildOverview(BaseModel):
 
 class ParentDashboard(BaseModel):
     """首页聚合: 孩子概览 + 未读通知 + 待处理反馈 + 最近反馈"""
+    model_config = ConfigDict(populate_by_name=True)
+
     child: ChildOverview
     unread_notifications: int = 0
     pending_feedbacks: int = 0
     recent_feedbacks: List[FeedbackItem] = []
-    _meta: Optional[Dict[str, Any]] = None
+    meta: Optional[Dict[str, Any]] = None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -159,12 +164,14 @@ class ParentDashboard(BaseModel):
 # ═══════════════════════════════════════════════════════════════
 
 class AppealProxyResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     success: bool
     target_module: AppealTargetModuleEnum
     target_appeal_id: Optional[int] = None
     message: str
     source_context: Optional[Dict[str, Any]] = None
-    _meta: Optional[Dict[str, Any]] = None
+    meta: Optional[Dict[str, Any]] = None
 
 
 # ═══════════════════════════════════════════════════════════════

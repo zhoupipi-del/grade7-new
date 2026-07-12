@@ -39,6 +39,14 @@ export const useUserStore = defineStore('user', {
     schoolId(): number | null {
       return this.userInfo?.school_id ?? null
     },
+    /** 🎯 千人千面: 当前学段 */
+    currentPhase(): string {
+      return this.userInfo?.school_phase ?? 'junior'
+    },
+    /** 🎯 千人千面: 插件配置 */
+    pluginConfig(): Record<string, any> | null {
+      return this.userInfo?.plugin_config ?? null
+    },
   },
 
   actions: {
@@ -66,6 +74,9 @@ export const useUserStore = defineStore('user', {
         role: (typeof raw.role === 'string' ? raw.role.toUpperCase() : raw.role) as UserRole,
         school_id: raw.school_id ?? 0,
         school_name: raw.school_name || '',
+        // 🎯 千人千面: 学段 + 插件配置
+        school_phase: raw.school_phase || 'junior',
+        plugin_config: raw.plugin_config ?? null,
         class_id: raw.class_id ?? null,
         class_name: raw.class_name ?? null,
         grade_id: raw.grade_id ?? null,

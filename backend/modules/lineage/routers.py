@@ -17,6 +17,10 @@ from modules.lineage.schemas import (
     LineageStatsOut,
     LineageQuery,
     ScoreTraceOut,
+    MigrationBatchCreate,
+    MigrationBatchUpdate,
+    MigrationBatchOut,
+    MigrationStatsOut,
 )
 from modules.evaluation.models import ScoreLog
 
@@ -144,3 +148,84 @@ async def get_score_trace(
         raise HTTPException(status_code=404, detail="评分流水不存在")
 
     return trace
+
+
+# ═══════════════════════════════════════════════════════════
+# 数据迁移批次追踪
+# ═══════════════════════════════════════════════════════════
+
+@router.post("/migration/batches", status_code=201, response_model=MigrationBatchOut)
+async def create_migration_batch(
+    body: MigrationBatchCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    创建数据迁移批次记录。
+    用于旧数据迁移流程的第一步: 开工前先注册批次UUID,
+    后续逐行写入时携带此 batch_id 关联 sync_batch。
+    """
+    return await LineageService.create_migration_batch(
+        db=db, data=body, school_id=current_user.school_id,
+        created_by=current_user.id,
+    )
+
+
+@router.put("/migration/batches/{batch_id}", response_model=MigrationBatchOut)
+async def update_migration_batch(
+    batch_id: str,
+    body: MigrationBatchUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    更新迁移批次进度:
+    - 迁移开始: status="processing"
+    - 迁移完成: status="completed"/"completed_with_errors"/"failed"
+    - 增量更新: success_rows/failed_rows/skipped_rows
+    """
+    result = await LineageService.update_migration_batch(db, batch_id, body)
+    if not result:
+        raise HTTPException(status_code=404, detail="批次不存在")
+    return result
+
+
+@router.get("/migration/batches/{batch_id}", response_model=MigrationBatchOut)
+async def get_migration_batch(
+    batch_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """查询单个迁移批次详情"""
+    result = await LineageService.get_migration_batch(db, batch_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="批次不存在")
+    return result
+
+
+@router.get("/migration/batches")
+async def list_migration_batches(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    target_table: str = Query(None),
+    status: str = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出数据迁移批次（分页+筛选）"""
+    return await LineageService.list_migration_batches(
+        db=db, school_id=current_user.school_id,
+        page=page, page_size=page_size,
+        target_table=target_table, status=status,
+    )
+
+
+@router.get("/migration/stats", response_model=MigrationStatsOut)
+async def get_migration_stats(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """数据迁移统计概览"""
+    return await LineageService.get_migration_stats(
+        db=db, school_id=current_user.school_id,
+    )

@@ -47,6 +47,23 @@
                 </el-input>
 
                 <el-select
+                  v-model="selectedGradeId"
+                  placeholder="选择年级"
+                  clearable
+                  size="default"
+                  style="width: 100%"
+                  class="mb-3"
+                  @change="onGradeChange"
+                >
+                  <el-option
+                    v-for="g in gradeOptions"
+                    :key="g.id"
+                    :label="g.name"
+                    :value="g.id"
+                  />
+                </el-select>
+
+                <el-select
                   v-model="selectedClassId"
                   placeholder="按班级筛选"
                   clearable
@@ -56,7 +73,7 @@
                   @change="loadClassStudents"
                 >
                   <el-option
-                    v-for="c in classOptions"
+                    v-for="c in filteredClassOptions"
                     :key="c.id"
                     :label="c.name"
                     :value="c.id"
@@ -169,6 +186,20 @@
                     </span>
                     <div class="header-actions">
                       <el-select
+                        v-model="rankingGradeId"
+                        placeholder="选择年级"
+                        size="small"
+                        style="width: 120px"
+                        @change="onRankingGradeChange"
+                      >
+                        <el-option
+                          v-for="g in gradeOptions"
+                          :key="g.id"
+                          :label="g.name"
+                          :value="g.id"
+                        />
+                      </el-select>
+                      <el-select
                         v-model="rankingClassId"
                         placeholder="选择班级"
                         size="small"
@@ -176,7 +207,7 @@
                         @change="loadClassRanking"
                       >
                         <el-option
-                          v-for="c in classOptions"
+                          v-for="c in rankingFilteredClasses"
                           :key="c.id"
                           :label="c.name"
                           :value="c.id"
@@ -822,6 +853,7 @@ import {
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts/core'
 import { useUserStore } from '@/store/user'
+import { getClasses, getGrades, getStudents } from '@/api/classes'
 import {
   listIndicators,
   createIndicator,
@@ -896,9 +928,16 @@ const currentScores = ref<StudentScoreOut | null>(null)
 const studentsLoading = ref(false)
 const scoresLoading = ref(false)
 const allStudents = ref<any[]>([])
-const classOptions = ref<{ id: number; name: string }[]>([])
+const classOptions = ref<{ id: number; name: string; grade_id?: number }[]>([])
+const gradeOptions = ref<{ id: number; name: string }[]>([])
+const selectedGradeId = ref<number | null>(null)
 
 // filtered students for tab 1
+const filteredClassOptions = computed(() => {
+  if (!selectedGradeId.value) return classOptions.value
+  return classOptions.value.filter((c: any) => c.grade_id === selectedGradeId.value)
+})
+
 const filteredStudents = computed(() => {
   let list = allStudents.value
   if (studentSearchKeyword.value) {
@@ -918,6 +957,11 @@ let radarChartInst: ReturnType<typeof echarts.init> | null = null
 
 // ── Tab 2: 班级排名 ──────────────────────────
 const rankingClassId = ref<number | null>(null)
+const rankingGradeId = ref<number | null>(null)
+const rankingFilteredClasses = computed(() => {
+  if (!rankingGradeId.value) return classOptions.value
+  return classOptions.value.filter((c: any) => c.grade_id === rankingGradeId.value)
+})
 const classRanking = ref<ClassRankingOut | null>(null)
 const rankingLoading = ref(false)
 
@@ -1074,24 +1118,88 @@ function policyTagLabel(tag: string): string {
 // Tab 1: 学生画像
 // ═══════════════════════════════════════════════
 
+async function onGradeChange() {
+  selectedClassId.value = null
+  selectedStudent.value = null
+  if (selectedGradeId.value) {
+    const firstClass = filteredClassOptions.value[0]
+    if (firstClass) {
+      selectedClassId.value = firstClass.id
+      loadClassStudents()
+    }
+  } else {
+    allStudents.value = []
+  }
+}
+
+async function onRankingGradeChange() {
+  rankingClassId.value = null
+  classRanking.value = null
+  if (rankingGradeId.value) {
+    const firstClass = rankingFilteredClasses.value[0]
+    if (firstClass) {
+      rankingClassId.value = firstClass.id
+      loadClassRanking()
+    }
+  }
+}
+
 async function loadClassStudents() {
-  // 简化: 使用班级排名来获取学生列表
   studentsLoading.value = true
   try {
     if (selectedClassId.value) {
+      // 先尝试评价模块的班级排名（有分数数据更丰富）
       const ranking = await getClassRanking(selectedClassId.value)
-      allStudents.value = ranking.ranking.map((r) => ({
-        id: r.student_id,
-        name: r.student_name,
-        student_no: r.student_no,
-        class_name: `七(${selectedClassId.value})班`,
-        total_score: r.total_score,
-      }))
+      if (ranking.ranking && ranking.ranking.length > 0) {
+        const selectedClass = classOptions.value.find((c: any) => c.id === selectedClassId.value)
+        const className = selectedClass?.name || `班级#${selectedClassId.value}`
+        allStudents.value = ranking.ranking.map((r) => ({
+          id: r.student_id,
+          name: r.student_name,
+          student_no: r.student_no,
+          class_name: className,
+          class_id: selectedClassId.value,
+          grade_id: selectedGradeId.value || selectedClass?.grade_id,
+          total_score: r.total_score,
+        }))
+      } else {
+        // fallback: 班级无评价数据时，用核心学生API获取名单
+        const res: any = await getStudents({ class_id: selectedClassId.value, page: 1, page_size: 200 })
+        const list = res?.items ?? (Array.isArray(res) ? res : [])
+        allStudents.value = list.map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          student_no: s.student_no || s.student_number,
+          class_name: s.class_name || `班级#${s.class_id}`,
+          class_id: s.class_id || selectedClassId.value,
+          grade_id: s.grade_id || selectedGradeId.value,
+          total_score: 0,
+        }))
+      }
     } else {
       allStudents.value = []
     }
   } catch {
-    allStudents.value = []
+    // 评价API异常时，fallback到核心学生API
+    try {
+      if (selectedClassId.value) {
+        const res: any = await getStudents({ class_id: selectedClassId.value, page: 1, page_size: 200 })
+        const list = res?.items ?? (Array.isArray(res) ? res : [])
+        allStudents.value = list.map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          student_no: s.student_no || s.student_number,
+          class_name: s.class_name || `班级#${s.class_id}`,
+          class_id: s.class_id || selectedClassId.value,
+          grade_id: s.grade_id || selectedGradeId.value,
+          total_score: 0,
+        }))
+      } else {
+        allStudents.value = []
+      }
+    } catch {
+      allStudents.value = []
+    }
   } finally {
     studentsLoading.value = false
   }
@@ -1312,8 +1420,8 @@ async function submitScore() {
   try {
     await recordScore({
       student_id: scoreForm.value.student_id,
-      class_id: 1,
-      grade_id: 1,
+      class_id: selectedStudent.value?.class_id || selectedClassId.value,
+      grade_id: selectedStudent.value?.grade_id || selectedGradeId.value,
       indicator_id: scoreForm.value.indicator_path,
       score: scoreForm.value.score,
       scorer_type: scoreForm.value.scorer_type as any,
@@ -1345,37 +1453,66 @@ function resetScoreForm() {
 
 async function loadAllStudents() {
   if (allStudents.value.length > 0) return
-  // Try all classes
   studentsLoading.value = true
   try {
     const results: any[] = []
     for (const c of classOptions.value) {
       try {
         const ranking = await getClassRanking(c.id)
-        results.push(
-          ...ranking.ranking.map((r) => ({
-            id: r.student_id,
-            name: r.student_name,
-            student_no: r.student_no,
-            class_name: c.name,
-            total_score: r.total_score,
-          })),
-        )
+        if (ranking.ranking && ranking.ranking.length > 0) {
+          results.push(
+            ...ranking.ranking.map((r) => ({
+              id: r.student_id,
+              name: r.student_name,
+              student_no: r.student_no,
+              class_name: c.name,
+              class_id: c.id,
+              grade_id: c.grade_id,
+              total_score: r.total_score,
+            })),
+          )
+        } else {
+          // 班级无评价数据，fallback到核心学生API
+          try {
+            const res: any = await getStudents({ class_id: c.id, page: 1, page_size: 200 })
+            const list = res?.items ?? (Array.isArray(res) ? res : [])
+            results.push(
+              ...list.map((s: any) => ({
+                id: s.id,
+                name: s.name,
+                student_no: s.student_no || s.student_number,
+                class_name: s.class_name || c.name,
+                class_id: s.class_id || c.id,
+                grade_id: s.grade_id || c.grade_id,
+                total_score: 0,
+              })),
+            )
+          } catch {
+            // skip failed class fallback
+          }
+        }
       } catch {
         // skip failed class
       }
     }
-    if (results.length > 0) allStudents.value = results
+    if (results.length > 0) {
+      allStudents.value = results
+    } else {
+      // 全部失败时，直接用核心API
+      const res: any = await getStudents({ page: 1, page_size: 500 })
+      const list = res?.items ?? (Array.isArray(res) ? res : [])
+      allStudents.value = list.map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        student_no: s.student_no || s.student_number,
+        class_name: s.class_name || `班级#${s.class_id}`,
+        class_id: s.class_id,
+        grade_id: s.grade_id,
+        total_score: 0,
+      }))
+    }
   } catch {
-    // fallback demo
-    const demoNames = ['陈博裕', '李梓涵', '王浩然', '张雨萱', '刘子轩', '赵文博', '孙梦琪', '周思远']
-    allStudents.value = demoNames.map((n, i) => ({
-      id: 100 + i,
-      name: n,
-      student_no: `20250${String(i + 1)}`,
-      class_name: '七(1)班',
-      total_score: 0,
-    }))
+    allStudents.value = []
   } finally {
     studentsLoading.value = false
   }
@@ -1440,16 +1577,43 @@ onMounted(async () => {
   // 加载基础数据
   await Promise.all([loadIndicators(), loadRules()])
 
-  // 加载班级列表 (使用固定的7个班级)
-  classOptions.value = Array.from({ length: 8 }, (_, i) => ({
-    id: i + 1,
-    name: `七(${i + 1})班`,
-  }))
+  // 加载年级和班级列表 (使用真实API)
+  try {
+    const gradesRes: any = await getGrades()
+    const gradesList = gradesRes?.items ?? (Array.isArray(gradesRes) ? gradesRes : [])
+    gradeOptions.value = gradesList.map((g: any) => ({ id: g.id, name: g.name }))
 
-  // 默认选择第一个班级
+    const classesRes: any = await getClasses()
+    const classesList = classesRes?.items ?? (Array.isArray(classesRes) ? classesRes : [])
+    classOptions.value = classesList.map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      grade_id: c.grade_id,
+    }))
+  } catch {
+    // Fallback to demo data
+    classOptions.value = Array.from({ length: 8 }, (_, i) => ({
+      id: i + 1,
+      name: `七(${i + 1})班`,
+      grade_id: 1,
+    }))
+    gradeOptions.value = [{ id: 1, name: '七年级' }]
+  }
+
+  // 默认选择第一个年级和班级
+  if (gradeOptions.value.length > 0) {
+    selectedGradeId.value = gradeOptions.value[0].id
+    rankingGradeId.value = gradeOptions.value[0].id
+  }
   if (classOptions.value.length > 0) {
-    selectedClassId.value = classOptions.value[0].id
-    rankingClassId.value = classOptions.value[0].id
+    const firstClassOfClass = filteredClassOptions.value[0]
+    if (firstClassOfClass) {
+      selectedClassId.value = firstClassOfClass.id
+    }
+    const firstRankingClass = rankingFilteredClasses.value[0]
+    if (firstRankingClass) {
+      rankingClassId.value = firstRankingClass.id
+    }
     loadClassStudents()
     loadClassRanking()
   }

@@ -185,9 +185,9 @@
             <span class="detail-key">路由模块：</span>
             <span class="detail-val">{{ successResult.target_module === 'discipline' ? '处分申诉' : '违纪申诉' }}</span>
           </div>
-          <div v-if="successResult._meta" class="detail-row">
+          <div v-if="successResult.meta" class="detail-row">
             <span class="detail-key">处理耗时：</span>
-            <span class="detail-val">{{ successResult._meta.elapsed_ms }}ms</span>
+            <span class="detail-val">{{ successResult.meta.elapsed_ms }}ms</span>
           </div>
         </div>
         <el-button type="primary" @click="showSuccessDialog = false" class="success-btn">

@@ -298,7 +298,12 @@
         </div>
       </el-tab-pane>
 
-      <!-- ── Tab 4: 快照管理 ── -->
+      <!-- ── Tab 4: 五维雷达 ── -->
+      <el-tab-pane label="五维雷达" name="radar">
+        <FiveDimensionRadar />
+      </el-tab-pane>
+
+      <!-- ── Tab 5: 快照管理 ── -->
       <el-tab-pane v-if="!isParent" label="快照管理" name="snapshots">
         <div class="tab-toolbar">
           <div class="toolbar-left">
@@ -417,6 +422,7 @@ import {
   type EventSeverity, type StudentHolisticProfile, type GrowthSnapshotResponse,
   type SnapshotType, type GrowthDimension,
 } from '@/api/growth'
+import FiveDimensionRadar from './FiveDimensionRadar.vue'
 
 const userStore = useUserStore()
 

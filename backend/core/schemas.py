@@ -38,6 +38,8 @@ class UserOut(BaseModel):
     role: UserRoleEnum
     school_id: int
     school_name: Optional[str] = None
+    school_phase: Optional[str] = "junior"
+    plugin_config: Optional[dict] = None
     grade_id: Optional[int] = None
     class_id: Optional[int] = None
     is_active: bool
@@ -56,6 +58,8 @@ class ChangePasswordRequest(BaseModel):
 class SchoolOut(BaseModel):
     id: int
     name: str
+    school_phase: Optional[str] = "junior"
+    plugin_config: Optional[dict] = None
     is_active: bool
     created_at: Optional[datetime] = None
 

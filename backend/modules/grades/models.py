@@ -18,7 +18,15 @@ from core.models import Base, SchoolMixin, get_local_now
 
 
 class GradeSubject(Base, SchoolMixin):
-    """科目表 — 定义学校开设的考试科目"""
+    """科目表 — 定义学校开设的考试科目
+
+    subject_category 三分类(新高考 3+1+2):
+      - mandatory:  必考科目(语数英)，原始分直接计入总分
+      - preferred:  首选科目(物理/历史)，原始分直接计入总分
+      - elective:   再选科目(化/生/政/地)，等级赋分计入总分
+
+    初中/小学所有科目默认 subject_category='mandatory'(兼容)
+    """
 
     __tablename__ = "grades_subjects"
 
@@ -26,6 +34,18 @@ class GradeSubject(Base, SchoolMixin):
     name = Column(String(50), nullable=False, comment="科目名称（语文/数学/英语...）")
     code = Column(String(30), nullable=False, comment="科目代码（chinese/math/english...）")
     full_score = Column(Numeric(6, 2), default=100.00, comment="满分值（如 100/120/150）")
+    subject_category = Column(
+        String(20), nullable=False, default="mandatory",
+        comment="科目分类: mandatory(必考:语数英)/preferred(首选:物史)/elective(再选:化生政地)",
+    )
+    is_scaling_target = Column(
+        Boolean, nullable=False, default=False,
+        comment="是否需要等级赋分(仅再选科目为TRUE)",
+    )
+    scaling_score_range = Column(
+        String(20), nullable=True,
+        comment="赋分分值区间(如 '30-100' 表示再选科目赋分区间)",
+    )
     sort_order = Column(Integer, default=0, comment="排序权重")
     is_active = Column(Boolean, default=True, comment="是否启用")
     created_at = Column(DateTime, default=get_local_now, comment="创建时间")

@@ -230,6 +230,7 @@ from .schemas import (
     TimelineEventCreate, TimelineEventResponse,
     GrowthSnapshotResponse, TeacherCommentUpdate, SnapshotGenerateRequest,
     StudentHolisticProfile, GrowthDashboard,
+    CompositeAlertDetail, AlertResolveRequest, AlertResolveResponse,
 )
 from . import services as growth_svc
 
@@ -380,3 +381,256 @@ async def update_comment(
     if not snap:
         raise HTTPException(404, "快照不存在")
     return {"id": snap.id, "teacher_comment": snap.teacher_comment}
+
+
+# ═══════════════════════════════════════════════════════════════
+#   动态五维雷达 + 德育量化工单
+# ═══════════════════════════════════════════════════════════════
+
+from .analytics import DynamicGrowthEngine
+
+
+@router.get(
+    "/radar/{student_id}",
+    summary="动态五维成长雷达 — 13路降维 + 时间衰减",
+    description=(
+        "实时计算学生五维雷达得分（道德品行/学业发展/身心健康/行为习惯/综合实践）。\n\n"
+        "数据源: 考勤 + 违纪 + 处分 + 学业趋势 + 错题断层 + 作业 + 心理风险 + 时光轴 + 快照 + 活动。\n"
+        "算法: Time-Decay(λ=0.05) → 降维映射矩阵 → Sigmoid归一化。\n"
+        "附: 分值跌破警戒线时自动挂牌德育工单。"
+    ),
+)
+async def five_dimension_radar(
+    student_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    动态五维雷达 — 13路全息事件流 → 5维 Sigmoid 归一化得分。
+
+    返回结构:
+      scores:    {moral, academic, psych, habit, practice}  0-100
+      penalties: 各维度原始扣分（调试用）
+      sources:   各路数据采集摘要
+      alerts:    本次触发的德育工单列表
+    """
+    await _verify_student_access(student_id, user, db)
+    result = await DynamicGrowthEngine.compute_five_dimensions(
+        db=db,
+        student_id=student_id,
+        school_id=user.school_id,
+    )
+    return result
+
+
+@router.get(
+    "/moral-ledger",
+    summary="德育量化工单列表",
+    description="查询德育闭环自动挂牌的工单记录，支持按学生/未解除筛选。",
+)
+async def list_moral_ledger(
+    student_id: Optional[int] = Query(None, description="按学生筛选"),
+    unresolved_only: bool = Query(False, description="仅显示未解除工单"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """德育工单列表 — 班主任/年级组长/德育处可用"""
+    role = user.role
+    if isinstance(role, str):
+        role = UserRole(role)
+
+    # 家长只能看自己孩子的
+    filter_student_id = student_id
+    if role == UserRole.PARENT:
+        if not user.bound_student_id:
+            raise HTTPException(403, "未绑定学生")
+        filter_student_id = user.bound_student_id
+    elif role == UserRole.CLASS_TEACHER and not student_id:
+        # 班主任不指定 student_id 时看全量（后续可加 class_id 过滤）
+        pass
+
+    result = await DynamicGrowthEngine.get_ledger_entries(
+        db=db,
+        school_id=user.school_id,
+        student_id=filter_student_id,
+        unresolved_only=unresolved_only,
+        page=page,
+        page_size=page_size,
+    )
+    return result
+
+
+@router.put(
+    "/moral-ledger/{ledger_id}/resolve",
+    summary="解除德育工单挂牌",
+    description="班主任/年级组长/德育处执行干预后，解除学生的德育量化工单。",
+)
+async def resolve_moral_ledger(
+    ledger_id: int,
+    note: Optional[str] = Query(None, description="干预说明"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """解除挂牌 — 标记工单为已解决，记录干预说明"""
+    role = user.role
+    if isinstance(role, str):
+        role = UserRole(role)
+
+    if role not in (UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER):
+        raise HTTPException(403, "仅管理角色可解除工单")
+
+    entry = await DynamicGrowthEngine.resolve_ledger_entry(
+        db=db,
+        ledger_id=ledger_id,
+        school_id=user.school_id,
+        resolved_by=user.id,
+        note=note or "",
+    )
+    if not entry:
+        raise HTTPException(404, "工单不存在或无权操作")
+    return {
+        "id": entry.id,
+        "is_resolved": entry.is_resolved,
+        "resolved_at": entry.resolved_at,
+        "resolved_by": entry.resolved_by,
+        "resolution_note": entry.resolution_note,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+#   CEP 复合预警 Alert API — 前端沙箱消费
+# ═══════════════════════════════════════════════════════════════
+
+from sqlalchemy import select as sa_select
+from .models import ActiveCompositeAlert
+from core.models import get_local_now
+
+
+@router.get(
+    "/alerts/{alert_id}",
+    response_model=CompositeAlertDetail,
+    summary="获取复合预警详情（含AI处方）",
+    description=(
+        "前端沙箱消费端点：查询 ActiveCompositeAlert 完整详情，\n"
+        "包含 V3 AI 引擎生成的靶向处方（Markdown 格式），\n"
+        "供前端打字机动画渲染 + 人工微调 textarea。\n\n"
+        "RBAC: MS_ADMIN / GRADE_LEADER / CLASS_TEACHER 可查看本校预警；"
+        "班主任仅能查看本班学生的预警。"
+    ),
+)
+async def get_composite_alert(
+    alert_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    获取复合预警详情 — 前端沙箱核心数据源
+
+    1. 查询 alert 并校验 school_id（多租户红线）
+    2. 班主任额外校验: 该学生必须在本班
+    3. 已 resolved 的预警仍可查看（历史回溯）
+    """
+    result = await db.execute(
+        sa_select(ActiveCompositeAlert).where(ActiveCompositeAlert.id == alert_id)
+    )
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(404, "预警不存在")
+
+    # 多租户红线
+    if alert.school_id != user.school_id:
+        raise HTTPException(403, "无权查看其他学校的预警数据")
+
+    # 班主任铁闸 — 只能看本班学生的预警
+    role = user.role
+    if isinstance(role, str):
+        role = UserRole(role)
+    if role == UserRole.CLASS_TEACHER:
+        # 查询学生所在班级
+        student_result = await db.execute(
+            sa_select(Student).where(Student.id == alert.student_id)
+        )
+        student = student_result.scalar_one_or_none()
+        if not student or student.class_id != user.class_id:
+            raise HTTPException(403, "无权查看其他班级学生的预警")
+
+    return alert
+
+
+@router.post(
+    "/alerts/{alert_id}/resolve",
+    response_model=AlertResolveResponse,
+    summary="签署复合预警处方归档",
+    description=(
+        "Human-in-the-Loop 微调沙箱的最终出口：\n\n"
+        "教师对 V3 AI 处方进行人工修正后，一键签署归档。\n"
+        "final_prescription: 修正后的最终处方（必填）\n"
+        "resolution_note: 处置备注（可选）\n\n"
+        "签署后: is_resolved=True, 冷却锁继续生效防止重复触发。"
+    ),
+)
+async def resolve_composite_alert(
+    alert_id: int,
+    body: AlertResolveRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    签署处方归档 — 人工微调 → 一键签署
+
+    RBAC: 仅 MS_ADMIN / GRADE_LEADER / CLASS_TEACHER 可签署
+    多租户: alert.school_id 必须匹配 user.school_id
+    重复签署: 已 resolved 的预警返回 409
+    """
+    # ── RBAC 角色铁闸 ──
+    role = user.role
+    if isinstance(role, str):
+        role = UserRole(role)
+    if role not in (UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER):
+        raise HTTPException(403, "仅管理角色可签署预警处方")
+
+    # ── 查询 alert ──
+    result = await db.execute(
+        sa_select(ActiveCompositeAlert).where(ActiveCompositeAlert.id == alert_id)
+    )
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(404, "预警不存在")
+
+    # 多租户红线
+    if alert.school_id != user.school_id:
+        raise HTTPException(403, "无权操作其他学校的预警数据")
+
+    # 重复签署防护
+    if alert.is_resolved:
+        raise HTTPException(409, "该预警已被签署归档，不可重复操作")
+
+    # ── 班主任铁闸 ──
+    if role == UserRole.CLASS_TEACHER:
+        student_result = await db.execute(
+            sa_select(Student).where(Student.id == alert.student_id)
+        )
+        student = student_result.scalar_one_or_none()
+        if not student or student.class_id != user.class_id:
+            raise HTTPException(403, "无权操作其他班级学生的预警")
+
+    # ── 写入 Human-in-the-Loop 微调数据 ──
+    alert.is_resolved = True
+    alert.resolved_at = get_local_now()
+    alert.resolved_by = user.id
+    alert.final_prescription = body.final_prescription
+    alert.resolution_note = body.resolution_note
+
+    await db.commit()
+    await db.refresh(alert)
+
+    return AlertResolveResponse(
+        id=alert.id,
+        is_resolved=alert.is_resolved,
+        resolved_at=alert.resolved_at,
+        resolved_by=alert.resolved_by,
+        resolution_note=alert.resolution_note,
+        final_prescription=alert.final_prescription,
+    )

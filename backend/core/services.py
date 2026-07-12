@@ -99,11 +99,19 @@ class AuthService:
     async def get_user_out(cls, db: AsyncSession, user: User) -> UserOut:
         """将 User ORM 对象转为 UserOut 响应模型"""
         school_name = None
+        school_phase = "junior"
+        plugin_config = None
         if user.school_id:
             result = await db.execute(
-                select(School.name).where(School.id == user.school_id)
+                select(School.name, School.school_phase, School.plugin_config).where(
+                    School.id == user.school_id
+                )
             )
-            school_name = result.scalar_one_or_none()
+            row = result.first()
+            if row:
+                school_name = row[0]
+                school_phase = row[1] or "junior"
+                plugin_config = row[2]
 
         return UserOut(
             id=user.id,
@@ -112,6 +120,8 @@ class AuthService:
             role=user.role.value if isinstance(user.role, UserRole) else user.role,
             school_id=user.school_id,
             school_name=school_name,
+            school_phase=school_phase,
+            plugin_config=plugin_config,
             grade_id=user.grade_id,
             class_id=user.class_id,
             is_active=user.is_active,

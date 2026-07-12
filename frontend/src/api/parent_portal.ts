@@ -108,7 +108,7 @@ export interface ParentDashboard {
   unread_notifications: number
   pending_feedbacks: number
   recent_feedbacks: FeedbackItem[]
-  _meta?: { elapsed_ms: number }
+  meta?: { elapsed_ms: number }
 }
 
 /** ── 申诉代理结果 ─────────────────────────── */
@@ -119,7 +119,7 @@ export interface AppealProxyResult {
   target_appeal_id: number | null
   message: string
   source_context: Record<string, any> | null
-  _meta?: { elapsed_ms: number }
+  meta?: { elapsed_ms: number }
 }
 
 // ═══════════════════════════════════════════════════
@@ -167,7 +167,7 @@ export function getDashboard() {
  * 仅 PARENT 角色可访问
  */
 export function getChildOverview() {
-  return request.get<any, ChildOverview & { _meta?: { elapsed_ms: number } }>(
+  return request.get<any, ChildOverview & { meta?: { elapsed_ms: number } }>(
     '/parent_portal/child/overview',
   )
 }

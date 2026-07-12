@@ -11,6 +11,8 @@ export interface UserInfo {
   role: UserRole
   school_id: number
   school_name: string
+  school_phase?: string
+  plugin_config?: Record<string, any> | null
   class_id?: number
   class_name?: string
   grade_id?: number

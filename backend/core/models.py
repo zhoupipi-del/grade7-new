@@ -123,6 +123,11 @@ class School(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False, comment="学校名称")
+    school_phase = Column(
+        String(20), nullable=False, default="junior",
+        comment="学段类型: primary小学, junior初中, senior高中, integrated综合中学"
+    )
+    plugin_config = Column(JSON, nullable=True, comment="租户功能开关与灰度配置")
     branch_id = Column(BigInteger, ForeignKey("branches.id"), nullable=True, index=True,
                         comment="所属片区（nullable 允许迁移过渡）")
     org_id = Column(BigInteger, ForeignKey("organizations.id"), nullable=True, index=True,
@@ -271,6 +276,16 @@ class Grade(Base):
 # ═══════════════════════════════════════════════════════════════
 
 class Class(Base):
+    """
+    班级表 — 支持高中新高考走班制双轨模式
+
+    class_type 区分行政班与教学班:
+      - administrative: 行政班(班主任管理、考勤、德育、日常)
+      - teaching: 教学班/选科班(走班上课, 按选科组合分组)
+
+    初中/小学: 所有班级 class_type='administrative' (DEFAULT 值兼容)
+    高中: 学生同时属于1个行政班 + N个教学班(通过中间表关联)
+    """
     __tablename__ = "classes"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -279,6 +294,18 @@ class Class(Base):
     grade_id = Column(BigInteger, ForeignKey("grades.id"), nullable=False, index=True)
     head_teacher_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     student_count = Column(Integer, default=0)
+    class_type = Column(
+        String(20), nullable=False, default="administrative",
+        comment="班级类型: administrative(行政班)/teaching(教学班/选科班)",
+    )
+    subject_group = Column(
+        String(50), nullable=True,
+        comment="教学班选科组合: physics_group(物化生)/history_group(史政地)/custom",
+    )
+    grade_level = Column(
+        String(10), nullable=True,
+        comment="年级层级: senior_1(高一)/senior_2(高二)/senior_3(高三)",
+    )
     is_active = Column(Boolean, default=True)
 
     school = relationship("School", back_populates="classes")

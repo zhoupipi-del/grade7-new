@@ -337,6 +337,20 @@ class AttendanceService:
                     exc_info=True,
                 )
 
+        # 🔌 事件总线盲发: absent 记录 → growth 连续缺勤检测 (fire-and-forget)
+        # 监听器内部查 DB 判断连续缺勤 >= 3 天才注入时光轴
+        for target in hook_targets:
+            if target["status"] == "absent":
+                try:
+                    from core.event_bus import EventBus
+                    EventBus().publish("attendance.consecutive_absent", {
+                        "school_id": school_id,
+                        "student_id": target["student_id"],
+                        "class_id": class_id,
+                    })
+                except Exception:
+                    pass  # 事件总线不可用时静默降级
+
         return len(new_records), notification_targets
 
     # ═══════════════════════════════════════════════════════════
@@ -1455,29 +1469,33 @@ class AttendanceService:
         end_date: date,
     ) -> List[Dict]:
         """
-        班级考勤历史聚合 — 按天多态状态矩阵
+        班级考勤历史聚合 — 按天多态状态矩阵 (对齐前端 ClassHistoryMetric)
 
-        利用 CASE WHEN 在数据库端单次扫描完成按天归总：
-        date | total | present | absent_critical | warning | leave
+        利用 CASE WHEN 在数据库端单次扫描完成按天归总:
+        date | total | present | late | early | absent | leave | attendance_rate
 
-        性能足以支撑前端 ECharts 折线大盘瞬时轰击。
+        扣分公式: 100 − absent×15 − late×5 − early×5
+        前端 ECharts 双轴复合: 出勤率折线 + 异常人次堆叠柱状
         """
         stmt = (
             select(
                 AttendanceRecord.record_date.label("date"),
-                func.count(AttendanceRecord.id).label("total_students"),
+                func.count(AttendanceRecord.id).label("total"),
                 func.sum(case(
                     (AttendanceRecord.status == "present", 1), else_=0
-                )).label("present_count"),
+                )).label("present"),
+                func.sum(case(
+                    (AttendanceRecord.status == "late", 1), else_=0
+                )).label("late"),
+                func.sum(case(
+                    (AttendanceRecord.status == "early", 1), else_=0
+                )).label("early"),
                 func.sum(case(
                     (AttendanceRecord.status == "absent", 1), else_=0
-                )).label("absent_critical_count"),
-                func.sum(case(
-                    (AttendanceRecord.status.in_(["late", "early"]), 1), else_=0
-                )).label("warning_count"),
+                )).label("absent"),
                 func.sum(case(
                     (AttendanceRecord.status == "leave", 1), else_=0
-                )).label("leave_count"),
+                )).label("leave"),
             )
             .where(
                 and_(
@@ -1488,20 +1506,31 @@ class AttendanceService:
                 )
             )
             .group_by(AttendanceRecord.record_date)
-            .order_by(AttendanceRecord.record_date.desc())
+            .order_by(AttendanceRecord.record_date.asc())
         )
 
         res = await db.execute(stmt)
         rows = res.all()
 
-        return [
-            {
+        result = []
+        for row in rows:
+            total = int(row.total or 0)
+            present = int(row.present or 0)
+            late = int(row.late or 0)
+            early = int(row.early or 0)
+            absent = int(row.absent or 0)
+            leave = int(row.leave or 0)
+            # 出勤率 = present / total * 100 (请假不扣分)
+            attendance_rate = round(present / total * 100, 1) if total > 0 else 0.0
+            result.append({
                 "date": str(row.date) if row.date else None,
-                "total_students": int(row.total_students or 0),
-                "present_count": int(row.present_count or 0),
-                "absent_critical_count": int(row.absent_critical_count or 0),
-                "warning_count": int(row.warning_count or 0),
-                "leave_count": int(row.leave_count or 0),
-            }
-            for row in rows
-        ]
+                "total": total,
+                "present": present,
+                "late": late,
+                "early": early,
+                "absent": absent,
+                "leave": leave,
+                "attendance_rate": attendance_rate,
+            })
+
+        return result

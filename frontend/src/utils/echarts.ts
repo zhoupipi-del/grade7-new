@@ -13,7 +13,7 @@
 
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { RadarChart, LineChart, BarChart, PieChart, ScatterChart } from 'echarts/charts'
+import { RadarChart, LineChart, BarChart, PieChart, ScatterChart, FunnelChart } from 'echarts/charts'
 import {
   TitleComponent,
   TooltipComponent,
@@ -33,6 +33,7 @@ use([
   BarChart,
   PieChart,
   ScatterChart,
+  FunnelChart,
   TitleComponent,
   TooltipComponent,
   LegendComponent,

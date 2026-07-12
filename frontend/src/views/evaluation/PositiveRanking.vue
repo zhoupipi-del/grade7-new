@@ -250,6 +250,7 @@ import {
   Histogram, Search, Rank, Download, Refresh,
 } from '@element-plus/icons-vue'
 import request from '@/api/request'
+import { getClasses, getGrades } from '@/api/classes'
 import {
   getPositiveScoreRanking,
   type PositiveRankingOut,
@@ -281,6 +282,39 @@ const selectedDimension = ref<string>('all')
 const searchKeyword = ref('')
 const rankingLoading = ref(false)
 
+// 班级和年级选择
+const selectedClassId = ref<number | null>(null)
+const selectedGradeId = ref<number | null>(null)
+const classOptions = ref<Array<{ id: number; name: string; grade_id?: number }>>([])
+const gradeOptions = ref<Array<{ id: number; name: string }>>([])
+
+async function loadGradeAndClassOptions() {
+  try {
+    const gradesRes: any = await getGrades()
+    const gradesList = gradesRes?.items ?? (Array.isArray(gradesRes) ? gradesRes : [])
+    gradeOptions.value = gradesList.map((g: any) => ({ id: g.id, name: g.name }))
+    if (gradeOptions.value.length > 0) {
+      selectedGradeId.value = gradeOptions.value[0].id
+    }
+
+    const classesRes: any = await getClasses()
+    const classesList = classesRes?.items ?? (Array.isArray(classesRes) ? classesRes : [])
+    classOptions.value = classesList.map((c: any) => ({ id: c.id, name: c.name, grade_id: c.grade_id }))
+    // 根据选中的年级过滤并默认选择第一个班级
+    const filtered = classOptions.value.filter((c: any) => c.grade_id === selectedGradeId.value)
+    if (filtered.length > 0) {
+      selectedClassId.value = filtered[0].id
+    }
+  } catch {
+    // Fallback empty
+  }
+}
+
+const filteredClassOptions = computed(() => {
+  if (!selectedGradeId.value) return classOptions.value
+  return classOptions.value.filter((c: any) => c.grade_id === selectedGradeId.value)
+})
+
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalRecords = ref(0)
@@ -299,7 +333,8 @@ const topThree = computed(() => {
 // 生命周期
 // ════════════════════════════════════════
 
-onMounted(() => {
+onMounted(async () => {
+  await loadGradeAndClassOptions()
   loadRanking()
 })
 
@@ -319,11 +354,9 @@ async function loadRanking() {
 
     // 根据排名范围设置参数
     if (rankingScope.value === 'class') {
-      // TODO: 获取当前用户管理的班级ID
-      params.class_id = 1 // 临时硬编码
+      params.class_id = selectedClassId.value || undefined
     } else if (rankingScope.value === 'grade') {
-      // TODO: 获取当前用户管理的年级ID
-      params.grade_id = 1 // 临时硬编码
+      params.grade_id = selectedGradeId.value || undefined
     }
 
     // 维度筛选

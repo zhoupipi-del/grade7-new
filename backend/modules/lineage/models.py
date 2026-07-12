@@ -82,3 +82,71 @@ class LineageEvent(Base, SchoolMixin):
         Index("idx_le_stu_time", "student_id", "created_at"),
         Index("idx_le_trans", "transformation", "created_at"),
     )
+
+
+class MigrationBatch(Base, SchoolMixin):
+    """
+    数据迁移批次追踪表
+
+    每一次从旧系统 / 外部数据源批量迁移数据时,
+    在此表落盘一条批次记录, 记录源端信息、目标表、行数和状态。
+    配合 data_adapter 的 sync_status 字段, 实现完整的数据溯源闭环。
+
+    典型流程:
+      1. 创建批次 (status=pending)
+      2. 逐行/逐表迁移 (success_rows/failed_rows 递增)
+      3. 完成或失败 (status=completed/completed_with_errors/failed)
+      4. 审计时按 batch_id 查询该批次影响的所有记录
+    """
+
+    __tablename__ = "migration_batches"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    batch_id = Column(
+        String(36), nullable=False, unique=True, index=True,
+        comment="批次 UUID, 用于关联数据行的 sync_batch",
+    )
+    source_type = Column(
+        String(30), nullable=False,
+        comment="源类型: mysql_legacy/sqlite_dump/excel/csv/api",
+    )
+    source_desc = Column(
+        String(255), nullable=True,
+        comment="源描述: 旧数据库IP/文件名/API URL",
+    )
+    target_table = Column(
+        String(50), nullable=False, index=True,
+        comment="目标表: students/classes/grade_records/...",
+    )
+    status = Column(
+        String(30), nullable=False, default="pending",
+        comment="批次状态: pending/processing/completed/completed_with_errors/failed",
+    )
+    total_rows = Column(BigInteger, default=0, comment="源端总行数")
+    success_rows = Column(BigInteger, default=0, comment="成功迁移行数")
+    failed_rows = Column(BigInteger, default=0, comment="失败行数")
+    skipped_rows = Column(BigInteger, default=0, comment="跳过行数(已存在/不匹配)")
+
+    errors_summary = Column(JSON, nullable=True, comment="失败摘要(前50条)")
+    mapping_config = Column(
+        JSON, nullable=True,
+        comment="迁移映射配置: 字段映射/满分缩放/科目别名等",
+    )
+    transform_script = Column(
+        String(100), nullable=True,
+        comment="使用的变换脚本: legacy_data_etl.py / legacy_score_sampler.py",
+    )
+
+    created_by = Column(BigInteger, nullable=True, comment="操作人 user_id")
+    started_at = Column(DateTime, nullable=True, comment="迁移开始时间")
+    completed_at = Column(DateTime, nullable=True, comment="迁移完成时间")
+    created_at = Column(DateTime, default=get_local_now, nullable=False)
+    updated_at = Column(
+        DateTime, default=get_local_now, onupdate=get_local_now, nullable=False,
+    )
+
+    __table_args__ = (
+        Index("idx_mb_status", "status", "created_at"),
+        Index("idx_mb_target", "target_table", "created_at"),
+        {"comment": "数据迁移批次追踪表"},
+    )

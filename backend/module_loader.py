@@ -34,6 +34,7 @@ class ModuleManifest:
     dependencies: List[str] = field(default_factory=list)  # 前置依赖模块代码
     path: str = ""         # 物理路径
     enabled_by_default: bool = False  # 新学校是否默认启用
+    phases: List[str] = field(default_factory=list)  # 适用学段白名单, 空列表=全学段开放
 
     def validate(self) -> List[str]:
         """自检 manifest 合法性，返回错误列表"""
@@ -114,6 +115,7 @@ class ModuleScanner:
         category = getattr(mod, "MODULE_CATEGORY", "uncategorized")
         dependencies = list(getattr(mod, "MODULE_DEPENDENCIES", []))
         enabled_default = getattr(mod, "ENABLED_BY_DEFAULT", False)
+        phases = list(getattr(mod, "MODULE_PHASES", []))  # 空列表 = 全学段开放
 
         manifest = ModuleManifest(
             code=code,
@@ -122,6 +124,7 @@ class ModuleScanner:
             dependencies=dependencies,
             path=str(module_dir),
             enabled_by_default=enabled_default,
+            phases=phases,
         )
 
         errors = manifest.validate()
@@ -379,8 +382,18 @@ class ModuleLoader:
                 router = result
                 prefix = router_prefix
 
-            # 注册到 FastAPI
-            fastapi_app.include_router(router, prefix=prefix)
+            # 注册到 FastAPI（学段隔离闸：若模块声明了 MODULE_PHASES，自动注入 phase guard）
+            deps = []
+            if manifest.phases:
+                from core.routers import require_school_phase
+                from fastapi import Depends as FastAPIDepends
+                phase_guard = require_school_phase(manifest.phases)
+                deps = [FastAPIDepends(phase_guard)]
+                logger.info(
+                    f"[{manifest.code}] 🔒 学段隔离已激活: {manifest.phases}"
+                )
+
+            fastapi_app.include_router(router, prefix=prefix, dependencies=deps)
 
             self.registered_routers[manifest.code] = (router, prefix)
             logger.info(f"[{manifest.code}] ✓ 已注册: {prefix}")

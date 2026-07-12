@@ -12,7 +12,7 @@ import type { TagType } from './behavior'
  * - Source Traceability (惩戒前置源头溯源): RDI_Radar vs Approval_Ticket origin tracking
  * - Probation Status (观察期状态): 观察中 / 申诉中 / 已撤销 / 已到期未撤销
  *
- * Backend: /api/v1/discipline/records (domain aggregate endpoint)
+ * Backend: /api/v1/discipline/sanctions (domain aggregate endpoint)
  */
 
 // ═════════════════════════════════════════════════════════════════
@@ -57,14 +57,14 @@ export interface DisciplineRecord {
 // API Functions
 // ═════════════════════════════════════════════════════════════════
 
-/** GET /discipline/records — domain aggregate with timeline chain */
+/** GET /discipline/sanctions — domain aggregate with timeline chain */
 export const getDisciplineRecords = (params?: { status?: string }) => {
-  return request.get<any, DisciplineRecord[]>('/discipline/records', { params })
+  return request.get<any, DisciplineRecord[]>('/discipline/sanctions', { params })
 }
 
-/** POST /discipline/records/{punishmentId}/appeal — submit revocation appeal */
+/** POST /discipline/sanctions/{punishmentId}/revoke — submit revocation request */
 export const submitAppeal = (punishmentId: string, appealReason: string) => {
-  return request.post(`/discipline/records/${punishmentId}/appeal`, { appeal_reason: appealReason })
+  return request.post(`/discipline/sanctions/${punishmentId}/revoke`, { revoke_reason: appealReason })
 }
 
 // ═════════════════════════════════════════════════════════════════

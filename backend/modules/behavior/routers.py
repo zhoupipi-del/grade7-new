@@ -33,6 +33,22 @@ router = APIRouter(tags=["behavior"])
 
 
 # ═══════════════════════════════════════════════════════════════
+# 辅助函数
+# ═══════════════════════════════════════════════════════════════
+
+def _resolve_role(role) -> str:
+    """自呼吸看守熔断 — 杜绝 str/enum 混合体 AttributeError，始终返回纯字符串"""
+    if isinstance(role, UserRole):
+        return role.value
+    if isinstance(role, str):
+        try:
+            return UserRole(role).value
+        except ValueError:
+            return role
+    return str(role)
+
+
+# ═══════════════════════════════════════════════════════════════
 # 违纪记录 CRUD
 # ═══════════════════════════════════════════════════════════════
 
@@ -48,7 +64,7 @@ async def create_discipline(
         record = await BehaviorService.create_record(
             db, current_user.school_id,
             body.model_dump(), current_user.id,
-            creator_role=current_user.role.value,
+            creator_role=_resolve_role(current_user.role),
         )
         return _format_record(record)
     except ValueError as e:

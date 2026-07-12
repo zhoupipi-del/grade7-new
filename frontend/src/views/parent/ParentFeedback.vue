@@ -223,7 +223,6 @@ import {
 import {
   listFeedbacks,
   createFeedback,
-  getDemoFeedbacks,
   feedbackStatusTagType,
   formatRelativeTime,
   FEEDBACK_TYPE_OPTIONS,
@@ -280,9 +279,7 @@ async function fetchFeedbacks() {
     feedbacks.value = res.items
     total.value = res.total
   } catch {
-    // 后端不可用 → 降级到Demo数据
-    feedbacks.value = getDemoFeedbacks()
-    total.value = feedbacks.value.length
+    ElMessage.error('反馈数据加载失败，请稍后刷新重试')
   } finally {
     loading.value = false
   }
@@ -305,8 +302,13 @@ async function submitFeedback() {
 
     submitting.value = true
     try {
-      // 获取绑定的学生ID
-      const studentId = (userStore.userInfo as any)?.bound_student_id || 100
+      // 获取绑定的学生ID — 必须有绑定才能提交反馈
+      const studentId = (userStore.userInfo as any)?.bound_student_id
+      if (!studentId) {
+        ElMessage.warning('您的账号未绑定学生，无法提交反馈，请联系班主任')
+        submitting.value = false
+        return
+      }
       const result = await createFeedback({
         student_id: studentId,
         feedback_type: createForm.feedback_type as FeedbackType,

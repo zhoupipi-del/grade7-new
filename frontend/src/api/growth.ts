@@ -253,6 +253,84 @@ export function updateTeacherComment(snapshotId: number, data: TeacherCommentUpd
 }
 
 // ═══════════════════════════════════════════════════
+// 动态五维雷达 + 德育量化工单 API
+// ═══════════════════════════════════════════════════
+
+/** 动态五维雷达得分 (BOSS 新五维: moral/academic/psych/habit/practice) */
+export interface DynamicFiveDimensions {
+  moral: number
+  academic: number
+  psych: number
+  habit: number
+  practice: number
+}
+
+/** GET /radar/{student_id} 返回结构 */
+export interface RadarResponse {
+  scores: DynamicFiveDimensions
+  penalties: Record<string, number>
+  sources: Record<string, any>
+  alerts: Array<{
+    dimension: string
+    score: number
+    action_type: string
+    threshold_warn: number
+    threshold_red: number
+  }>
+}
+
+/** 德育量化工单 */
+export interface MoralLedgerEntry {
+  id: number
+  student_id: number
+  dimension_name: string
+  trigger_score: number
+  action_type: string
+  description: string | null
+  score_snapshot: string | null
+  is_resolved: boolean
+  resolved_at: string | null
+  resolved_by: number | null
+  resolution_note: string | null
+  created_at: string
+}
+
+export interface MoralLedgerResponse {
+  items: MoralLedgerEntry[]
+  total: number
+  page: number
+  page_size: number
+}
+
+/** GET /radar/{student_id} — 动态五维成长雷达 */
+export function getFiveDimensionRadar(studentId: number) {
+  return request.get<any, RadarResponse>(`/growth/radar/${studentId}`)
+}
+
+/** GET /moral-ledger — 德育量化工单列表 */
+export function listMoralLedger(params?: {
+  student_id?: number
+  unresolved_only?: boolean
+  page?: number
+  page_size?: number
+}) {
+  return request.get<any, MoralLedgerResponse>('/growth/moral-ledger', { params })
+}
+
+/** PUT /moral-ledger/{id}/resolve — 解除德育工单挂牌 */
+export function resolveMoralLedger(ledgerId: number, note?: string) {
+  return request.put<any, {
+    id: number
+    is_resolved: boolean
+    resolved_at: string | null
+    resolved_by: number | null
+    resolution_note: string | null
+  }>(`/growth/moral-ledger/${ledgerId}/resolve`, null, {
+    params: note ? { note } : undefined,
+  })
+}
+
+// ═══════════════════════════════════════════════════
 // 业务常量 & 映射工具
 // ═══════════════════════════════════════════════════
 

@@ -16,7 +16,7 @@ P0 重型增强：从只读融合模块升级为双表驱动母舰模块。
 import enum
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, Float, Text, JSON, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, DateTime, Float, Text, JSON, ForeignKey, Index, Boolean
 
 from core.models import Base
 
@@ -112,4 +112,51 @@ class GrowthPeriodicalSnapshot(Base):
 
     __table_args__ = (
         Index("ix_growth_snap_student_period", "student_id", "period_label"),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  表3: 主动复合预警 — CEP (Complex Event Processing) 拦截器持久化
+# ═══════════════════════════════════════════════════════════════
+
+class ActiveCompositeAlert(Base):
+    """
+    主动复合预警记录 — 当考勤危机 × 学业断层在 48h 滑动时间窗内交汇时，
+    CEP 拦截器自动唤醒 V3 AI 引擎生成靶向处方，持久化至此表。
+
+    生命周期: CRITICAL_COMPOSITE → RESOLVED (班主任/德育处确认处理)
+    冷却机制: 同一学生 3 天内仅触发一次 (Redis SETNX 冷却锁)
+    """
+    __tablename__ = "growth_active_composite_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    school_id = Column(Integer, nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False, index=True)
+
+    # 预警类型: CRITICAL_COMPOSITE (考勤×学业), 后续可扩展更多组合
+    alert_type = Column(String(50), nullable=False, default="CRITICAL_COMPOSITE")
+    # 预警标题: "复合预警: 连续缺勤3天 + 知识断层critical"
+    title = Column(String(200), nullable=False)
+
+    # 触发元数据 JSON — 记录哪两个事件在什么时间交汇
+    # 例: {"attendance": {"consecutive": 3, "window_key": "..."}, "error_funnel": {"kp": "...", "level": "critical", "window_key": "..."}}
+    reason_meta = Column(Text, nullable=False)
+
+    # V3 AI 引擎生成的靶向处方 (Markdown)
+    ai_prescription = Column(Text, nullable=False)
+
+    # 处置状态
+    is_resolved = Column(Boolean, default=False, index=True)
+    resolved_at = Column(DateTime, nullable=True)
+    resolved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Human-in-the-Loop 微调区 — 班主任/德育处签署归档时填入
+    resolution_note = Column(Text, nullable=True, comment="处置备注（教师手动填写）")
+    final_prescription = Column(Text, nullable=True, comment="人工微调后的最终处方（V3原始→教师修正）")
+
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_growth_alert_school_student", "school_id", "student_id"),
+        Index("ix_growth_alert_unresolved", "is_resolved", "created_at"),
     )

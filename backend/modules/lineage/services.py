@@ -5,14 +5,16 @@ modules/lineage/services.py — 血缘查询服务
 """
 
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from modules.lineage.models import LineageEvent
+from modules.lineage.models import LineageEvent, MigrationBatch
 from modules.lineage.schemas import (
     CausalNode, CausalChain, LineageStatsOut, LineageEventListItem,
     ScoreLogBrief, ScoreTraceOut,
+    MigrationBatchCreate, MigrationBatchUpdate, MigrationBatchOut, MigrationStatsOut,
 )
 from modules.evaluation.models import ScoreLog
 from core.models import Student, Class, User
@@ -359,4 +361,172 @@ class LineageService:
             causal_chain=causal_chain,
             related_events=related_events,
             lineage_status=lineage_status,
+        )
+
+    # ═══════════════════════════════════════════════════════════
+    # 迁移批次追踪
+    # ═══════════════════════════════════════════════════════════
+
+    @staticmethod
+    async def create_migration_batch(
+        db: AsyncSession, data: MigrationBatchCreate,
+        school_id: int, created_by: Optional[int] = None,
+    ) -> MigrationBatchOut:
+        """创建迁移批次记录"""
+        batch = MigrationBatch(
+            school_id=school_id,
+            batch_id=data.batch_id,
+            source_type=data.source_type,
+            source_desc=data.source_desc,
+            target_table=data.target_table,
+            status="pending",
+            total_rows=data.total_rows,
+            mapping_config=data.mapping_config,
+            transform_script=data.transform_script,
+            created_by=created_by,
+        )
+        db.add(batch)
+        await db.commit()
+        await db.refresh(batch)
+        return MigrationBatchOut.model_validate(batch)
+
+    @staticmethod
+    async def update_migration_batch(
+        db: AsyncSession, batch_id: str, data: MigrationBatchUpdate,
+    ) -> Optional[MigrationBatchOut]:
+        """更新迁移批次进度"""
+        result = await db.execute(
+            select(MigrationBatch).where(MigrationBatch.batch_id == batch_id)
+        )
+        batch = result.scalar_one_or_none()
+        if not batch:
+            return None
+
+        if data.status is not None:
+            batch.status = data.status
+            if data.status == "completed" or data.status == "completed_with_errors":
+                batch.completed_at = datetime.now()
+            elif data.status == "processing" and batch.started_at is None:
+                batch.started_at = datetime.now()
+
+        if data.success_rows is not None:
+            batch.success_rows = data.success_rows
+        if data.failed_rows is not None:
+            batch.failed_rows = data.failed_rows
+        if data.skipped_rows is not None:
+            batch.skipped_rows = data.skipped_rows
+        if data.errors_summary is not None:
+            batch.errors_summary = data.errors_summary
+
+        await db.commit()
+        await db.refresh(batch)
+        return MigrationBatchOut.model_validate(batch)
+
+    @staticmethod
+    async def get_migration_batch(
+        db: AsyncSession, batch_id: str,
+    ) -> Optional[MigrationBatchOut]:
+        """查询单个迁移批次"""
+        result = await db.execute(
+            select(MigrationBatch).where(MigrationBatch.batch_id == batch_id)
+        )
+        batch = result.scalar_one_or_none()
+        return MigrationBatchOut.model_validate(batch) if batch else None
+
+    @staticmethod
+    async def list_migration_batches(
+        db: AsyncSession, school_id: int,
+        page: int = 1, page_size: int = 20,
+        target_table: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> dict:
+        """列出迁移批次（分页）"""
+        conditions = [MigrationBatch.school_id == school_id]
+        if target_table:
+            conditions.append(MigrationBatch.target_table == target_table)
+        if status:
+            conditions.append(MigrationBatch.status == status)
+
+        count_q = select(func.count()).select_from(
+            select(MigrationBatch).where(and_(*conditions)).subquery()
+        )
+        total_result = await db.execute(count_q)
+        total = total_result.scalar() or 0
+
+        result = await db.execute(
+            select(MigrationBatch)
+            .where(and_(*conditions))
+            .order_by(desc(MigrationBatch.created_at))
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        batches = result.scalars().all()
+
+        return {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "items": [MigrationBatchOut.model_validate(b) for b in batches],
+        }
+
+    @staticmethod
+    async def get_migration_stats(
+        db: AsyncSession, school_id: int,
+    ) -> MigrationStatsOut:
+        """迁移统计概览"""
+        subquery = select(MigrationBatch).where(MigrationBatch.school_id == school_id).subquery()
+
+        total_result = await db.execute(
+            select(func.count()).select_from(subquery)
+        )
+        total_batches = total_result.scalar() or 0
+
+        active_result = await db.execute(
+            select(func.count()).where(
+                and_(
+                    MigrationBatch.school_id == school_id,
+                    MigrationBatch.status.in_(["pending", "processing"]),
+                )
+            )
+        )
+        active_batches = active_result.scalar() or 0
+
+        rows_result = await db.execute(
+            select(func.coalesce(func.sum(MigrationBatch.success_rows), 0))
+            .where(MigrationBatch.school_id == school_id)
+        )
+        total_migrated_rows = rows_result.scalar() or 0
+
+        status_result = await db.execute(
+            select(MigrationBatch.status, func.count(MigrationBatch.id))
+            .where(MigrationBatch.school_id == school_id)
+            .group_by(MigrationBatch.status)
+        )
+        by_status = {row[0]: row[1] for row in status_result.all()}
+
+        table_result = await db.execute(
+            select(MigrationBatch.target_table, func.count(MigrationBatch.id))
+            .where(MigrationBatch.school_id == school_id)
+            .group_by(MigrationBatch.target_table)
+        )
+        by_target_table = {row[0]: row[1] for row in table_result.all()}
+
+        recent_result = await db.execute(
+            select(MigrationBatch)
+            .where(MigrationBatch.school_id == school_id)
+            .order_by(desc(MigrationBatch.created_at))
+            .limit(10)
+        )
+        recent_batches = [
+            MigrationBatchOut.model_validate(b)
+            for b in recent_result.scalars().all()
+        ]
+
+        return MigrationStatsOut(
+            total_batches=total_batches,
+            active_batches=active_batches,
+            total_migrated_rows=total_migrated_rows,
+            by_status=by_status,
+            by_target_table=by_target_table,
+            recent_batches=recent_batches,
         )

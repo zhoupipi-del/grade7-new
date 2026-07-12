@@ -122,9 +122,13 @@ async function handleLogin() {
       // Store user info
       if (res.user) {
         userStore.setUserInfo(res.user)
-        // Set tenant context from user info
+        // Set tenant context from user info (含学段)
         if (res.user.school_id && res.user.school_name) {
-          tenantStore.setSchool(res.user.school_id, res.user.school_name)
+          tenantStore.setSchool(
+            res.user.school_id,
+            res.user.school_name,
+            res.user.school_phase,
+          )
         }
       }
 

@@ -172,3 +172,43 @@ class GrowthDashboard(BaseModel):
     bonus_events: int = Field(0, description="bonus级事件数")
     dimension_distribution: List[Dict[str, Any]] = Field(default_factory=list, description="维度分布")
     recent_critical_events: List[TimelineEventResponse] = Field(default_factory=list, description="近期critical事件")
+
+
+# ═══════════════════════════════════════════════════════════
+#  CEP 复合预警 Alert 契约 — SSE 泵站前端沙箱消费
+# ═══════════════════════════════════════════════════════════
+
+class CompositeAlertDetail(BaseModel):
+    """复合预警详情 — 前端沙箱 GET /alerts/{id} 响应"""
+    id: int
+    school_id: int
+    student_id: int
+    alert_type: str = Field("CRITICAL_COMPOSITE", description="预警类型")
+    title: str = Field(..., description="预警标题")
+    reason_meta: str = Field(..., description="触发元数据 JSON")
+    ai_prescription: str = Field(..., description="V3 AI 引擎生成的靶向处方 (Markdown)")
+    is_resolved: bool = Field(False, description="是否已签署归档")
+    resolved_at: Optional[datetime] = None
+    resolved_by: Optional[int] = None
+    resolution_note: Optional[str] = Field(None, description="处置备注")
+    final_prescription: Optional[str] = Field(None, description="人工微调后的最终处方")
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AlertResolveRequest(BaseModel):
+    """签署处方归档请求 — 前端沙箱 POST /alerts/{id}/resolve"""
+    final_prescription: str = Field(..., min_length=10, description="人工微调后的最终处方（可基于 V3 原始修正）")
+    resolution_note: Optional[str] = Field(None, max_length=500, description="处置备注（教师手动填写）")
+
+
+class AlertResolveResponse(BaseModel):
+    """签署归档响应"""
+    id: int
+    is_resolved: bool
+    resolved_at: datetime
+    resolved_by: int
+    resolution_note: Optional[str] = None
+    final_prescription: str

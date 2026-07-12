@@ -24,9 +24,15 @@ export function getClassStudents(classId: number, params?: {
   return request.get(`/classes/${classId}/students`, { params })
 }
 
+/** Fetch grades list (年级) */
+export function getGrades() {
+  return request.get('/grades')
+}
+
 /** Fetch students across classes (lightweight list for selectors) */
 export function getStudents(params?: {
   grade_id?: number
+  class_id?: number
   page?: number
   page_size?: number
 }) {

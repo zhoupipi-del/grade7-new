@@ -184,6 +184,7 @@ import {
   Plus, EditPen, List, Check, Search,
 } from '@element-plus/icons-vue'
 import request from '@/api/request'
+import { getClasses, getGrades, getStudents } from '@/api/classes'
 import {
   type EvalDimension,
   type IndicatorItem,
@@ -300,9 +301,23 @@ async function searchStudents(query: string) {
 
   studentsLoading.value = true
   try {
-    // TODO: 调用学生搜索 API（需要后端支持）
-    // 临时方案：使用本地过滤（假设已有学生列表）
-    ElMessage.info('学生搜索功能待后端 API 支持')
+    const res: any = await getStudents({ page: 1, page_size: 50 })
+    const list = res?.items ?? (Array.isArray(res) ? res : [])
+    // 搜索过滤（按姓名或学号）
+    const kw = query.toLowerCase()
+    const filtered = list.filter((s: any) =>
+      s.name?.toLowerCase().includes(kw) ||
+      s.student_no?.toLowerCase().includes(kw) ||
+      s.student_number?.toLowerCase().includes(kw),
+    )
+    studentOptions.value = filtered.map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      student_no: s.student_no || s.student_number || '',
+      class_name: s.class_name || '',
+      class_id: s.class_id,
+      grade_id: s.grade_id,
+    }))
   } catch (err: any) {
     ElMessage.error(`搜索学生失败: ${err.message || err}`)
   } finally {
@@ -368,10 +383,15 @@ async function submitScore() {
 
   submitLoading.value = true
   try {
-    // TODO: 需要获取 class_id 和 grade_id
-    // 临时方案：从 selectedStudent 中获取（需要后端返回）
-    const classId = selectedStudent.value?.['class_id'] || 1
-    const gradeId = selectedStudent.value?.['grade_id'] || 1
+    // 从选中学生获取 class_id 和 grade_id（不再硬编码为1）
+    const classId = selectedStudent.value?.['class_id']
+    const gradeId = selectedStudent.value?.['grade_id']
+
+    if (!classId || !gradeId) {
+      ElMessage.warning('缺少班级/年级信息，请重新选择学生')
+      submitLoading.value = false
+      return
+    }
 
     await recordScore({
       student_id: formData.student_id!,

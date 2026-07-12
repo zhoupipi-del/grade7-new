@@ -133,6 +133,7 @@ async def lifespan(app: FastAPI):
     import modules.notifications.models   # noqa: F401
     import modules.dashboard.models        # noqa: F401  (纯聚合，不建表)
     import modules.growth.models          # noqa: F401  (P0双表: timeline_events + periodical_snapshots)
+    import modules.growth.analytics       # noqa: F401  (德育量化工单表: moral_education_ledger)
     import modules.approval.models        # noqa: F401
     import modules.teach_math.models     # noqa: F401
     import modules.risk_models.models    # noqa: F401
@@ -240,12 +241,40 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"PolicyEngine 加载失败(降级模式，Hook将跳过): {e}", exc_info=True)
 
+    # 7. Redis 分布式事件总线 — 跨进程 pub/sub (4 Workers 下必须用 Redis)
+    try:
+        from core.redis_client import init_redis, close_redis
+        from modules.growth.listeners import (
+            initialize_growth_events,
+            shutdown_growth_events,
+        )
+
+        await init_redis()
+        await initialize_growth_events(AsyncSessionLocal)
+        logger.info("Redis 事件总线已并网 - 4路跨模块事件自动注入成长档案")
+    except Exception as e:
+        logger.error(
+            f"Redis 事件总线初始化失败(降级模式，事件注入将跳过): {e}",
+            exc_info=True,
+        )
+
     logger.info("═" * 50)
 
     yield  # ← 应用运行中
 
     # ── 关闭: 清理资源 ──
     logger.info("Wings 3.0 正在关闭...")
+
+    # 关闭事件总线监听
+    try:
+        from modules.growth.listeners import shutdown_growth_events
+        from core.redis_client import close_redis
+        await shutdown_growth_events()
+        await close_redis()
+        logger.info("Redis 事件总线已关闭")
+    except Exception as e:
+        logger.error(f"Redis 事件总线关闭异常: {e}")
+
     await engine.dispose()
     logger.info("数据库连接池已释放")
 

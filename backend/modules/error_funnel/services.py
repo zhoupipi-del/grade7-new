@@ -386,6 +386,7 @@ async def _aggregate_gaps(
       4. 如果达到 critical 且无AI处方 → 标记待生成
     """
     now = get_local_now()
+    critical_events = []  # 收集新晋 critical 的断层 (用于事件总线盲发)
 
     for kp_id in knowledge_point_ids:
         # 获取知识点名
@@ -415,9 +416,18 @@ async def _aggregate_gaps(
             gap.consecutive_errors += 1
             gap.last_error_date = now
             gap.last_error_source = source_desc
+            old_level = gap.gap_level
             gap.gap_level = _calculate_gap_level(gap.error_count, gap.consecutive_errors)
             gap.gap_status = GAP_ACTIVE  # 新错误入列，重新激活
             gap.resolved_at = None
+
+            # 🔌 事件总线: 新晋 critical (非 critical → critical) 才发射
+            if old_level != GAP_CRITICAL and gap.gap_level == GAP_CRITICAL:
+                critical_events.append({
+                    "knowledge_point": kp_name,
+                    "consecutive_errors": gap.consecutive_errors,
+                    "error_count": gap.error_count,
+                })
         else:
             # 新建记录
             gap = KnowledgeGap(
@@ -436,6 +446,20 @@ async def _aggregate_gaps(
             db.add(gap)
 
     await db.flush()
+
+    # 🔌 事件总线盲发: critical 断层 → growth 时光轴 (fire-and-forget)
+    for evt in critical_events:
+        try:
+            from core.event_bus import EventBus
+            EventBus().publish("error_funnel.critical", {
+                "school_id": school_id,
+                "student_id": student_id,
+                "knowledge_point": evt["knowledge_point"],
+                "consecutive_errors": evt["consecutive_errors"],
+                "error_count": evt["error_count"],
+            })
+        except Exception:
+            pass  # 事件总线不可用时静默降级
 
 
 # ──────────────────────────────────────────────

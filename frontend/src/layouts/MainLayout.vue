@@ -343,6 +343,12 @@ const allMenuGroups: MenuGroup[] = [
         roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
       },
       {
+        index: '/attendance/class-history',
+        title: '考勤历史大盘',
+        icon: 'TrendCharts',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
+      {
         index: '/red-flag',
         title: '流动红旗',
         icon: 'Flag',

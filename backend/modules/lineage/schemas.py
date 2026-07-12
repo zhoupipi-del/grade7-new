@@ -8,6 +8,63 @@ from pydantic import BaseModel, Field
 
 
 # ═══════════════════════════════════════════════════════════
+# 迁移批次 Schema
+# ═══════════════════════════════════════════════════════════
+
+class MigrationBatchCreate(BaseModel):
+    """创建迁移批次"""
+    batch_id: str = Field(..., description="批次UUID")
+    source_type: str = Field(..., description="mysql_legacy/sqlite_dump/excel/csv/api")
+    source_desc: Optional[str] = None
+    target_table: str = Field(..., description="目标表名")
+    total_rows: int = Field(0, ge=0)
+    mapping_config: Optional[Dict[str, Any]] = None
+    transform_script: Optional[str] = None
+
+
+class MigrationBatchUpdate(BaseModel):
+    """更新迁移批次进度"""
+    status: Optional[str] = None
+    success_rows: Optional[int] = None
+    failed_rows: Optional[int] = None
+    skipped_rows: Optional[int] = None
+    errors_summary: Optional[List[Dict[str, Any]]] = None
+
+
+class MigrationBatchOut(BaseModel):
+    """迁移批次响应"""
+    id: int
+    batch_id: str
+    source_type: str
+    source_desc: Optional[str] = None
+    target_table: str
+    status: str
+    total_rows: int
+    success_rows: int
+    failed_rows: int
+    skipped_rows: int
+    errors_summary: Optional[Any] = None
+    mapping_config: Optional[Any] = None
+    transform_script: Optional[str] = None
+    created_by: Optional[int] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MigrationStatsOut(BaseModel):
+    """迁移统计概览"""
+    total_batches: int
+    active_batches: int
+    total_migrated_rows: int
+    by_status: Dict[str, int]
+    by_target_table: Dict[str, int]
+    recent_batches: List[MigrationBatchOut]
+
+
+# ═══════════════════════════════════════════════════════════
 # 事件 Schema
 # ═══════════════════════════════════════════════════════════
 
