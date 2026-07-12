@@ -452,6 +452,53 @@ export function scoreColor(score: number): string {
 }
 
 // ═══════════════════════════════════════════════════
+// CEP 复合预警 Alert API (与后端 growth/schemas.py 对齐)
+// ═══════════════════════════════════════════════════
+
+/** GET /growth/alerts/{alert_id} — 复合预警详情 */
+export interface CompositeAlertDetail {
+  id: number
+  school_id: number
+  student_id: number
+  alert_type: string
+  title: string
+  reason_meta: Record<string, any> | null
+  ai_prescription: string | null
+  is_resolved: boolean
+  resolved_at: string | null
+  resolved_by: number | null
+  resolution_note: string | null
+  final_prescription: string | null
+  created_at: string
+}
+
+/** POST /growth/alerts/{alert_id}/resolve — 签署归档请求体 */
+export interface AlertResolveRequest {
+  final_prescription: string   // min_length=10, 人工微调后的最终处方
+  resolution_note?: string     // max_length=500, 处置备注(可选)
+}
+
+/** POST /growth/alerts/{alert_id}/resolve — 签署归档响应 */
+export interface AlertResolveResponse {
+  id: number
+  is_resolved: boolean
+  resolved_at: string | null
+  resolved_by: number | null
+  resolution_note: string | null
+  final_prescription: string | null
+}
+
+/** GET /growth/alerts/{alert_id} — 获取复合预警详情 */
+export function getCompositeAlert(alertId: number) {
+  return request.get<any, CompositeAlertDetail>(`/growth/alerts/${alertId}`)
+}
+
+/** POST /growth/alerts/{alert_id}/resolve — 签署处方归档 */
+export function resolveCompositeAlert(alertId: number, body: AlertResolveRequest) {
+  return request.post<any, AlertResolveResponse>(`/growth/alerts/${alertId}/resolve`, body)
+}
+
+// ═══════════════════════════════════════════════════
 // Demo Data (后端不可用时降级, HolisticProfileCard 依赖)
 // ═══════════════════════════════════════════════════
 

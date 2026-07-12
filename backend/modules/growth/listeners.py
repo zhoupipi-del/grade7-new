@@ -22,7 +22,8 @@ import hashlib
 from datetime import datetime
 from typing import Optional, Any, Dict
 
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+from sqlalchemy import select as sa_select
 
 from core.event_bus import EventBus
 from core.redis_client import get_redis
@@ -97,6 +98,126 @@ async def _try_dedup(event_data: Dict[str, Any]) -> bool:
 #  通用注入器 — 独立 Session 写入时光轴
 # ═══════════════════════════════════════════════════════════════
 
+async def _enrich_timetable_context(
+    session: AsyncSession,
+    event_data: Dict[str, Any],
+) -> None:
+    """
+    Wings 3.1 时空上下文升维中枢 — 在事件注入前注入课表上下文。
+
+    通过 student_id → class_id → TimetableEnricher.enrich_telemetry_event()
+    将孤立的时间戳富集为 (节次, 学科, 教师) 三维坐标，
+    写入 event_data["payload"]["_timetable"]。
+
+    降级策略: 任何异常均静默跳过，绝不阻塞主事件流。
+    """
+    student_id = event_data.get("student_id")
+    school_id = event_data.get("school_id")
+
+    if not student_id or not school_id:
+        return
+
+    # 获取学生班级 (缓存友好: Student 表极小且常驻内存)
+    try:
+        from core.models import Student
+
+        result = await session.execute(
+            sa_select(Student.class_id).where(
+                Student.id == student_id,
+                Student.school_id == school_id,
+            )
+        )
+        class_id = result.scalar()
+    except Exception as e:
+        logger.debug(f"[growth-listeners] 获取学生班级失败 student={student_id}: {e}")
+        return
+
+    if not class_id:
+        logger.debug(f"[growth-listeners] 学生无班级 student={student_id}")
+        return
+
+    # 调用时空富集网关
+    try:
+        from modules.timetable.enricher import TimetableEnricher
+
+        occurred_at = event_data.get("occurred_at", datetime.utcnow())
+        enriched = await TimetableEnricher.enrich_telemetry_event(
+            school_id=school_id,
+            class_id=class_id,
+            occurred_at=occurred_at,
+            db=session,
+        )
+
+        # 写入 payload（持久化到时光轴） + 顶层（供 CEP 消费）
+        if isinstance(event_data.get("payload"), dict):
+            event_data["payload"]["_timetable"] = enriched
+        event_data["_timetable_context"] = enriched
+        logger.debug(
+                f"[growth-listeners] 时空上下文已升维: "
+                f"student={student_id} class={class_id} "
+                f"in_lesson={enriched.get('in_lesson')} "
+                f"period={enriched.get('period_index')} "
+                f"subject={enriched.get('subject_id')}"
+            )
+    except Exception as e:
+        logger.debug(f"[growth-listeners] 时空富集跳过 student={student_id}: {e}")
+
+
+async def _enrich_cep_event_with_timetable(event: Dict[str, Any]) -> None:
+    """
+    CEP 专用时空上下文注入 — 为不经过 _inject_event() 的 CEP 事件补充课表信息。
+
+    典型场景: on_error_funnel_critical 中 CEP 调用使用原始 event dict，
+    而非已富集的 inject_data。此函数在原位为 event dict 注入 class_id
+    和 _timetable_context，供 CEP 的 trigger_meta 捕获。
+
+    降级策略: 任何异常静默跳过，不阻塞 CEP 主流程。
+    """
+    student_id = event.get("student_id")
+    school_id = event.get("school_id")
+
+    if not student_id or not school_id or _session_factory is None:
+        return
+
+    try:
+        from core.models import Student
+
+        async with _session_factory() as session:
+            result = await session.execute(
+                sa_select(Student.class_id).where(
+                    Student.id == student_id,
+                    Student.school_id == school_id,
+                )
+            )
+            class_id = result.scalar()
+
+            if not class_id:
+                return
+
+            # 注入 class_id (CEP trigger_meta 会捕获此字段)
+            event["class_id"] = class_id
+
+            # 调用 Enricher 获取完整时空上下文
+            from modules.timetable.enricher import TimetableEnricher
+
+            occurred_at = event.get("occurred_at", datetime.utcnow())
+            enriched = await TimetableEnricher.enrich_telemetry_event(
+                school_id=school_id,
+                class_id=class_id,
+                occurred_at=occurred_at,
+                db=session,
+            )
+            event["_timetable_context"] = enriched
+            logger.debug(
+                f"[growth-listeners] CEP事件时空上下文已注入: "
+                f"student={student_id} class={class_id} "
+                f"in_lesson={enriched.get('in_lesson')} "
+                f"subject={enriched.get('subject_id')}"
+            )
+    except Exception as e:
+        logger.debug(f"[growth-listeners] CEP时空富集跳过: {e}")
+
+
 async def _inject_event(event_data: Dict[str, Any]):
     """
     通用事件注入器 — 开启独立 DB Session 写入成长时光轴。
@@ -116,6 +237,9 @@ async def _inject_event(event_data: Dict[str, Any]):
 
     async with _session_factory() as session:
         try:
+            # ⚡ Wings 3.1: 时空上下文升维 (13路流 x 课表网格合体)
+            await _enrich_timetable_context(session, event_data)
+
             pipeline = GrowthAggregationPipeline(session)
             await pipeline.inject_timeline_event(event_data)
             await session.commit()
@@ -170,6 +294,8 @@ async def on_error_funnel_critical(event: Dict[str, Any]):
     # ── CEP 复合事件拦截: 学业断层入站, 探测考勤窗口是否同时亮着 ──
     if _cep_interceptor:
         try:
+            # ⚡ Wings 3.1: 为 CEP 注入时空上下文 (class_id → Enricher → subject/teacher)
+            await _enrich_cep_event_with_timetable(event)
             await _cep_interceptor.process_event(TRIGGER_ERROR_FUNNEL, event)
         except Exception as e:
             logger.warning(
@@ -338,6 +464,8 @@ async def on_attendance_consecutive_absent(event: Dict[str, Any]):
                 if not await _try_dedup(inject_data):
                     logger.debug(f"[growth-listeners] 连续缺勤去重命中, 跳过: student={student_id}")
                     return
+                # ⚡ Wings 3.1: 时空上下文升维
+                await _enrich_timetable_context(session, inject_data)
                 pipeline = GrowthAggregationPipeline(session)
                 await pipeline.inject_timeline_event(inject_data)
                 await session.commit()

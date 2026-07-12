@@ -53,6 +53,61 @@ CH_NOTIFICATIONS_POPUP = "wings:notifications:popup"
 TRIGGER_ATTENDANCE = "attendance"
 TRIGGER_ERROR_FUNNEL = "error_funnel"
 
+
+# ═══════════════════════════════════════════════════════════════
+#  Wings 3.1 时空加权引擎
+# ═══════════════════════════════════════════════════════════════
+
+def _compute_timetable_weight(timetable_ctx: dict) -> float:
+    """
+    根据课表时空上下文计算 CEP 复合事件加权系数。
+
+    设计思路:
+      - 正课期间发生的异常行为影响更大（学生本应在专注学习）
+      - 课间/午休/非教学时段 = 标准权重 1.0
+      - 降级: 无课表上下文时默认为 1.0
+
+    权重阶梯:
+      1.5 — 正课(LESSON)期间
+      1.0 — 非正课/课间/午休/无数据
+    """
+    if not timetable_ctx:
+        return 1.0
+    if timetable_ctx.get("in_lesson"):
+        return 1.5
+    return 1.0
+
+
+def _build_timetable_prompt_section(timetable_ctx: dict, weight: float) -> str:
+    """
+    构建 DeepSeek V3 Prompt 中的 Wings 3.1 时空课表上下文段落。
+
+    将 Enricher 返回的 (节次, 学科, 教师) 三维坐标转化为
+    自然语言段落注入处方 Prompt，让 AI 能感知事件发生的
+    课堂教学环境。
+    """
+    lines = ["## ⚡ 时空坐标系 (Wings 3.1 课堂课表上下文)", ""]
+    lines.append(f"- 复合事件加权系数: ×{weight}")
+    if timetable_ctx.get("in_lesson"):
+        lines.append("- 事件发生时状态: **正在上课** (课堂环境)")
+        if timetable_ctx.get("period_index") is not None:
+            lines.append(f"- 具体节次: 第 {timetable_ctx['period_index']} 节课")
+        if timetable_ctx.get("subject_id"):
+            lines.append(f"- 当前学科ID: {timetable_ctx['subject_id']}")
+        if timetable_ctx.get("teacher_id"):
+            lines.append(f"- 任课教师ID: {timetable_ctx['teacher_id']}")
+    else:
+        lines.append("- 事件发生时状态: 课间/午休/非教学时段")
+    lines.append(f"- 时空上下文: {timetable_ctx.get('context_desc', '无数据')}")
+    lines.append("")
+    lines.append(
+        "> **重要提示**: 如果事件发生于上课时间，请在分析中额外考虑"
+        "课堂纪律环境和学科特点对行为的影响。如果事件发生于非教学时段，"
+        "请侧重于学生自主行为习惯的分析。"
+    )
+    return "\n".join(lines)
+
+
 # ═══════════════════════════════════════════════════════════════
 #  异步引擎 (独立于 listeners 的 session_factory，避免 Session 争用)
 # ═══════════════════════════════════════════════════════════════
@@ -187,6 +242,9 @@ class ComplexEventInterceptor:
             return
 
         # ── Step 1d: 唤醒 V3 引擎 — 零阻塞后台任务 ──
+        # Wings 3.1: 提取时空上下文 & 计算加权系数
+        timetable_ctx = event_data.get("_timetable_context", {})
+
         trigger_meta = {
             "trigger_source": trigger_source,
             "opposite_source": opposite_source,
@@ -202,6 +260,9 @@ class ComplexEventInterceptor:
                     "category", "deduction",
                 )
             },
+            # ⚡ Wings 3.1 时空连续体: 课表上下文 + 加权系数
+            "timetable_context": timetable_ctx if timetable_ctx else None,
+            "weight_factor": _compute_timetable_weight(timetable_ctx),
         }
 
         # 后台异步执行 — 不阻塞 listener 事件循环
@@ -252,6 +313,15 @@ class ComplexEventInterceptor:
             )
 
             prompt = _build_student_prompt(context)
+
+            # ⚡ Wings 3.1: 注入时空课表上下文到 V3 处方 Prompt
+            timetable_ctx = trigger_meta.get("timetable_context")
+            if timetable_ctx:
+                timetable_section = _build_timetable_prompt_section(
+                    timetable_ctx, trigger_meta.get("weight_factor", 1.0)
+                )
+                prompt = prompt + "\n\n" + timetable_section
+
             result = await asyncio.to_thread(
                 _call_deepseek, prompt, SYSTEM_PROMPT_STUDENT, 90,
             )

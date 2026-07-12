@@ -356,6 +356,14 @@
 
     <!-- Event Creation Dialog -->
     <el-dialog v-model="showEventDialog" title="记录成长事件" width="560px" class="dark-dialog">
+
+    <!-- ── CEP 复合预警 AI处方微调沙箱 ── -->
+    <AiPrescriptionSandbox
+      v-model:visible="sandboxVisible"
+      :alert-id="currentAlertId"
+      :sse-payload="ssePayload"
+      @resolved="onAlertResolved"
+    />
       <el-form :model="eventForm" label-width="80px">
         <el-form-item label="学生ID">
           <el-input v-model="eventForm.student_id" placeholder="如 3" />
@@ -411,7 +419,7 @@ import '@/utils/echarts'
 import { useUserStore } from '@/store/user'
 import {
   getGrowthDashboard, getGrowthTimeline, getMyTimeline,
-  createTimelineEvent, getHolisticProfile, generateSnapshot, listSnapshots,
+  createTimelineEvent, getHolisticProfile, generateSnapshot as generateSnapshotApi, listSnapshots,
   updateTeacherComment,
   EVENT_TYPE_OPTIONS, DIMENSION_OPTIONS, SEVERITY_OPTIONS,
   eventTypeLabel, eventTypeIcon, eventTypeColor,
@@ -423,8 +431,18 @@ import {
   type SnapshotType, type GrowthDimension,
 } from '@/api/growth'
 import FiveDimensionRadar from './FiveDimensionRadar.vue'
+import AiPrescriptionSandbox from './AiPrescriptionSandbox.vue'
 
 const userStore = useUserStore()
+
+// ── SSE CEP Alert State ─────────────────────
+
+const sandboxVisible = ref(false)
+const currentAlertId = ref<number | null>(null)
+const ssePayload = ref<Record<string, any> | null>(null)
+let eventSource: EventSource | null = null
+
+const SSE_ALLOWED_ROLES = ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER']
 
 // ── Tab State ──────────────────────────────
 
@@ -615,7 +633,7 @@ async function generateSnapshot() {
   if (!snapshotPeriodLabel.value.trim()) { ElMessage.warning('请输入周期标签'); return }
   loading.generate = true
   try {
-    const res = await generateSnapshot({
+    const res = await generateSnapshotApi({
       student_id: sid, snapshot_type: snapshotTypeSelect.value, period_label: snapshotPeriodLabel.value,
     })
     ElMessage.success(`快照已生成: ${res.period_label}`)
@@ -631,7 +649,7 @@ async function generateSnapshotFromProfile() {
   const periodLabel = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   loading.generate = true
   try {
-    await generateSnapshot({ student_id: sid, snapshot_type: 'monthly', period_label: periodLabel })
+    await generateSnapshotApi({ student_id: sid, snapshot_type: 'monthly', period_label: periodLabel })
     ElMessage.success(`月度快照已生成: ${periodLabel}`)
     fetchProfile()
   } catch { ElMessage.error('生成快照失败') }
@@ -672,6 +690,16 @@ function goToProfile(studentId: number) {
   profileStudentId.value = String(studentId)
   activeTab.value = 'profile'
   fetchProfile()
+}
+
+// ── Alert Resolved Handler ─────────────────
+
+function onAlertResolved(resolvedId: number) {
+  sandboxVisible.value = false
+  currentAlertId.value = null
+  ssePayload.value = null
+  // 刷新看板数据 (可能影响了统计)
+  if (activeTab.value === 'dashboard') fetchDashboard()
 }
 
 // ── Radar Chart ────────────────────────────
@@ -809,9 +837,45 @@ function formatAiPrescription(text: string): string {
 
 // ── Lifecycle ──────────────────────────────
 
+// ── SSE Initialization ─────────────────────
+
+function initSSE() {
+  const role = userStore.currentRole
+  if (!role || !SSE_ALLOWED_ROLES.includes(role)) return  // RBAC铁闸: 非授权角色不订阅
+  if (eventSource) return  // 已连接, 防止重复
+
+  eventSource = new EventSource('/api/v1/notifications/stream', { withCredentials: true })
+
+  eventSource.addEventListener('COMPOSITE_ALERT', (event) => {
+    try {
+      const payload = JSON.parse(event.data)
+      // 多租户红线: 仅接收本校预警
+      const mySchoolId = userStore.userInfo?.school_id
+      if (mySchoolId && payload.school_id !== mySchoolId) return
+
+      const alertId = payload.alert_id || payload.id
+      if (!alertId) return
+
+      currentAlertId.value = Number(alertId)
+      ssePayload.value = payload
+      sandboxVisible.value = true
+      ElMessage.warning({ message: `⚠️ CEP沸点拦截: ${payload.title || '复合预警'}`, duration: 3000 })
+    } catch { /* ignore malformed SSE data */ }
+  })
+
+  eventSource.onerror = () => {
+    // SSE连接断开 — 延迟5s自动重连 (EventSource内置重连机制)
+    // 如果持续失败则关闭, 防止无限循环
+    if (eventSource?.readyState === EventSource.CLOSED) {
+      eventSource = null
+    }
+  }
+}
+
 onMounted(() => {
   if (isParent.value) fetchTimeline()
   else fetchDashboard()
+  initSSE()  // ← SSE泵站点火
   window.addEventListener('resize', handleResize)
 })
 
@@ -819,6 +883,7 @@ onBeforeUnmount(() => {
   radarChart?.dispose()
   trendChart?.dispose()
   window.removeEventListener('resize', handleResize)
+  if (eventSource) { eventSource.close(); eventSource = null }  // ← SSE管线释放
 })
 </script>
 
