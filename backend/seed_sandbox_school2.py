@@ -8,20 +8,22 @@ seed_sandbox_school2.py — 创建 school_id=2 沙箱环境
 """
 
 import asyncio
-import sys
 import os
+import sys
 
 # 确保 backend 在路径中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # 加载 .env
 from dotenv import load_dotenv
+
 load_dotenv()
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import select, text
+from core.db_utils import get_db_url_for_script
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-DATABASE_URL = os.getenv("DATABASE_URL", "mysql+aiomysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3")
+DATABASE_URL = get_db_url_for_script("运行前请先 export DATABASE_URL=...")
 
 engine = create_async_engine(DATABASE_URL, echo=False, pool_size=5)
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -29,7 +31,7 @@ AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_co
 
 async def seed_school2():
     """创建 school_id=2 沙箱环境（幂等）"""
-    from core.models import School, User, UserRole, SchoolModule
+    from core.models import School, SchoolModule, User, UserRole
     from core.services import AuthService
 
     async with AsyncSessionLocal() as session:
@@ -56,9 +58,7 @@ async def seed_school2():
                 print("○ 学校已存在: 沙箱实验中学 (id=2)")
 
         # ── Step 2: 创建管理员 ──
-        result = await session.execute(
-            select(User).where(User.username == "sandbox_admin")
-        )
+        result = await session.execute(select(User).where(User.username == "sandbox_admin"))
         admin = result.scalar_one_or_none()
 
         if not admin:
@@ -80,10 +80,23 @@ async def seed_school2():
 
         # ── Step 3: 启用全部 14 模块 ──
         ALL_MODULES = [
-            "attendance", "behavior", "red_flag", "evaluation",
-            "discipline", "reports", "ai_prescription", "notifications",
-            "dashboard", "growth", "policy_engine", "risk_models",
-            "teach_math", "approval", "parent_portal", "grades", "lineage",
+            "attendance",
+            "behavior",
+            "red_flag",
+            "evaluation",
+            "discipline",
+            "reports",
+            "ai_prescription",
+            "notifications",
+            "dashboard",
+            "growth",
+            "policy_engine",
+            "risk_models",
+            "teach_math",
+            "approval",
+            "parent_portal",
+            "grades",
+            "lineage",
         ]
 
         enabled_count = 0
@@ -112,7 +125,7 @@ async def seed_school2():
         print(f"✓ 模块已启用: {enabled_count} 新建, 共 {len(ALL_MODULES)} 个")
 
         # ── Step 4: 创建组织架构（年级 + 班级） ──
-        from core.models import Grade, Class
+        from core.models import Class, Grade
 
         # 年级
         grade_names = ["七年级", "八年级", "九年级"]
@@ -136,28 +149,33 @@ async def seed_school2():
             for i in range(1, 3):
                 cname = f"{gname}{i}班"
                 result = await session.execute(
-                    select(Class).where(Class.school_id == 2, Class.grade_id == grade.id, Class.name == cname)
+                    select(Class).where(
+                        Class.school_id == 2, Class.grade_id == grade.id, Class.name == cname
+                    )
                 )
                 cls = result.scalar_one_or_none()
                 if not cls:
                     cls = Class(
-                        name=cname, school_id=2, grade_id=grade.id,
-                        student_count=0, is_active=True,
+                        name=cname,
+                        school_id=2,
+                        grade_id=grade.id,
+                        student_count=0,
+                        is_active=True,
                     )
                     session.add(cls)
 
         await session.commit()
-        print(f"✓ 班级已创建: 6 个 (3年级×2班)")
+        print("✓ 班级已创建: 6 个 (3年级×2班)")
 
         # ── 总结 ──
         print("\n" + "=" * 50)
         print("  school_id=2 沙箱环境就绪")
         print("=" * 50)
-        print(f"  学校: 沙箱实验中学 (id=2)")
-        print(f"  管理员: sandbox_admin / admin123")
-        print(f"  角色: ms_admin")
+        print("  学校: 沙箱实验中学 (id=2)")
+        print("  管理员: sandbox_admin / admin123")
+        print("  角色: ms_admin")
         print(f"  模块: {len(ALL_MODULES)} 个全部启用")
-        print(f"  组织: 3 年级, 6 班级")
+        print("  组织: 3 年级, 6 班级")
         print("=" * 50)
 
 

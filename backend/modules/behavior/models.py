@@ -6,17 +6,24 @@ modules/behavior/models.py — 违纪行为数据模型
   - discipline_appeals: 违纪申诉表
 """
 
-from datetime import datetime, date
+from core.models import Base, SchoolMixin, get_local_now
 from sqlalchemy import (
-    Column, Integer, BigInteger, String, Boolean, Date, DateTime,
-    ForeignKey, Text, Index,
+    BigInteger,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.orm import relationship
-from core.models import Base, SchoolMixin, get_local_now
 
 
 class DisciplineRecord(Base, SchoolMixin):
     """违纪记录 — 继承 SchoolMixin 实现多租户隔离"""
+
     __tablename__ = "discipline_records"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -47,10 +54,13 @@ class DisciplineRecord(Base, SchoolMixin):
 
 class DisciplineAppeal(Base, SchoolMixin):
     """违纪申诉"""
+
     __tablename__ = "discipline_appeals"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    discipline_id = Column(BigInteger, ForeignKey("discipline_records.id"), nullable=False, index=True)
+    discipline_id = Column(
+        BigInteger, ForeignKey("discipline_records.id"), nullable=False, index=True
+    )
     student_id = Column(BigInteger, ForeignKey("students.id"), nullable=False, index=True)
     class_id = Column(BigInteger, ForeignKey("classes.id"), nullable=False)
     grade_id = Column(BigInteger, ForeignKey("grades.id"), nullable=False)

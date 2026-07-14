@@ -8,70 +8,66 @@ Psych Screening 路由层 — 18 个 API 端点
   📖 辅助:       /questions /students/search /dashboard + /seed
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
-from typing import Optional
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from core.models import User, Student, UserRole
-from core.routers import get_db, get_current_user, require_role
-
+from core.models import Student, User, UserRole
+from core.routers import get_current_user, get_db, require_role
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import status as http_status
 from modules.psych_screening.models import (
-    PsychSurvey,
+    InterventionRecord,
+    MentalHealthAnswer,
     MentalHealthAssessment,
     MentalHealthQuestion,
-    MentalHealthAnswer,
-    InterventionRecord,
-)
-from modules.psych_screening.services import (
-    seed_mssmhs_questions,
-    submit_survey,
-    calculate_scores,
-    list_assessments,
-    create_assessment,
-    update_assessment,
-    delete_assessment,
-    get_dimension_aggregation,
-    run_ai_analysis,
-    sync_surveys_to_assessments,
-    list_interventions,
-    create_intervention,
-    followup_intervention,
-    get_intervention_timeline,
-    search_students,
-    get_dashboard_stats,
+    PsychSurvey,
 )
 from modules.psych_screening.schemas import (
-    SurveySubmitRequest,
-    SurveySubmitResponse,
-    PsychSurveyOut,
-    PsychSurveyListResponse,
-    AssessmentCreateRequest,
-    AssessmentUpdateRequest,
-    AssessmentOut,
-    AssessmentDetailOut,
-    AssessmentListResponse,
-    DimensionDataResponse,
+    ASSESSMENT_TYPE_CHOICES,
+    EFFECT_RATING_CHOICES,
+    INTERVENTION_TYPE_CHOICES,
+    MSSMHS_DIMENSIONS,
+    RISK_LEVEL_CHOICES,
     AIAnalysisRequest,
     AIAnalysisResponse,
-    SyncToAssessmentResponse,
+    AssessmentCreateRequest,
+    AssessmentDetailOut,
+    AssessmentListResponse,
+    AssessmentOut,
+    AssessmentUpdateRequest,
+    DimensionDataResponse,
     InterventionCreateRequest,
     InterventionFollowupRequest,
-    InterventionOut,
     InterventionListResponse,
+    InterventionOut,
     InterventionTimelineResponse,
-    QuestionOut,
+    PsychDashboardResponse,
+    PsychSurveyListResponse,
+    PsychSurveyOut,
     QuestionListResponse,
+    QuestionOut,
     StudentSearchItem,
     StudentSearchResponse,
-    PsychDashboardResponse,
-    MSSMHS_DIMENSIONS,
-    ASSESSMENT_TYPE_CHOICES,
-    RISK_LEVEL_CHOICES,
-    INTERVENTION_TYPE_CHOICES,
-    EFFECT_RATING_CHOICES,
+    SurveySubmitRequest,
+    SurveySubmitResponse,
+    SyncToAssessmentResponse,
 )
+from modules.psych_screening.services import (
+    create_assessment,
+    create_intervention,
+    delete_assessment,
+    followup_intervention,
+    get_dashboard_stats,
+    get_dimension_aggregation,
+    get_intervention_timeline,
+    list_assessments,
+    list_interventions,
+    run_ai_analysis,
+    search_students,
+    seed_mssmhs_questions,
+    submit_survey,
+    sync_surveys_to_assessments,
+    update_assessment,
+)
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["psych-screening"])
 
@@ -80,10 +76,11 @@ router = APIRouter(tags=["psych-screening"])
 # 辅助 Dependency — 角色权限
 # ═══════════════════════════════════════════════════════════════
 
+
 def _verify_student_scope(
     user: User,
-    target_class_id: Optional[int] = None,
-    target_grade_id: Optional[int] = None,
+    target_class_id: int | None = None,
+    target_grade_id: int | None = None,
 ):
     """验证用户权限 scope：班主任只能看自己班，年级组长只能看自己年级"""
     if user.role == UserRole.MS_ADMIN:
@@ -110,6 +107,7 @@ def _get_scope_params(user: User):
 # 元数据端点 — 常量列表
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/metadata")
 async def get_metadata(
     current_user: User = Depends(get_current_user),
@@ -117,18 +115,10 @@ async def get_metadata(
     """返回模块所用的常量列表 (供前端渲染表单)"""
     return {
         "mssmhs_dimensions": MSSMHS_DIMENSIONS,
-        "assessment_types": [
-            {"value": v, "label": l} for v, l in ASSESSMENT_TYPE_CHOICES
-        ],
-        "risk_levels": [
-            {"value": v, "label": l} for v, l in RISK_LEVEL_CHOICES
-        ],
-        "intervention_types": [
-            {"value": v, "label": l} for v, l in INTERVENTION_TYPE_CHOICES
-        ],
-        "effect_ratings": [
-            {"value": v, "label": l} for v, l in EFFECT_RATING_CHOICES
-        ],
+        "assessment_types": [{"value": v, "label": l} for v, l in ASSESSMENT_TYPE_CHOICES],
+        "risk_levels": [{"value": v, "label": l} for v, l in RISK_LEVEL_CHOICES],
+        "intervention_types": [{"value": v, "label": l} for v, l in INTERVENTION_TYPE_CHOICES],
+        "effect_ratings": [{"value": v, "label": l} for v, l in EFFECT_RATING_CHOICES],
         "max_per_dim": 30,
         "max_total": 275,
     }
@@ -138,11 +128,12 @@ async def get_metadata(
 # 📋 问卷筛查
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/surveys", response_model=PsychSurveyListResponse)
 async def list_surveys(
-    grade_id: Optional[int] = Query(None),
-    class_id: Optional[int] = Query(None),
-    survey_type: Optional[str] = Query(None, description="MSSMHS-55 / PCE-55"),
+    grade_id: int | None = Query(None),
+    class_id: int | None = Query(None),
+    survey_type: str | None = Query(None, description="MSSMHS-55 / PCE-55"),
     limit: int = Query(200, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -169,6 +160,7 @@ async def list_surveys(
 
     # 列表
     from sqlalchemy import func
+
     count_stmt = select(func.count(PsychSurvey.id)).where(*conditions)
     total = (await db.execute(count_stmt)).scalar() or 0
 
@@ -185,9 +177,7 @@ async def list_surveys(
     # 批量加载学生信息
     student_ids = [s.student_id for s in surveys]
     if student_ids:
-        students_result = await db.execute(
-            select(Student).where(Student.id.in_(student_ids))
-        )
+        students_result = await db.execute(select(Student).where(Student.id.in_(student_ids)))
         student_map = {s.id: s for s in students_result.scalars().all()}
     else:
         student_map = {}
@@ -195,11 +185,13 @@ async def list_surveys(
     # 统计
     stats_stmt = select(
         func.sum(func.if_(PsychSurvey.total_score >= 160, 1, 0)),
-        func.sum(func.if_(
-            PsychSurvey.total_score >= 120,
-            func.if_(PsychSurvey.total_score < 160, 1, 0),
-            0,
-        )),
+        func.sum(
+            func.if_(
+                PsychSurvey.total_score >= 120,
+                func.if_(PsychSurvey.total_score < 160, 1, 0),
+                0,
+            )
+        ),
         func.sum(func.if_(PsychSurvey.total_score < 120, 1, 0)),
     ).where(*conditions, PsychSurvey.survey_type == "MSSMHS-55")
     stats_result = await db.execute(stats_stmt)
@@ -207,22 +199,25 @@ async def list_surveys(
 
     # 序列化
     from modules.psych_screening.services import _parse_dimensions
+
     survey_outs = []
     for s in surveys:
         stu = student_map.get(s.student_id)
         dims = _parse_dimensions(s.dimension_scores)
-        survey_outs.append(PsychSurveyOut(
-            id=s.id,
-            student_id=s.student_id,
-            student_name=stu.name if stu else None,
-            class_name=stu.class_.name if stu and stu.class_ else None,
-            grade_name=None,
-            survey_type=s.survey_type,
-            total_score=s.total_score,
-            verify_status=s.verify_status,
-            completed_at=s.completed_at,
-            dimensions=dims,
-        ))
+        survey_outs.append(
+            PsychSurveyOut(
+                id=s.id,
+                student_id=s.student_id,
+                student_name=stu.name if stu else None,
+                class_name=stu.class_.name if stu and stu.class_ else None,
+                grade_name=None,
+                survey_type=s.survey_type,
+                total_score=s.total_score,
+                verify_status=s.verify_status,
+                completed_at=s.completed_at,
+                dimensions=dims,
+            )
+        )
 
     return PsychSurveyListResponse(
         surveys=survey_outs,
@@ -257,8 +252,8 @@ async def submit_psych_survey(
 
 @router.get("/surveys/dimension-data", response_model=DimensionDataResponse)
 async def get_dimension_data(
-    class_id: Optional[int] = Query(None),
-    grade_id: Optional[int] = Query(None),
+    class_id: int | None = Query(None),
+    grade_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -285,9 +280,7 @@ async def get_dimension_data(
 async def ai_analysis(
     req: AIAnalysisRequest = AIAnalysisRequest(),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)
-    ),
+    current_user: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
     DeepSeek AI 宏观分析 → 心理健康白皮书 (仅管理员/年级组长)。
@@ -307,11 +300,9 @@ async def ai_analysis(
 
 @router.post("/surveys/sync-to-assessment", response_model=SyncToAssessmentResponse)
 async def sync_surveys(
-    grade_id: Optional[int] = Query(None),
+    grade_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)
-    ),
+    current_user: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
     一键同步: 扫描中高风险问卷 → 批量创建/更新评估记录 (幂等)。
@@ -332,12 +323,13 @@ async def sync_surveys(
 # 📊 心理健康评估
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/assessments", response_model=AssessmentListResponse)
 async def list_psych_assessments(
-    grade_id: Optional[int] = Query(None),
-    class_id: Optional[int] = Query(None),
-    student_id: Optional[int] = Query(None),
-    risk_level: Optional[str] = Query(None),
+    grade_id: int | None = Query(None),
+    class_id: int | None = Query(None),
+    student_id: int | None = Query(None),
+    risk_level: str | None = Query(None),
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -373,28 +365,30 @@ async def list_psych_assessments(
     outs = []
     for a in result["assessments"]:
         stu = student_map.get(a.student_id)
-        outs.append(AssessmentOut(
-            id=a.id,
-            student_id=a.student_id,
-            student_name=stu.name if stu else None,
-            class_name=stu.class_.name if stu and stu.class_ else None,
-            assessment_type=a.assessment_type,
-            assessment_date=a.assessment_date,
-            scale_name=a.scale_name,
-            total_score=a.total_score,
-            risk_level=a.risk_level,
-            conclusion=a.conclusion,
-            recommendations=a.recommendations,
-            need_intervention=a.need_intervention,
-            intervention_plan=a.intervention_plan,
-            assessed_by=a.assessed_by,
-            assessor_name=None,  # risk_models 不提供 assessor relationship
-            status=a.status,
-            reviewed_by=a.reviewed_by,
-            reviewed_at=a.reviewed_at,
-            review_comment=a.review_comment,
-            created_at=a.created_at,
-        ))
+        outs.append(
+            AssessmentOut(
+                id=a.id,
+                student_id=a.student_id,
+                student_name=stu.name if stu else None,
+                class_name=stu.class_.name if stu and stu.class_ else None,
+                assessment_type=a.assessment_type,
+                assessment_date=a.assessment_date,
+                scale_name=a.scale_name,
+                total_score=a.total_score,
+                risk_level=a.risk_level,
+                conclusion=a.conclusion,
+                recommendations=a.recommendations,
+                need_intervention=a.need_intervention,
+                intervention_plan=a.intervention_plan,
+                assessed_by=a.assessed_by,
+                assessor_name=None,  # risk_models 不提供 assessor relationship
+                status=a.status,
+                reviewed_by=a.reviewed_by,
+                reviewed_at=a.reviewed_at,
+                review_comment=a.review_comment,
+                created_at=a.created_at,
+            )
+        )
 
     return AssessmentListResponse(
         assessments=outs,
@@ -485,31 +479,37 @@ async def get_assessment_detail(
     answer_detail = []
     for a in answers:
         q = a.question
-        answer_detail.append({
-            "question_id": a.question_id,
-            "answer_value": a.answer_value,
-            "dimension": q.dimension if q else None,
-            "question_text": q.question_text if q else None,
-            "question_no": q.question_no if q else None,
-        })
+        answer_detail.append(
+            {
+                "question_id": a.question_id,
+                "answer_value": a.answer_value,
+                "dimension": q.dimension if q else None,
+                "question_text": q.question_text if q else None,
+                "question_no": q.question_no if q else None,
+            }
+        )
 
     # 干预记录
     interventions_result = await db.execute(
-        select(InterventionRecord).where(
+        select(InterventionRecord)
+        .where(
             InterventionRecord.assessment_id == assessment_id,
             InterventionRecord.school_id == current_user.school_id,
-        ).order_by(InterventionRecord.intervention_date.desc())
+        )
+        .order_by(InterventionRecord.intervention_date.desc())
     )
     interventions = interventions_result.scalars().all()
     intervention_summary = []
     for ir in interventions:
-        intervention_summary.append({
-            "id": ir.id,
-            "type": ir.intervention_type,
-            "date": str(ir.intervention_date) if ir.intervention_date else None,
-            "effect": ir.effect_rating,
-            "status": ir.status,
-        })
+        intervention_summary.append(
+            {
+                "id": ir.id,
+                "type": ir.intervention_type,
+                "date": str(ir.intervention_date) if ir.intervention_date else None,
+                "effect": ir.effect_rating,
+                "status": ir.status,
+            }
+        )
 
     return AssessmentDetailOut(
         id=assessment.id,
@@ -590,9 +590,7 @@ async def update_psych_assessment(
 async def delete_psych_assessment(
     assessment_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)
-    ),
+    current_user: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """删除评估记录 (仅管理员/年级组长)"""
     assessment = await db.execute(
@@ -615,12 +613,13 @@ async def delete_psych_assessment(
 # 🩺 绿洲干预追踪
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/interventions", response_model=InterventionListResponse)
 async def list_psych_interventions(
-    grade_id: Optional[int] = Query(None),
-    class_id: Optional[int] = Query(None),
-    student_id: Optional[int] = Query(None),
-    status_filter: Optional[str] = Query(None, alias="status"),
+    grade_id: int | None = Query(None),
+    class_id: int | None = Query(None),
+    student_id: int | None = Query(None),
+    status_filter: str | None = Query(None, alias="status"),
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -650,37 +649,37 @@ async def list_psych_interventions(
     rec_student_ids = list({r.student_id for r in result["records"]})
     student_map = {}
     if rec_student_ids:
-        students_result = await db.execute(
-            select(Student).where(Student.id.in_(rec_student_ids))
-        )
+        students_result = await db.execute(select(Student).where(Student.id.in_(rec_student_ids)))
         student_map = {s.id: s for s in students_result.scalars().all()}
 
     outs = []
     for r in result["records"]:
         stu = student_map.get(r.student_id)
-        outs.append(InterventionOut(
-            id=r.id,
-            student_id=r.student_id,
-            student_name=stu.name if stu else None,
-            class_name=stu.class_.name if stu and stu.class_ else None,
-            teacher_id=r.teacher_id,
-            teacher_name=r.teacher.name if r.teacher else None,
-            assessment_id=r.assessment_id,
-            mh_risk_before=r.mh_risk_before,
-            mh_risk_after=r.mh_risk_after,
-            intervention_type=r.intervention_type,
-            notes=r.notes,
-            parent_feedback=r.parent_feedback,
-            effect_rating=r.effect_rating,
-            intervention_date=r.intervention_date,
-            follow_up_date=r.follow_up_date,
-            follow_up_done=r.follow_up_done,
-            follow_up_notes=r.follow_up_notes,
-            status=r.status,
-            is_effective=r.is_effective,
-            mh_risk_improved=r.mh_risk_improved,
-            created_at=r.created_at,
-        ))
+        outs.append(
+            InterventionOut(
+                id=r.id,
+                student_id=r.student_id,
+                student_name=stu.name if stu else None,
+                class_name=stu.class_.name if stu and stu.class_ else None,
+                teacher_id=r.teacher_id,
+                teacher_name=r.teacher.name if r.teacher else None,
+                assessment_id=r.assessment_id,
+                mh_risk_before=r.mh_risk_before,
+                mh_risk_after=r.mh_risk_after,
+                intervention_type=r.intervention_type,
+                notes=r.notes,
+                parent_feedback=r.parent_feedback,
+                effect_rating=r.effect_rating,
+                intervention_date=r.intervention_date,
+                follow_up_date=r.follow_up_date,
+                follow_up_done=r.follow_up_done,
+                follow_up_notes=r.follow_up_notes,
+                status=r.status,
+                is_effective=r.is_effective,
+                mh_risk_improved=r.mh_risk_improved,
+                created_at=r.created_at,
+            )
+        )
 
     return InterventionListResponse(
         records=outs,
@@ -844,26 +843,28 @@ async def intervention_timeline(
     # 序列化 records
     record_outs = []
     for r in result["records"]:
-        record_outs.append(InterventionOut(
-            id=r.id,
-            student_id=r.student_id,
-            teacher_id=r.teacher_id,
-            assessment_id=r.assessment_id,
-            mh_risk_before=r.mh_risk_before,
-            mh_risk_after=r.mh_risk_after,
-            intervention_type=r.intervention_type,
-            notes=r.notes,
-            parent_feedback=r.parent_feedback,
-            effect_rating=r.effect_rating,
-            intervention_date=r.intervention_date,
-            follow_up_date=r.follow_up_date,
-            follow_up_done=r.follow_up_done,
-            follow_up_notes=r.follow_up_notes,
-            status=r.status,
-            is_effective=r.is_effective,
-            mh_risk_improved=r.mh_risk_improved,
-            created_at=r.created_at,
-        ))
+        record_outs.append(
+            InterventionOut(
+                id=r.id,
+                student_id=r.student_id,
+                teacher_id=r.teacher_id,
+                assessment_id=r.assessment_id,
+                mh_risk_before=r.mh_risk_before,
+                mh_risk_after=r.mh_risk_after,
+                intervention_type=r.intervention_type,
+                notes=r.notes,
+                parent_feedback=r.parent_feedback,
+                effect_rating=r.effect_rating,
+                intervention_date=r.intervention_date,
+                follow_up_date=r.follow_up_date,
+                follow_up_done=r.follow_up_done,
+                follow_up_notes=r.follow_up_notes,
+                status=r.status,
+                is_effective=r.is_effective,
+                mh_risk_improved=r.mh_risk_improved,
+                created_at=r.created_at,
+            )
+        )
 
     return InterventionTimelineResponse(
         student_id=result["student_id"],
@@ -878,9 +879,10 @@ async def intervention_timeline(
 # 📖 学生搜索
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/students/search", response_model=StudentSearchResponse)
 async def search_psych_students(
-    q: Optional[str] = Query(None, alias="q", description="姓名关键词"),
+    q: str | None = Query(None, alias="q", description="姓名关键词"),
     limit: int = Query(50, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(
@@ -909,9 +911,10 @@ async def search_psych_students(
 # 📖 问题库
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/questions", response_model=QuestionListResponse)
 async def list_questions(
-    scale_name: Optional[str] = Query(None, description="MSSMHS-55 / SCL-90"),
+    scale_name: str | None = Query(None, description="MSSMHS-55 / SCL-90"),
     is_active: bool = Query(True),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -928,7 +931,11 @@ async def list_questions(
     stmt = (
         select(MentalHealthQuestion)
         .where(*conditions)
-        .order_by(MentalHealthQuestion.scale_name, MentalHealthQuestion.dimension, MentalHealthQuestion.question_no)
+        .order_by(
+            MentalHealthQuestion.scale_name,
+            MentalHealthQuestion.dimension,
+            MentalHealthQuestion.question_no,
+        )
     )
     result = await db.execute(stmt)
     questions = result.scalars().all()
@@ -942,16 +949,19 @@ async def list_questions(
     )
     scale_names = [row[0] for row in scale_names_result.all() if row[0]]
 
-    outs = [QuestionOut(
-        id=q.id,
-        scale_name=q.scale_name,
-        dimension=q.dimension,
-        question_no=q.question_no,
-        question_text=q.question_text,
-        option_type=q.option_type,
-        reverse_scoring=q.reverse_scoring,
-        is_active=q.is_active,
-    ) for q in questions]
+    outs = [
+        QuestionOut(
+            id=q.id,
+            scale_name=q.scale_name,
+            dimension=q.dimension,
+            question_no=q.question_no,
+            question_text=q.question_text,
+            option_type=q.option_type,
+            reverse_scoring=q.reverse_scoring,
+            is_active=q.is_active,
+        )
+        for q in questions
+    ]
 
     return QuestionListResponse(
         questions=outs,
@@ -963,9 +973,7 @@ async def list_questions(
 @router.post("/questions/seed")
 async def seed_questions(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN)
-    ),
+    current_user: User = Depends(require_role(UserRole.MS_ADMIN)),
 ):
     """
     幂等初始化 MSSMHS-55 题目库 (仅管理员)。
@@ -975,7 +983,9 @@ async def seed_questions(
     return {
         "status": "ok",
         "seeded": count,
-        "message": f"已初始化 {count} 道 MSSMHS-55 题目" if count > 0 else "题目库已存在，无需重复初始化",
+        "message": f"已初始化 {count} 道 MSSMHS-55 题目"
+        if count > 0
+        else "题目库已存在，无需重复初始化",
     }
 
 
@@ -983,10 +993,11 @@ async def seed_questions(
 # 📊 统计仪表盘
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/dashboard", response_model=PsychDashboardResponse)
 async def get_dashboard(
-    grade_id: Optional[int] = Query(None),
-    class_id: Optional[int] = Query(None),
+    grade_id: int | None = Query(None),
+    class_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(
         require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)

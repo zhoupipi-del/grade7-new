@@ -18,4 +18,5 @@ def register(router_prefix="/api/v1/attendance"):
     返回 (APIRouter, prefix) 元组。
     """
     from modules.attendance.routers import router
+
     return router, router_prefix

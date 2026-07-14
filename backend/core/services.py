@@ -5,24 +5,28 @@ AuthService: JWT 签发 / 密码验证 / 权限校验
 OrgService:  组织架构 CRUD / 租户上下文注入
 """
 
-import os
 import hashlib
 import hmac
+import logging
+import os
+import re
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple, List
+from datetime import UTC, datetime, timedelta, timezone
 
 import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import User, School, Grade, Class, Student, SchoolModule, UserRole
+from .models import Class, Grade, School, SchoolModule, Student, User, UserRole
 from .schemas import UserOut
+
+logger = logging.getLogger("auth")
 
 
 # ═══════════════════════════════════════════════════════════════
 # AuthService — 认证与鉴权
 # ═══════════════════════════════════════════════════════════════
+
 
 class AuthService:
     JWT_ALGORITHM = "HS256"
@@ -51,10 +55,66 @@ class AuthService:
         except (ValueError, AttributeError):
             return False
 
+    # ── 密码安全策略 ──
+
+    # 复杂度规则: 至少包含以下 4 类中的 3 类
+    _PW_UPPER = re.compile(r"[A-Z]")
+    _PW_LOWER = re.compile(r"[a-z]")
+    _PW_DIGIT = re.compile(r"[0-9]")
+    _PW_SPECIAL = re.compile(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>\/?`~]")
+
+    # 账户锁定阈值
+    MAX_LOGIN_ATTEMPTS = 5
+    LOCKOUT_DURATION_SECONDS = 15 * 60  # 15 分钟
+
+    @classmethod
+    def _get_redis(cls):
+        """延迟导入 Redis 客户端（避免循环依赖）"""
+        try:
+            from .redis_client import get_redis
+
+            return get_redis()
+        except ImportError:
+            return None
+
+    @classmethod
+    def validate_password_strength(cls, password: str, username: str = "") -> str | None:
+        """
+        验证密码强度。返回 None 表示通过，否则返回错误消息。
+
+        策略:
+        - 最少 8 个字符
+        - 不能包含用户名
+        - 至少包含大写字母、小写字母、数字、特殊字符中的 3 类
+        """
+        if len(password) < 8:
+            return "密码长度不能少于8位"
+
+        if len(password) > 128:
+            return "密码长度不能超过128位"
+
+        if username and username.lower() in password.lower():
+            return "密码不能包含用户名"
+
+        categories = 0
+        if cls._PW_UPPER.search(password):
+            categories += 1
+        if cls._PW_LOWER.search(password):
+            categories += 1
+        if cls._PW_DIGIT.search(password):
+            categories += 1
+        if cls._PW_SPECIAL.search(password):
+            categories += 1
+
+        if categories < 3:
+            return "密码强度不足，需包含大写字母、小写字母、数字、特殊字符中的至少3类"
+
+        return None
+
     @classmethod
     def create_token(cls, user: User) -> str:
         """签发 JWT access token"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         payload = {
             "sub": str(user.id),
             "username": user.username,
@@ -73,27 +133,63 @@ class AuthService:
     @classmethod
     async def authenticate(
         cls, db: AsyncSession, username: str, password: str
-    ) -> Tuple[Optional[User], Optional[str]]:
+    ) -> tuple[User | None, str | None]:
         """
-        验证用户凭证。
+        验证用户凭证（带账户锁定保护）。
         返回 (user, error_message) — 成功时 error_message 为 None。
+
+        锁定策略: 5 次失败 → 15 分钟锁定（基于 Redis 计数）
         """
+        redis = cls._get_redis()
+
+        # ── 检查锁定状态 ──
+        if redis:
+            locked = await redis.get(f"login_locked:{username}")
+            if locked:
+                ttl = await redis.ttl(f"login_locked:{username}")
+                minutes = max(1, ttl // 60)
+                return None, f"账户已锁定，请{minutes}分钟后重试"
+
+        # ── 查询用户 ──
         result = await db.execute(
             select(User).where(User.username == username, User.is_active == True)
         )
         user = result.scalar_one_or_none()
 
         if not user:
+            await cls._record_failed_attempt(redis, username)
             return None, "用户名或密码错误"
 
         if not cls.verify_password(password, user.password_hash):
+            await cls._record_failed_attempt(redis, username)
             return None, "用户名或密码错误"
+
+        # ── 登录成功: 清除失败计数 ──
+        if redis:
+            await redis.delete(f"login_fails:{username}", f"login_locked:{username}")
 
         # 更新最后登录时间
         user.last_login = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
         await db.commit()
 
         return user, None
+
+    @classmethod
+    async def _record_failed_attempt(cls, redis, username: str) -> None:
+        """记录一次登录失败，达到阈值则锁定账户"""
+        if redis is None:
+            return
+        try:
+            key = f"login_fails:{username}"
+            fails = await redis.incr(key)
+            # 首次失败时设置 TTL（15分钟滑动窗口）
+            if fails == 1:
+                await redis.expire(key, cls.LOCKOUT_DURATION_SECONDS)
+            if fails >= cls.MAX_LOGIN_ATTEMPTS:
+                await redis.setex(f"login_locked:{username}", cls.LOCKOUT_DURATION_SECONDS, "1")
+                logger.warning(f"账户锁定: {username} ({fails}次失败)")
+        except Exception as e:
+            logger.error(f"Redis 登录失败记录异常: {e}")
 
     @classmethod
     async def get_user_out(cls, db: AsyncSession, user: User) -> UserOut:
@@ -131,16 +227,18 @@ class AuthService:
     @classmethod
     async def change_password(
         cls, db: AsyncSession, user: User, old_password: str, new_password: str
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """
-        修改密码。验证旧密码 → 更新为新密码哈希 → 清除强制改密标志。
+        修改密码。验证旧密码 → 强度检查 → 更新哈希 → 清除强制改密标志。
         返回 (success, error_message)
         """
         if not cls.verify_password(old_password, user.password_hash):
             return False, "原密码错误"
 
-        if len(new_password) < 8:
-            return False, "新密码长度不能少于8位"
+        # 密码强度验证
+        strength_error = cls.validate_password_strength(new_password, user.username)
+        if strength_error:
+            return False, strength_error
 
         if old_password == new_password:
             return False, "新密码不能与原密码相同"
@@ -156,10 +254,10 @@ class AuthService:
 # OrgService — 组织架构与租户管理
 # ═══════════════════════════════════════════════════════════════
 
-class OrgService:
 
+class OrgService:
     @staticmethod
-    async def get_school(db: AsyncSession, school_id: int) -> Optional[School]:
+    async def get_school(db: AsyncSession, school_id: int) -> School | None:
         result = await db.execute(select(School).where(School.id == school_id))
         return result.scalar_one_or_none()
 
@@ -172,7 +270,7 @@ class OrgService:
         return school
 
     @staticmethod
-    async def get_grades(db: AsyncSession, school_id: int) -> List[Grade]:
+    async def get_grades(db: AsyncSession, school_id: int) -> list[Grade]:
         result = await db.execute(
             select(Grade)
             .where(Grade.school_id == school_id, Grade.is_active == True)
@@ -181,7 +279,9 @@ class OrgService:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_classes(db: AsyncSession, school_id: int, grade_id: Optional[int] = None) -> List[Class]:
+    async def get_classes(
+        db: AsyncSession, school_id: int, grade_id: int | None = None
+    ) -> list[Class]:
         stmt = select(Class).where(
             Class.school_id == school_id,
             Class.is_active == True,
@@ -196,14 +296,14 @@ class OrgService:
     async def get_students(
         db: AsyncSession,
         school_id: int,
-        class_id: Optional[int] = None,
-        grade_id: Optional[int] = None,
-        gender: Optional[str] = None,
-        is_active: Optional[bool] = True,
-        search: Optional[str] = None,
+        class_id: int | None = None,
+        grade_id: int | None = None,
+        gender: str | None = None,
+        is_active: bool | None = True,
+        search: str | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> Tuple[List[Student], int]:
+    ) -> tuple[list[Student], int]:
         """分页查询学生列表，返回 (students, total)"""
         conditions = [Student.school_id == school_id]
         if is_active is not None:
@@ -221,6 +321,7 @@ class OrgService:
 
         # 高效 count（避免加载全量数据）
         from sqlalchemy import func
+
         cnt = await db.scalar(select(func.count()).select_from(Student).where(*conditions))
         total = int(cnt or 0)
 
@@ -238,14 +339,14 @@ class OrgService:
     async def get_students_with_names(
         db: AsyncSession,
         school_id: int,
-        class_id: Optional[int] = None,
-        grade_id: Optional[int] = None,
-        gender: Optional[str] = None,
-        is_active: Optional[bool] = True,
-        search: Optional[str] = None,
+        class_id: int | None = None,
+        grade_id: int | None = None,
+        gender: str | None = None,
+        is_active: bool | None = True,
+        search: str | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         """分页查询学生列表，附班级名和年级名（单次 JOIN 无 N+1）"""
         conditions = [Student.school_id == school_id]
         if is_active is not None:
@@ -262,14 +363,19 @@ class OrgService:
             )
 
         from sqlalchemy import func
+
         cnt = await db.scalar(select(func.count()).select_from(Student).where(*conditions))
         total = int(cnt or 0)
 
         # 单次 JOIN 查学生+班级名+年级名
         stmt = (
             select(
-                Student.id, Student.name, Student.student_no,
-                Student.class_id, Student.grade_id, Student.gender,
+                Student.id,
+                Student.name,
+                Student.student_no,
+                Student.class_id,
+                Student.grade_id,
+                Student.gender,
                 Student.is_active,
                 Class.name.label("class_name"),
                 Grade.name.label("grade_name"),
@@ -285,10 +391,15 @@ class OrgService:
         rows = result.all()
         students = [
             {
-                "id": r.id, "name": r.name, "student_no": r.student_no,
-                "class_id": r.class_id, "grade_id": r.grade_id,
-                "gender": r.gender, "is_active": r.is_active,
-                "class_name": r.class_name, "grade_name": r.grade_name,
+                "id": r.id,
+                "name": r.name,
+                "student_no": r.student_no,
+                "class_id": r.class_id,
+                "grade_id": r.grade_id,
+                "gender": r.gender,
+                "is_active": r.is_active,
+                "class_name": r.class_name,
+                "grade_name": r.grade_name,
             }
             for r in rows
         ]
@@ -296,13 +407,18 @@ class OrgService:
 
     @staticmethod
     async def get_classes_with_details(
-        db: AsyncSession, school_id: int, grade_id: Optional[int] = None
-    ) -> List[dict]:
+        db: AsyncSession, school_id: int, grade_id: int | None = None
+    ) -> list[dict]:
         """查询班级列表，附年级名和班主任名"""
         stmt = (
             select(
-                Class.id, Class.name, Class.school_id, Class.grade_id,
-                Class.head_teacher_id, Class.student_count, Class.is_active,
+                Class.id,
+                Class.name,
+                Class.school_id,
+                Class.grade_id,
+                Class.head_teacher_id,
+                Class.student_count,
+                Class.is_active,
                 Grade.name.label("grade_name"),
                 User.display_name.label("head_teacher_name"),
             )
@@ -316,16 +432,21 @@ class OrgService:
         result = await db.execute(stmt)
         return [
             {
-                "id": r.id, "name": r.name, "school_id": r.school_id,
-                "grade_id": r.grade_id, "head_teacher_id": r.head_teacher_id,
-                "student_count": r.student_count or 0, "is_active": r.is_active,
-                "grade_name": r.grade_name, "head_teacher_name": r.head_teacher_name,
+                "id": r.id,
+                "name": r.name,
+                "school_id": r.school_id,
+                "grade_id": r.grade_id,
+                "head_teacher_id": r.head_teacher_id,
+                "student_count": r.student_count or 0,
+                "is_active": r.is_active,
+                "grade_name": r.grade_name,
+                "head_teacher_name": r.head_teacher_name,
             }
             for r in result.all()
         ]
 
     @staticmethod
-    async def get_enabled_modules(db: AsyncSession, school_id: int) -> List[str]:
+    async def get_enabled_modules(db: AsyncSession, school_id: int) -> list[str]:
         """获取某学校当前启用的模块代码列表"""
         result = await db.execute(
             select(SchoolModule.module_code).where(
@@ -337,7 +458,11 @@ class OrgService:
 
     @staticmethod
     async def set_module_state(
-        db: AsyncSession, school_id: int, module_code: str, enabled: bool, config: Optional[dict] = None
+        db: AsyncSession,
+        school_id: int,
+        module_code: str,
+        enabled: bool,
+        config: dict | None = None,
     ) -> SchoolModule:
         """启用/禁用学校的某个模块"""
         result = await db.execute(

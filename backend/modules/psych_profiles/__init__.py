@@ -18,11 +18,11 @@ psych_profiles 模块 — 心理档案 + 筛查流水 + 学业x心理双轨预�
 """
 
 from modules.psych_profiles.manifest import (
-    MODULE_CODE,
-    MODULE_NAME,
-    MODULE_CATEGORY,
-    MODULE_DEPENDENCIES,
     ENABLED_BY_DEFAULT,
+    MODULE_CATEGORY,
+    MODULE_CODE,
+    MODULE_DEPENDENCIES,
+    MODULE_NAME,
     MODULE_PHASES,
     register,
 )

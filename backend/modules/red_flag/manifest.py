@@ -17,4 +17,5 @@ MODULE_DEPENDENCIES = ["attendance", "behavior"]
 
 def register(router_prefix="/api/v1/red-flag"):
     from modules.red_flag.routers import router
+
     return router, router_prefix

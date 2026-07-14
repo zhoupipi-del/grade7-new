@@ -24,15 +24,16 @@ research_activities/routers.py — 教研活动管理 API 网关
   DELETE /{act_id}/agendas/{aid}        删除议题
 """
 
+from core.models import User
+from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
 
-from core.routers import get_db, get_current_user
-from core.models import User
 from . import schemas, services
 from .models import (
-    ACT_PLANNED, ACT_IN_PROGRESS, ACT_COMPLETED, ACT_CANCELLED,
+    ACT_CANCELLED,
+    ACT_COMPLETED,
+    ACT_IN_PROGRESS,
 )
 
 router = APIRouter(tags=["教研活动管理"])
@@ -56,6 +57,7 @@ def _can_manage(user: User, organizer_id: int) -> bool:
 # 活动 CRUD
 # ═══════════════════════════════════════════════
 
+
 @router.post("/", response_model=schemas.ActivityDetailResponse, status_code=201)
 async def api_create_activity(
     payload: schemas.ActivityCreate,
@@ -67,7 +69,10 @@ async def api_create_activity(
         raise HTTPException(403, "无权创建教研活动")
 
     activity = await services.create_activity(
-        db, current_user.school_id, current_user.id, payload,
+        db,
+        current_user.school_id,
+        current_user.id,
+        payload,
     )
 
     # 获取参与人和议题
@@ -81,10 +86,10 @@ async def api_create_activity(
 
 @router.get("/")
 async def api_list_activities(
-    subject_code: Optional[str] = Query(None),
-    activity_type: Optional[str] = Query(None),
-    act_status: Optional[str] = Query(None, alias="status"),
-    organizer_id: Optional[int] = Query(None),
+    subject_code: str | None = Query(None),
+    activity_type: str | None = Query(None),
+    act_status: str | None = Query(None, alias="status"),
+    organizer_id: int | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -92,12 +97,14 @@ async def api_list_activities(
 ):
     """活动列表"""
     items, total = await services.list_activities(
-        db, current_user.school_id,
+        db,
+        current_user.school_id,
         subject_code=subject_code,
         activity_type=activity_type,
         status=act_status,
         organizer_id=organizer_id,
-        page=page, page_size=page_size,
+        page=page,
+        page_size=page_size,
     )
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
@@ -175,6 +182,7 @@ async def api_delete_activity(
 # 状态机流转
 # ═══════════════════════════════════════════════
 
+
 @router.post("/{act_id}/start", response_model=schemas.ActivityResponse)
 async def api_start_activity(
     act_id: int,
@@ -189,7 +197,11 @@ async def api_start_activity(
         raise HTTPException(403, "无权操作")
 
     activity, err = await services.transition_status(
-        db, current_user.school_id, act_id, ACT_IN_PROGRESS, current_user.id,
+        db,
+        current_user.school_id,
+        act_id,
+        ACT_IN_PROGRESS,
+        current_user.id,
     )
     if err:
         raise HTTPException(400, err)
@@ -211,7 +223,11 @@ async def api_complete_activity(
         raise HTTPException(403, "无权操作")
 
     activity, err = await services.transition_status(
-        db, current_user.school_id, act_id, ACT_COMPLETED, current_user.id,
+        db,
+        current_user.school_id,
+        act_id,
+        ACT_COMPLETED,
+        current_user.id,
     )
     if err:
         raise HTTPException(400, err)
@@ -234,7 +250,11 @@ async def api_cancel_activity(
         raise HTTPException(403, "无权操作")
 
     activity, err = await services.transition_status(
-        db, current_user.school_id, act_id, ACT_CANCELLED, current_user.id,
+        db,
+        current_user.school_id,
+        act_id,
+        ACT_CANCELLED,
+        current_user.id,
         cancel_reason=payload.cancel_reason,
     )
     if err:
@@ -246,6 +266,7 @@ async def api_cancel_activity(
 # ═══════════════════════════════════════════════
 # 参与人员管理
 # ═══════════════════════════════════════════════
+
 
 @router.post("/{act_id}/participants", response_model=schemas.ParticipantResponse, status_code=201)
 async def api_add_participant(
@@ -267,13 +288,18 @@ async def api_add_participant(
 
     user_name = await services._get_user_name(db, p.user_id)
     return {
-        "id": p.id, "activity_id": p.activity_id,
-        "user_id": p.user_id, "user_name": user_name,
-        "role": p.role, "attendance_status": p.attendance_status,
-        "check_in_at": p.check_in_at, "check_out_at": p.check_out_at,
+        "id": p.id,
+        "activity_id": p.activity_id,
+        "user_id": p.user_id,
+        "user_name": user_name,
+        "role": p.role,
+        "attendance_status": p.attendance_status,
+        "check_in_at": p.check_in_at,
+        "check_out_at": p.check_out_at,
         "contribution_score": p.contribution_score,
         "contribution_note": p.contribution_note,
-        "note": p.note, "created_at": p.created_at,
+        "note": p.note,
+        "created_at": p.created_at,
     }
 
 
@@ -313,13 +339,18 @@ async def api_update_participant(
 
     user_name = await services._get_user_name(db, p.user_id)
     return {
-        "id": p.id, "activity_id": p.activity_id,
-        "user_id": p.user_id, "user_name": user_name,
-        "role": p.role, "attendance_status": p.attendance_status,
-        "check_in_at": p.check_in_at, "check_out_at": p.check_out_at,
+        "id": p.id,
+        "activity_id": p.activity_id,
+        "user_id": p.user_id,
+        "user_name": user_name,
+        "role": p.role,
+        "attendance_status": p.attendance_status,
+        "check_in_at": p.check_in_at,
+        "check_out_at": p.check_out_at,
         "contribution_score": p.contribution_score,
         "contribution_note": p.contribution_note,
-        "note": p.note, "created_at": p.created_at,
+        "note": p.note,
+        "created_at": p.created_at,
     }
 
 
@@ -347,6 +378,7 @@ async def api_remove_participant(
 # 议题/议程管理
 # ═══════════════════════════════════════════════
 
+
 @router.post("/{act_id}/agendas", response_model=schemas.AgendaResponse, status_code=201)
 async def api_create_agenda(
     act_id: int,
@@ -369,16 +401,21 @@ async def api_create_agenda(
     if agenda.presenter_id:
         presenter_name = await services._get_user_name(db, agenda.presenter_id)
     return {
-        "id": agenda.id, "activity_id": agenda.activity_id,
-        "seq": agenda.seq, "title": agenda.title,
-        "presenter_id": agenda.presenter_id, "presenter_name": presenter_name,
+        "id": agenda.id,
+        "activity_id": agenda.activity_id,
+        "seq": agenda.seq,
+        "title": agenda.title,
+        "presenter_id": agenda.presenter_id,
+        "presenter_name": presenter_name,
         "content": agenda.content,
         "planned_duration": agenda.planned_duration,
         "actual_duration": agenda.actual_duration,
-        "decision": agenda.decision, "status": agenda.status,
+        "decision": agenda.decision,
+        "status": agenda.status,
         "linked_plan_id": agenda.linked_plan_id,
         "linked_observation_id": agenda.linked_observation_id,
-        "created_at": agenda.created_at, "updated_at": agenda.updated_at,
+        "created_at": agenda.created_at,
+        "updated_at": agenda.updated_at,
     }
 
 
@@ -420,16 +457,21 @@ async def api_update_agenda(
     if agenda.presenter_id:
         presenter_name = await services._get_user_name(db, agenda.presenter_id)
     return {
-        "id": agenda.id, "activity_id": agenda.activity_id,
-        "seq": agenda.seq, "title": agenda.title,
-        "presenter_id": agenda.presenter_id, "presenter_name": presenter_name,
+        "id": agenda.id,
+        "activity_id": agenda.activity_id,
+        "seq": agenda.seq,
+        "title": agenda.title,
+        "presenter_id": agenda.presenter_id,
+        "presenter_name": presenter_name,
         "content": agenda.content,
         "planned_duration": agenda.planned_duration,
         "actual_duration": agenda.actual_duration,
-        "decision": agenda.decision, "status": agenda.status,
+        "decision": agenda.decision,
+        "status": agenda.status,
         "linked_plan_id": agenda.linked_plan_id,
         "linked_observation_id": agenda.linked_observation_id,
-        "created_at": agenda.created_at, "updated_at": agenda.updated_at,
+        "created_at": agenda.created_at,
+        "updated_at": agenda.updated_at,
     }
 
 

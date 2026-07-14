@@ -3,18 +3,16 @@ modules/class_mgmt/services.py — 班级管理业务逻辑
 """
 
 import logging
-from typing import Optional, List, Tuple
 
-from sqlalchemy import select, func, update, and_
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
-from core.models import Student, Class, Grade, User
+from core.models import Class, Grade, Student, User
 from modules.class_mgmt.models import ClassChangeLog, ClassProfileExt
 from modules.class_mgmt.schemas import (
-    ClassCreate, ClassUpdate, AssignStudentsRequest,
-    TransferStudentRequest, MergeClassesRequest, SplitClassRequest,
+    ClassCreate,
+    ClassUpdate,
 )
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +70,7 @@ class ClassMgmtService:
         return cls
 
     @staticmethod
-    async def get_class(db: AsyncSession, class_id: int) -> Optional[dict]:
+    async def get_class(db: AsyncSession, class_id: int) -> dict | None:
         """获取班级详情"""
         result = await db.execute(
             select(Class, ClassProfileExt)
@@ -102,10 +100,10 @@ class ClassMgmtService:
     async def list_classes(
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
+        grade_id: int | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         """班级列表"""
         conditions = [Class.school_id == school_id, Class.is_active == True]
         if grade_id:
@@ -129,17 +127,21 @@ class ClassMgmtService:
 
         items = []
         for cls, ext in result:
-            items.append({
-                "id": cls.id,
-                "name": cls.name,
-                "school_id": cls.school_id,
-                "grade_id": cls.grade_id,
-                "head_teacher_id": cls.head_teacher_id,
-                "head_teacher_name": cls.head_teacher.display_name if cls.head_teacher else None,
-                "student_count": cls.student_count or 0,
-                "is_active": cls.is_active,
-                "class_slogan": ext.class_slogan if ext else None,
-            })
+            items.append(
+                {
+                    "id": cls.id,
+                    "name": cls.name,
+                    "school_id": cls.school_id,
+                    "grade_id": cls.grade_id,
+                    "head_teacher_id": cls.head_teacher_id,
+                    "head_teacher_name": cls.head_teacher.display_name
+                    if cls.head_teacher
+                    else None,
+                    "student_count": cls.student_count or 0,
+                    "is_active": cls.is_active,
+                    "class_slogan": ext.class_slogan if ext else None,
+                }
+            )
 
         return items, total
 
@@ -170,7 +172,9 @@ class ClassMgmtService:
             if ext:
                 ext.class_slogan = data.class_slogan
             else:
-                ext = ClassProfileExt(class_id=class_id, school_id=cls.school_id, class_slogan=data.class_slogan)
+                ext = ClassProfileExt(
+                    class_id=class_id, school_id=cls.school_id, class_slogan=data.class_slogan
+                )
                 db.add(ext)
 
         return cls
@@ -184,7 +188,7 @@ class ClassMgmtService:
         db: AsyncSession,
         school_id: int,
         class_id: int,
-        student_ids: List[int],
+        student_ids: list[int],
         operated_by: int,
         operator_name: str = "",
     ) -> dict:
@@ -233,7 +237,7 @@ class ClassMgmtService:
         target_class_id: int,
         operated_by: int,
         operator_name: str = "",
-        reason: Optional[str] = None,
+        reason: str | None = None,
     ) -> dict:
         """学生调班 — 从当前班级调到目标班级"""
         student = await db.get(Student, student_id)
@@ -323,7 +327,7 @@ class ClassMgmtService:
     async def get_class_students(
         db: AsyncSession,
         class_id: int,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """获取班级学生名单"""
         result = await db.execute(
             select(Student)
@@ -350,18 +354,22 @@ class ClassMgmtService:
     async def get_stats(db: AsyncSession, school_id: int) -> dict:
         """班级统计"""
         # 总班级数
-        total_classes = (await db.execute(
-            select(func.count(Class.id)).where(
-                Class.school_id == school_id, Class.is_active == True
+        total_classes = (
+            await db.execute(
+                select(func.count(Class.id)).where(
+                    Class.school_id == school_id, Class.is_active == True
+                )
             )
-        )).scalar() or 0
+        ).scalar() or 0
 
         # 总学生数
-        total_students = (await db.execute(
-            select(func.count(Student.id)).where(
-                Student.school_id == school_id, Student.is_active == True
+        total_students = (
+            await db.execute(
+                select(func.count(Student.id)).where(
+                    Student.school_id == school_id, Student.is_active == True
+                )
             )
-        )).scalar() or 0
+        ).scalar() or 0
 
         # 平均班级人数
         avg_size = total_students / total_classes if total_classes > 0 else 0
@@ -394,9 +402,19 @@ class ClassMgmtService:
         smallest = None
         if class_list:
             cls_max, grade_max = class_list[0]
-            largest = {"id": cls_max.id, "name": cls_max.name, "count": cls_max.student_count, "grade": grade_max}
+            largest = {
+                "id": cls_max.id,
+                "name": cls_max.name,
+                "count": cls_max.student_count,
+                "grade": grade_max,
+            }
             cls_min, grade_min = class_list[-1]
-            smallest = {"id": cls_min.id, "name": cls_min.name, "count": cls_min.student_count, "grade": grade_min}
+            smallest = {
+                "id": cls_min.id,
+                "name": cls_min.name,
+                "count": cls_min.student_count,
+                "grade": grade_min,
+            }
 
         return {
             "total_classes": total_classes,

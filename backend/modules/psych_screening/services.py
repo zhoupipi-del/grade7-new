@@ -10,29 +10,26 @@ Psych Screening 业务逻辑层
   6. 统计仪表盘
 """
 
-import os
 import json
 import logging
-from typing import Optional, List, Dict, Any
+import os
 from datetime import date, datetime
 
 import httpx
-from sqlalchemy import select, func, and_, or_, desc, asc
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
-from core.models import Student, Class, Grade, User, get_local_now
+from core.db_utils import require_db_url
+from core.models import Class, Student, get_local_now
 from modules.psych_screening.models import (
-    PsychSurvey,
+    InterventionRecord,
     MentalHealthAssessment,
     MentalHealthQuestion,
-    MentalHealthAnswer,
-    InterventionRecord,
+    PsychSurvey,
 )
 
 # risk_models 的 PsychSurvey 使用 dimension_scores (JSON) 而非 dimension_scores (Text)
 # MentalHealthAssessment 使用 Integer total_score 和 uppercase status
 from modules.psych_screening.schemas import MSSMHS_DIMENSIONS
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +43,8 @@ LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 # MSSMHS-55 量表常量
 # ═══════════════════════════════════════════════════════════════
 
-MSSMHS_MAX_PER_DIM = 30   # 每维度满分 (6题 × 5分)
-MSSMHS_MAX_TOTAL = 275    # 总分满分 (55题 × 5分)
+MSSMHS_MAX_PER_DIM = 30  # 每维度满分 (6题 × 5分)
+MSSMHS_MAX_TOTAL = 275  # 总分满分 (55题 × 5分)
 
 # 评分：1=从无, 2=轻度, 3=中度, 4=偏重, 5=严重
 MSSMHS_SCORE_LABELS = {
@@ -142,6 +139,7 @@ MSSMHS_QUESTIONS = [
 # 1. 种子数据 — MSSMHS-55 题目库初始化
 # ═══════════════════════════════════════════════════════════════
 
+
 async def seed_mssmhs_questions(db: AsyncSession, school_id: int) -> int:
     """
     幂等初始化 MSSMHS-55 题目库。
@@ -177,7 +175,9 @@ async def seed_mssmhs_questions(db: AsyncSession, school_id: int) -> int:
 
     if inserted > 0:
         await db.commit()
-        logger.info(f"[psych_screening] Seeded {inserted} MSSMHS-55 questions for school {school_id}")
+        logger.info(
+            f"[psych_screening] Seeded {inserted} MSSMHS-55 questions for school {school_id}"
+        )
 
     return inserted
 
@@ -186,7 +186,8 @@ async def seed_mssmhs_questions(db: AsyncSession, school_id: int) -> int:
 # 2. 评分引擎 — 计算总分 + 维度分 + 风险定级
 # ═══════════════════════════════════════════════════════════════
 
-def calculate_scores(answers: List[dict]) -> dict:
+
+def calculate_scores(answers: list[dict]) -> dict:
     """
     根据答案列表计算:
       - total_score: 总分
@@ -204,10 +205,7 @@ def calculate_scores(answers: List[dict]) -> dict:
             dim_scores[MSSMHS_DIMENSIONS[dim_idx]].append(score)
 
     total_score = sum(item.get("score", 1) for item in answers)
-    dimensions = {
-        d: sum(scores)
-        for d, scores in dim_scores.items()
-    }
+    dimensions = {d: sum(scores) for d, scores in dim_scores.items()}
 
     # 风险定级
     if total_score >= 160:
@@ -237,11 +235,12 @@ def calculate_scores(answers: List[dict]) -> dict:
 # 3. 问卷提交 + 自动评估同步
 # ═══════════════════════════════════════════════════════════════
 
+
 async def submit_survey(
     db: AsyncSession,
     student_id: int,
     school_id: int,
-    answers: List[dict],
+    answers: list[dict],
     survey_type: str = "MSSMHS-55",
 ) -> dict:
     """
@@ -249,6 +248,7 @@ async def submit_survey(
       1. 评分计算
       2. 落盘 PsychSurvey
       3. 中高风险 (≥120) 自动创建 MentalHealthAssessment
+      4. CEP 风险升级检测 → ActiveCompositeAlert + SSE 弹窗
     """
     # 1. 评分
     result = calculate_scores(answers)
@@ -263,6 +263,22 @@ async def submit_survey(
     student = student.scalar_one_or_none()
     if not student:
         raise ValueError(f"Student {student_id} not found")
+
+    # ── CEP: 查询前次风险等级，用于升级检测 ──
+    prev_risk = None
+    prev_assessment_result = await db.execute(
+        select(MentalHealthAssessment.risk_level)
+        .where(
+            MentalHealthAssessment.student_id == student_id,
+            MentalHealthAssessment.school_id == school_id,
+            MentalHealthAssessment.scale_name == "MSSMHS-55",
+        )
+        .order_by(MentalHealthAssessment.created_at.desc())
+        .limit(1)
+    )
+    prev_row = prev_assessment_result.first()
+    if prev_row:
+        prev_risk = prev_row[0]
 
     # 3. 落盘问卷
     survey = PsychSurvey(
@@ -286,13 +302,43 @@ async def submit_survey(
     risk_level = result["risk_level"]
     if result["total_score"] >= 120:
         assessment = await _auto_create_assessment(
-            db, student, result["total_score"], result["dimensions"],
-            risk_level, school_id, survey.id,
+            db,
+            student,
+            result["total_score"],
+            result["dimensions"],
+            risk_level,
+            school_id,
+            survey.id,
         )
         if assessment:
             assessment_id = assessment.id
 
     await db.commit()
+
+    # ── CEP 风险升级检测: 后台异步，不阻塞提交返回 ──
+    new_risk = risk_level
+    if _is_risk_escalation(prev_risk, new_risk):
+        import asyncio
+
+        asyncio.create_task(
+            _cep_psych_risk_escalation(
+                student_id=student_id,
+                school_id=school_id,
+                student_name=student.name,
+                class_id=student.class_id,
+                prev_risk=prev_risk,
+                new_risk=new_risk,
+                total_score=result["total_score"],
+                survey_id=survey.id,
+            )
+        )
+        logger.info(
+            "[CEP-PSYCH] 风险升级检测触发 | student=%s %s→%s score=%s",
+            student_id,
+            prev_risk,
+            new_risk,
+            result["total_score"],
+        )
 
     return {
         "status": "ok",
@@ -307,6 +353,133 @@ async def submit_survey(
     }
 
 
+def _is_risk_escalation(prev: str | None, new: str) -> bool:
+    """判断心理风险是否升级 (low→medium, low→high, medium→high)"""
+    if not prev:
+        return new in ("medium", "high")  # 首次筛查即中高风险
+    risk_order = {"low": 0, "medium": 1, "high": 2}
+    prev_val = risk_order.get(prev, -1)
+    new_val = risk_order.get(new, -1)
+    return new_val > prev_val
+
+
+async def _cep_psych_risk_escalation(
+    student_id: int,
+    school_id: int,
+    student_name: str,
+    class_id: int | None,
+    prev_risk: str | None,
+    new_risk: str,
+    total_score: float,
+    survey_id: int,
+) -> None:
+    """
+    CEP 心理风险升级 → 创建 ActiveCompositeAlert + Redis PUBLISH 弹窗
+
+    独立 async session，不阻塞主事务。
+    """
+    import json as _json
+    from datetime import datetime as _dt
+
+    try:
+        from core.redis_client import get_redis
+
+        # 独立引擎 (安全: 从环境变量读取，无硬编码回退)
+        _DB_URL = require_db_url()
+        _engine = create_async_engine(_DB_URL, pool_pre_ping=True, pool_recycle=300, pool_size=2)
+        _factory = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with _factory() as db:
+            from modules.growth.models import ActiveCompositeAlert
+
+            risk_labels = {"low": "低风险", "medium": "中风险", "high": "高风险"}
+            prev_label = risk_labels.get(prev_risk, "未知") if prev_risk else "首次筛查"
+            new_label = risk_labels.get(new_risk, new_risk)
+
+            title = f"心理风险升级: {student_name} {prev_label}→{new_label} (MSSMHS-55: {total_score}分)"
+
+            meta = _json.dumps(
+                {
+                    "module": "psych_screening",
+                    "alert_source": "PSYCH_RISK_ESCALATION",
+                    "student_id": student_id,
+                    "student_name": student_name,
+                    "class_id": class_id,
+                    "prev_risk": prev_risk,
+                    "new_risk": new_risk,
+                    "total_score": total_score,
+                    "survey_id": survey_id,
+                    "risk_jump": f"{prev_risk}→{new_risk}",
+                    "triggered_at": _dt.utcnow().isoformat(),
+                },
+                ensure_ascii=False,
+                default=str,
+            )
+
+            alert = ActiveCompositeAlert(
+                school_id=school_id,
+                student_id=student_id,
+                alert_type="PSYCH_RISK_ESCALATION",
+                title=title[:200],
+                reason_meta=meta,
+                ai_prescription=(
+                    f"## 心理风险升级预警\n\n"
+                    f"**学生**: {student_name}\n"
+                    f"**风险变化**: {prev_label} → {new_label}\n"
+                    f"**MSSMHS-55 总分**: {total_score}\n\n"
+                    f"### 处置建议\n"
+                    f"1. 班主任立即约谈学生，了解近期心理状态变化\n"
+                    f"2. 心理老师安排一对一访谈评估\n"
+                    f"3. 评估是否需要家长联动干预\n"
+                    f"4. 持续追踪 2 周内情绪行为变化\n"
+                    if new_risk == "high"
+                    else (
+                        f"## 心理风险等级变化提醒\n\n"
+                        f"**学生**: {student_name}\n"
+                        f"**风险变化**: {prev_label} → {new_label}\n"
+                        f"**MSSMHS-55 总分**: {total_score}\n\n"
+                        f"### 处置建议\n"
+                        f"1. 班主任关注学生日常情绪行为表现\n"
+                        f"2. 择机与学生谈心，了解是否有压力源\n"
+                        f"3. 观察 1-2 周，必要时安排心理面谈\n"
+                    )
+                ),
+                is_resolved=False,
+            )
+            db.add(alert)
+            await db.commit()
+            await db.refresh(alert)
+
+            logger.info(
+                "[CEP-PSYCH] ActiveCompositeAlert 已创建 | alert_id=%s student=%s",
+                alert.id,
+                student_id,
+            )
+
+            # Redis PUBLISH 弹窗
+            redis = get_redis()
+            if redis:
+                popup_data = {
+                    "type": "composite_alert",
+                    "alert_type": "PSYCH_RISK_ESCALATION",
+                    "school_id": school_id,
+                    "student_id": student_id,
+                    "alert_id": alert.id,
+                    "title": f"⚠️ 心理风险升级: {student_name}",
+                    "summary": f"MSSMHS-55 筛查 {prev_label}→{new_label}，总分 {total_score}",
+                    "risk_jump": f"{prev_risk}→{new_risk}",
+                    "created_at": _dt.utcnow().isoformat(),
+                }
+                await redis.publish(
+                    "wings:notifications:popup",
+                    _json.dumps(popup_data, ensure_ascii=False),
+                )
+                logger.info("[CEP-PSYCH] SSE弹窗已广播 | student=%s", student_id)
+
+    except Exception as e:
+        logger.error("[CEP-PSYCH] 风险升级处理失败: %s", e, exc_info=True)
+
+
 async def _auto_create_assessment(
     db: AsyncSession,
     student: Student,
@@ -315,7 +488,7 @@ async def _auto_create_assessment(
     risk_level: str,
     school_id: int,
     survey_id: int = None,
-) -> Optional[MentalHealthAssessment]:
+) -> MentalHealthAssessment | None:
     """幂等创建 (或更新) 心理健康评估档案"""
     # 检查是否已存在同一问卷的评估
     existing = await db.execute(
@@ -372,13 +545,14 @@ async def _auto_create_assessment(
 # 4. 评估 CRUD
 # ═══════════════════════════════════════════════════════════════
 
+
 async def list_assessments(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
-    class_id: Optional[int] = None,
-    student_id: Optional[int] = None,
-    risk_level: Optional[str] = None,
+    grade_id: int | None = None,
+    class_id: int | None = None,
+    student_id: int | None = None,
+    risk_level: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> dict:
@@ -482,8 +656,14 @@ async def update_assessment(
         raise ValueError(f"Assessment {assessment_id} not found")
 
     for field in [
-        "assessment_type", "scale_name", "conclusion", "recommendations",
-        "need_intervention", "intervention_plan", "risk_level", "status",
+        "assessment_type",
+        "scale_name",
+        "conclusion",
+        "recommendations",
+        "need_intervention",
+        "intervention_plan",
+        "risk_level",
+        "status",
     ]:
         if field in data and data[field] is not None:
             setattr(assessment, field, data[field])
@@ -511,11 +691,12 @@ async def delete_assessment(db: AsyncSession, assessment_id: int) -> bool:
 # 5. 维度聚合 — 雷达图数据
 # ═══════════════════════════════════════════════════════════════
 
+
 async def get_dimension_aggregation(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
-    class_id: Optional[int] = None,
+    grade_id: int | None = None,
+    class_id: int | None = None,
 ) -> dict:
     """
     聚合 MSSMHS-55 全部有效问卷的 10 维度数据:
@@ -555,21 +736,17 @@ async def get_dimension_aggregation(
 
     # 批量加载学生和班级信息
     student_ids = list({s.student_id for s in surveys})
-    students_result = await db.execute(
-        select(Student).where(Student.id.in_(student_ids))
-    )
+    students_result = await db.execute(select(Student).where(Student.id.in_(student_ids)))
     student_map = {s.id: s for s in students_result.scalars().all()}
 
     class_ids = list({s.class_id for s in surveys})
-    classes_result = await db.execute(
-        select(Class).where(Class.id.in_(class_ids))
-    )
+    classes_result = await db.execute(select(Class).where(Class.id.in_(class_ids)))
     class_map = {c.id: c for c in classes_result.scalars().all()}
 
     # 聚合
-    dim_sums = {d: 0.0 for d in MSSMHS_DIMENSIONS}
-    dim_max = {d: 0.0 for d in MSSMHS_DIMENSIONS}
-    dim_max_students = {d: None for d in MSSMHS_DIMENSIONS}
+    dim_sums = dict.fromkeys(MSSMHS_DIMENSIONS, 0.0)
+    dim_max = dict.fromkeys(MSSMHS_DIMENSIONS, 0.0)
+    dim_max_students = dict.fromkeys(MSSMHS_DIMENSIONS)
     risk_dist = {"high": 0, "medium": 0, "low": 0}
 
     for survey in surveys:
@@ -621,7 +798,7 @@ async def get_dimension_aggregation(
         for survey in surveys:
             cid = survey.class_id
             if cid not in class_dim_data:
-                class_dim_data[cid] = {d: 0.0 for d in MSSMHS_DIMENSIONS}
+                class_dim_data[cid] = dict.fromkeys(MSSMHS_DIMENSIONS, 0.0)
                 class_count[cid] = 0
             dims = _parse_dimensions(survey.dimension_scores)
             if not dims:
@@ -634,12 +811,14 @@ async def get_dimension_aggregation(
             if cnt == 0:
                 continue
             cls = class_map.get(cid)
-            class_comparison.append({
-                "class_id": cid,
-                "class_name": cls.name if cls else f"Class {cid}",
-                "count": cnt,
-                "averages": [round(class_dim_data[cid][d] / cnt, 2) for d in MSSMHS_DIMENSIONS],
-            })
+            class_comparison.append(
+                {
+                    "class_id": cid,
+                    "class_name": cls.name if cls else f"Class {cid}",
+                    "count": cnt,
+                    "averages": [round(class_dim_data[cid][d] / cnt, 2) for d in MSSMHS_DIMENSIONS],
+                }
+            )
         class_comparison.sort(key=lambda x: x["class_name"])
 
     return {
@@ -654,7 +833,7 @@ async def get_dimension_aggregation(
     }
 
 
-def _parse_dimensions(dim_data) -> Optional[dict]:
+def _parse_dimensions(dim_data) -> dict | None:
     """安全解析 dimension_scores (兼容两种格式)
 
     Format A (新): {"dimensions": {"强迫症状": 18, "偏执": 12, ...}}
@@ -709,11 +888,12 @@ def _convert_english_keys(data: dict) -> dict:
 # 6. AI 宏观分析 — DeepSeek 生成白皮书
 # ═══════════════════════════════════════════════════════════════
 
+
 async def run_ai_analysis(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
-    class_id: Optional[int] = None,
+    grade_id: int | None = None,
+    class_id: int | None = None,
 ) -> dict:
     """
     调用 DeepSeek 生成心理健康宏观分析白皮书。
@@ -740,8 +920,8 @@ async def run_ai_analysis(
         return {"error": "暂无有效问卷数据", "report": None}
 
     # 聚合统计
-    dim_sums = {d: 0.0 for d in MSSMHS_DIMENSIONS}
-    dim_max = {d: 0.0 for d in MSSMHS_DIMENSIONS}
+    dim_sums = dict.fromkeys(MSSMHS_DIMENSIONS, 0.0)
+    dim_max = dict.fromkeys(MSSMHS_DIMENSIONS, 0.0)
     valid_count = len(surveys)
     total_scores = []
     risk_dist = {"high": 0, "medium": 0, "low": 0}
@@ -774,9 +954,9 @@ async def run_ai_analysis(
         f"- 有效问卷数: {valid_count} 份\n"
         f"- 总分均值: {avg_total} / {MSSMHS_MAX_TOTAL}\n"
         f"- 总分范围: {min_total} ~ {max_total}\n"
-        f"- 风险分布: 高风险 {risk_dist['high']} 人 ({risk_dist['high']/valid_count*100:.1f}%), "
-        f"中风险 {risk_dist['medium']} 人 ({risk_dist['medium']/valid_count*100:.1f}%), "
-        f"低风险 {risk_dist['low']} 人 ({risk_dist['low']/valid_count*100:.1f}%)\n\n"
+        f"- 风险分布: 高风险 {risk_dist['high']} 人 ({risk_dist['high'] / valid_count * 100:.1f}%), "
+        f"中风险 {risk_dist['medium']} 人 ({risk_dist['medium'] / valid_count * 100:.1f}%), "
+        f"低风险 {risk_dist['low']} 人 ({risk_dist['low'] / valid_count * 100:.1f}%)\n\n"
         f"### 各维度均分（满分 {MSSMHS_MAX_PER_DIM} 分）\n"
     )
     for dim_name in MSSMHS_DIMENSIONS:
@@ -835,10 +1015,11 @@ async def run_ai_analysis(
 # 7. 问卷 → 评估批量同步
 # ═══════════════════════════════════════════════════════════════
 
+
 async def sync_surveys_to_assessments(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
+    grade_id: int | None = None,
 ) -> dict:
     """
     扫描所有 MSSMHS-55 中高风险问卷，自动创建/更新心理健康评估。
@@ -861,9 +1042,7 @@ async def sync_surveys_to_assessments(
     created = 0
     updated = 0
     for survey in surveys:
-        student_result = await db.execute(
-            select(Student).where(Student.id == survey.student_id)
-        )
+        student_result = await db.execute(select(Student).where(Student.id == survey.student_id))
         student = student_result.scalar_one_or_none()
         if not student:
             continue
@@ -883,8 +1062,12 @@ async def sync_surveys_to_assessments(
         is_new = existing.scalar_one_or_none() is None
 
         assessment = await _auto_create_assessment(
-            db, student, survey.total_score, dimensions,
-            risk_level, school_id,
+            db,
+            student,
+            survey.total_score,
+            dimensions,
+            risk_level,
+            school_id,
         )
         if assessment:
             if is_new:
@@ -906,13 +1089,14 @@ async def sync_surveys_to_assessments(
 # 8. 干预追踪 CRUD
 # ═══════════════════════════════════════════════════════════════
 
+
 async def list_interventions(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
-    class_id: Optional[int] = None,
-    student_id: Optional[int] = None,
-    status: Optional[str] = None,
+    grade_id: int | None = None,
+    class_id: int | None = None,
+    student_id: int | None = None,
+    status: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> dict:
@@ -957,13 +1141,17 @@ async def list_interventions(
     if grade_id:
         all_conditions.append(
             InterventionRecord.student_id.in_(
-                select(Student.id).where(Student.grade_id == grade_id, Student.school_id == school_id)
+                select(Student.id).where(
+                    Student.grade_id == grade_id, Student.school_id == school_id
+                )
             )
         )
     if class_id:
         all_conditions.append(
             InterventionRecord.student_id.in_(
-                select(Student.id).where(Student.class_id == class_id, Student.school_id == school_id)
+                select(Student.id).where(
+                    Student.class_id == class_id, Student.school_id == school_id
+                )
             )
         )
 
@@ -971,9 +1159,7 @@ async def list_interventions(
         func.count(InterventionRecord.id),
         func.sum(func.if_(InterventionRecord.status == "tracking", 1, 0)),
         func.sum(func.if_(InterventionRecord.status == "completed", 1, 0)),
-        func.sum(func.if_(
-            InterventionRecord.effect_rating.in_(["显著好转", "略有好转"]), 1, 0
-        )),
+        func.sum(func.if_(InterventionRecord.effect_rating.in_(["显著好转", "略有好转"]), 1, 0)),
     ).where(*all_conditions)
     stats_result = await db.execute(stats_stmt)
     stats_row = stats_result.one()
@@ -1014,10 +1200,12 @@ async def create_intervention(
 
     if not mh_risk_before:
         latest = await db.execute(
-            select(MentalHealthAssessment).where(
+            select(MentalHealthAssessment)
+            .where(
                 MentalHealthAssessment.student_id == data["student_id"],
                 MentalHealthAssessment.school_id == school_id,
-            ).order_by(MentalHealthAssessment.created_at.desc())
+            )
+            .order_by(MentalHealthAssessment.created_at.desc())
         )
         latest = latest.scalar_one_or_none()
         if latest:
@@ -1086,18 +1274,22 @@ async def get_intervention_timeline(
         raise ValueError(f"Student {student_id} not found")
 
     records = await db.execute(
-        select(InterventionRecord).where(
+        select(InterventionRecord)
+        .where(
             InterventionRecord.student_id == student_id,
             InterventionRecord.school_id == school_id,
-        ).order_by(InterventionRecord.intervention_date.asc())
+        )
+        .order_by(InterventionRecord.intervention_date.asc())
     )
     records = records.scalars().all()
 
     latest_assessment = await db.execute(
-        select(MentalHealthAssessment).where(
+        select(MentalHealthAssessment)
+        .where(
             MentalHealthAssessment.student_id == student_id,
             MentalHealthAssessment.school_id == school_id,
-        ).order_by(MentalHealthAssessment.created_at.desc())
+        )
+        .order_by(MentalHealthAssessment.created_at.desc())
     )
     latest_assessment = latest_assessment.scalar_one_or_none()
 
@@ -1106,19 +1298,23 @@ async def get_intervention_timeline(
     risk_trend = []
     for r in records:
         if r.mh_risk_before:
-            risk_trend.append({
-                "date": str(r.intervention_date) if r.intervention_date else "",
-                "risk": r.mh_risk_before,
-                "type": "干预前",
-                "label": r.intervention_type,
-            })
+            risk_trend.append(
+                {
+                    "date": str(r.intervention_date) if r.intervention_date else "",
+                    "risk": r.mh_risk_before,
+                    "type": "干预前",
+                    "label": r.intervention_type,
+                }
+            )
         if r.mh_risk_after and r.follow_up_done:
-            risk_trend.append({
-                "date": str(r.follow_up_date) if r.follow_up_date else "",
-                "risk": r.mh_risk_after,
-                "type": "随访后",
-                "label": r.effect_rating or "",
-            })
+            risk_trend.append(
+                {
+                    "date": str(r.follow_up_date) if r.follow_up_date else "",
+                    "risk": r.mh_risk_after,
+                    "type": "随访后",
+                    "label": r.effect_rating or "",
+                }
+            )
 
     risk_trend.sort(key=lambda x: (x["date"], risk_order.get(x["risk"], 0)))
 
@@ -1135,14 +1331,15 @@ async def get_intervention_timeline(
 # 9. 学生搜索 (供干预创建使用)
 # ═══════════════════════════════════════════════════════════════
 
+
 async def search_students(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
-    class_id: Optional[int] = None,
-    keyword: Optional[str] = None,
+    grade_id: int | None = None,
+    class_id: int | None = None,
+    keyword: str | None = None,
     limit: int = 50,
-) -> List[dict]:
+) -> list[dict]:
     """按权限 scope 搜索学生"""
     conditions = [Student.school_id == school_id, Student.is_active == True]
     if grade_id:
@@ -1152,12 +1349,7 @@ async def search_students(
     if keyword:
         conditions.append(Student.name.contains(keyword))
 
-    stmt = (
-        select(Student)
-        .where(*conditions)
-        .order_by(Student.class_id, Student.name)
-        .limit(limit)
-    )
+    stmt = select(Student).where(*conditions).order_by(Student.class_id, Student.name).limit(limit)
     result = await db.execute(stmt)
     students = result.scalars().all()
 
@@ -1165,21 +1357,25 @@ async def search_students(
     for s in students:
         # 取最新 MH 评估
         latest = await db.execute(
-            select(MentalHealthAssessment).where(
+            select(MentalHealthAssessment)
+            .where(
                 MentalHealthAssessment.student_id == s.id,
                 MentalHealthAssessment.school_id == school_id,
-            ).order_by(MentalHealthAssessment.created_at.desc())
+            )
+            .order_by(MentalHealthAssessment.created_at.desc())
         )
         latest = latest.scalar_one_or_none()
 
-        output.append({
-            "id": s.id,
-            "name": s.name,
-            "class_name": s.class_.name if s.class_ else "",
-            "risk_level": latest.risk_level if latest else None,
-            "total_score": latest.total_score if latest else None,
-            "assessment_id": latest.id if latest else None,
-        })
+        output.append(
+            {
+                "id": s.id,
+                "name": s.name,
+                "class_name": s.class_.name if s.class_ else "",
+                "risk_level": latest.risk_level if latest else None,
+                "total_score": latest.total_score if latest else None,
+                "assessment_id": latest.id if latest else None,
+            }
+        )
 
     return output
 
@@ -1188,11 +1384,12 @@ async def search_students(
 # 10. 统计仪表盘
 # ═══════════════════════════════════════════════════════════════
 
+
 async def get_dashboard_stats(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
-    class_id: Optional[int] = None,
+    grade_id: int | None = None,
+    class_id: int | None = None,
 ) -> dict:
     """
     心理筛查仪表盘聚合统计:
@@ -1203,29 +1400,38 @@ async def get_dashboard_stats(
       - 维度预警
     """
     # 问卷统计
-    survey_conds = [PsychSurvey.school_id == school_id, PsychSurvey.is_valid == True,
-                     PsychSurvey.verify_status == "VERIFIED"]
+    survey_conds = [
+        PsychSurvey.school_id == school_id,
+        PsychSurvey.is_valid == True,
+        PsychSurvey.verify_status == "VERIFIED",
+    ]
     if grade_id:
         survey_conds.append(PsychSurvey.grade_id == grade_id)
     if class_id:
         survey_conds.append(PsychSurvey.class_id == class_id)
 
-    mssmhs_count = (await db.execute(
-        select(func.count(PsychSurvey.id)).where(
-            *survey_conds, PsychSurvey.survey_type == "MSSMHS-55"
+    mssmhs_count = (
+        await db.execute(
+            select(func.count(PsychSurvey.id)).where(
+                *survey_conds, PsychSurvey.survey_type == "MSSMHS-55"
+            )
         )
-    )).scalar() or 0
-    pce_count = (await db.execute(
-        select(func.count(PsychSurvey.id)).where(
-            *survey_conds, PsychSurvey.survey_type == "PCE-55"
+    ).scalar() or 0
+    pce_count = (
+        await db.execute(
+            select(func.count(PsychSurvey.id)).where(
+                *survey_conds, PsychSurvey.survey_type == "PCE-55"
+            )
         )
-    )).scalar() or 0
+    ).scalar() or 0
 
     # 风险分布
     mssmhs_conds = survey_conds + [PsychSurvey.survey_type == "MSSMHS-55"]
     risk_stmt = select(
         func.sum(func.if_(PsychSurvey.total_score >= 160, 1, 0)),
-        func.sum(func.if_(and_(PsychSurvey.total_score >= 120, PsychSurvey.total_score < 160), 1, 0)),
+        func.sum(
+            func.if_(and_(PsychSurvey.total_score >= 120, PsychSurvey.total_score < 160), 1, 0)
+        ),
         func.sum(func.if_(PsychSurvey.total_score < 120, 1, 0)),
     ).where(*mssmhs_conds)
     risk_result = await db.execute(risk_stmt)
@@ -1239,31 +1445,60 @@ async def get_dashboard_stats(
         assessment_conds.append(MentalHealthAssessment.class_id == class_id)
 
     assessment_stats = {
-        "total": (await db.execute(select(func.count(MentalHealthAssessment.id)).where(*assessment_conds))).scalar() or 0,
-        "need_intervention": (await db.execute(
-            select(func.count(MentalHealthAssessment.id)).where(*assessment_conds, MentalHealthAssessment.need_intervention == True)
-        )).scalar() or 0,
+        "total": (
+            await db.execute(select(func.count(MentalHealthAssessment.id)).where(*assessment_conds))
+        ).scalar()
+        or 0,
+        "need_intervention": (
+            await db.execute(
+                select(func.count(MentalHealthAssessment.id)).where(
+                    *assessment_conds, MentalHealthAssessment.need_intervention == True
+                )
+            )
+        ).scalar()
+        or 0,
     }
 
     # 干预统计
     intv_conds = [InterventionRecord.school_id == school_id]
     if grade_id:
-        intv_conds.append(InterventionRecord.student_id.in_(
-            select(Student.id).where(Student.grade_id == grade_id, Student.school_id == school_id)
-        ))
+        intv_conds.append(
+            InterventionRecord.student_id.in_(
+                select(Student.id).where(
+                    Student.grade_id == grade_id, Student.school_id == school_id
+                )
+            )
+        )
     if class_id:
-        intv_conds.append(InterventionRecord.student_id.in_(
-            select(Student.id).where(Student.class_id == class_id, Student.school_id == school_id)
-        ))
+        intv_conds.append(
+            InterventionRecord.student_id.in_(
+                select(Student.id).where(
+                    Student.class_id == class_id, Student.school_id == school_id
+                )
+            )
+        )
 
     intv_stats = {
-        "total": (await db.execute(select(func.count(InterventionRecord.id)).where(*intv_conds))).scalar() or 0,
-        "tracking": (await db.execute(
-            select(func.count(InterventionRecord.id)).where(*intv_conds, InterventionRecord.status == "tracking")
-        )).scalar() or 0,
-        "completed": (await db.execute(
-            select(func.count(InterventionRecord.id)).where(*intv_conds, InterventionRecord.status == "completed")
-        )).scalar() or 0,
+        "total": (
+            await db.execute(select(func.count(InterventionRecord.id)).where(*intv_conds))
+        ).scalar()
+        or 0,
+        "tracking": (
+            await db.execute(
+                select(func.count(InterventionRecord.id)).where(
+                    *intv_conds, InterventionRecord.status == "tracking"
+                )
+            )
+        ).scalar()
+        or 0,
+        "completed": (
+            await db.execute(
+                select(func.count(InterventionRecord.id)).where(
+                    *intv_conds, InterventionRecord.status == "completed"
+                )
+            )
+        ).scalar()
+        or 0,
     }
 
     # 维度预警 (从问卷聚合中快速获取)
@@ -1273,12 +1508,14 @@ async def get_dashboard_stats(
         for i, dim_name in enumerate(MSSMHS_DIMENSIONS):
             avg = dim_data["average"][i]
             if avg > 15:  # 均分超过 50%
-                dim_alerts.append({
-                    "dimension": dim_name,
-                    "average": avg,
-                    "max": dim_data["max"][i],
-                    "severity": "high" if avg > 20 else "medium",
-                })
+                dim_alerts.append(
+                    {
+                        "dimension": dim_name,
+                        "average": avg,
+                        "max": dim_data["max"][i],
+                        "severity": "high" if avg > 20 else "medium",
+                    }
+                )
         dim_alerts.sort(key=lambda x: x["average"], reverse=True)
 
     return {
@@ -1302,7 +1539,8 @@ async def get_dashboard_stats(
 # 工具函数
 # ═══════════════════════════════════════════════════════════════
 
-def _parse_date(date_str: Optional[str]) -> Optional[date]:
+
+def _parse_date(date_str: str | None) -> date | None:
     """安全解析日期字符串 YYYY-MM-DD"""
     if not date_str:
         return date.today()

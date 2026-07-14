@@ -15,4 +15,5 @@ MODULE_PHASES = ["junior", "senior", "integrated"]
 
 def register(router_prefix="/api/v1/data_adapter"):
     from modules.data_adapter.routers import router
+
     return router, router_prefix

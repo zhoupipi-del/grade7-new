@@ -9,45 +9,46 @@ research_activities/services.py — 教研活动管理核心业务引擎
   5. 活动总结与决议归档
 """
 
+from core.models import User, get_local_now
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, update, delete, and_
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime
-import json
 
-from core.models import get_local_now
-from core.models import User
 from .models import (
-    ResearchActivity, ResearchActivityParticipant, ResearchActivityAgenda,
-    ACT_PLANNED, ACT_IN_PROGRESS, ACT_COMPLETED, ACT_CANCELLED,
-    VALID_ACT_TRANSITIONS,
-    PART_ORGANIZER, ATTEND_REGISTERED,
+    ACT_CANCELLED,
+    ACT_COMPLETED,
+    ACT_IN_PROGRESS,
+    ACT_PLANNED,
     AGENDA_PENDING,
+    ATTEND_REGISTERED,
+    PART_ORGANIZER,
+    VALID_ACT_TRANSITIONS,
+    ResearchActivity,
+    ResearchActivityAgenda,
+    ResearchActivityParticipant,
 )
 from .schemas import (
-    ActivityCreate, ActivityUpdate, CancelReason,
-    ParticipantAdd, ParticipantUpdate,
-    AgendaCreate, AgendaUpdate,
+    ActivityCreate,
+    ActivityUpdate,
+    AgendaCreate,
+    AgendaUpdate,
+    ParticipantAdd,
+    ParticipantUpdate,
 )
-
 
 # ═══════════════════════════════════════════════
 # 辅助函数
 # ═══════════════════════════════════════════════
 
+
 async def _get_user_name(db: AsyncSession, user_id: int) -> str:
-    result = await db.execute(
-        select(User.display_name).where(User.id == user_id)
-    )
-    return (result.scalar_one_or_none() or f"用户{user_id}")
+    result = await db.execute(select(User.display_name).where(User.id == user_id))
+    return result.scalar_one_or_none() or f"用户{user_id}"
 
 
-async def _get_user_names_batch(db: AsyncSession, user_ids: List[int]) -> Dict[int, str]:
+async def _get_user_names_batch(db: AsyncSession, user_ids: list[int]) -> dict[int, str]:
     if not user_ids:
         return {}
-    result = await db.execute(
-        select(User.id, User.display_name).where(User.id.in_(user_ids))
-    )
+    result = await db.execute(select(User.id, User.display_name).where(User.id.in_(user_ids)))
     return {row[0]: row[1] for row in result.fetchall()}
 
 
@@ -59,8 +60,12 @@ def _validate_act_transition(current: str, target: str) -> bool:
 # 活动 CRUD
 # ═══════════════════════════════════════════════
 
+
 async def create_activity(
-    db: AsyncSession, school_id: int, organizer_id: int, data: ActivityCreate,
+    db: AsyncSession,
+    school_id: int,
+    organizer_id: int,
+    data: ActivityCreate,
 ) -> ResearchActivity:
     """创建教研活动 + 初始参与人"""
     now = get_local_now()
@@ -111,7 +116,7 @@ async def create_activity(
     return activity
 
 
-async def get_activity(db: AsyncSession, school_id: int, act_id: int) -> Optional[ResearchActivity]:
+async def get_activity(db: AsyncSession, school_id: int, act_id: int) -> ResearchActivity | None:
     result = await db.execute(
         select(ResearchActivity).where(
             and_(ResearchActivity.id == act_id, ResearchActivity.school_id == school_id)
@@ -121,13 +126,15 @@ async def get_activity(db: AsyncSession, school_id: int, act_id: int) -> Optiona
 
 
 async def list_activities(
-    db: AsyncSession, school_id: int,
-    subject_code: Optional[str] = None,
-    activity_type: Optional[str] = None,
-    status: Optional[str] = None,
-    organizer_id: Optional[int] = None,
-    page: int = 1, page_size: int = 20,
-) -> Tuple[List[dict], int]:
+    db: AsyncSession,
+    school_id: int,
+    subject_code: str | None = None,
+    activity_type: str | None = None,
+    status: str | None = None,
+    organizer_id: int | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict], int]:
     conditions = [ResearchActivity.school_id == school_id]
     if subject_code:
         conditions.append(ResearchActivity.subject_code == subject_code)
@@ -138,9 +145,9 @@ async def list_activities(
     if organizer_id:
         conditions.append(ResearchActivity.organizer_id == organizer_id)
 
-    total = (await db.execute(
-        select(func.count()).select_from(ResearchActivity).where(*conditions)
-    )).scalar() or 0
+    total = (
+        await db.execute(select(func.count()).select_from(ResearchActivity).where(*conditions))
+    ).scalar() or 0
 
     offset = (page - 1) * page_size
     result = await db.execute(
@@ -160,17 +167,31 @@ async def list_activities(
 
 
 async def update_activity(
-    db: AsyncSession, school_id: int, act_id: int, data: ActivityUpdate,
-) -> Optional[ResearchActivity]:
+    db: AsyncSession,
+    school_id: int,
+    act_id: int,
+    data: ActivityUpdate,
+) -> ResearchActivity | None:
     activity = await get_activity(db, school_id, act_id)
     if not activity:
         return None
     if activity.status not in (ACT_PLANNED, ACT_IN_PROGRESS):
         return None
 
-    for field in ["title", "description", "activity_type", "grade_level",
-                  "planned_at", "planned_end_at", "location", "summary",
-                  "decisions", "attachments", "linked_plan_ids", "linked_observation_ids"]:
+    for field in [
+        "title",
+        "description",
+        "activity_type",
+        "grade_level",
+        "planned_at",
+        "planned_end_at",
+        "location",
+        "summary",
+        "decisions",
+        "attachments",
+        "linked_plan_ids",
+        "linked_observation_ids",
+    ]:
         val = getattr(data, field, None)
         if val is not None:
             setattr(activity, field, val)
@@ -202,11 +223,15 @@ async def delete_activity(db: AsyncSession, school_id: int, act_id: int) -> bool
 # 状态机流转
 # ═══════════════════════════════════════════════
 
+
 async def transition_status(
-    db: AsyncSession, school_id: int, act_id: int,
-    target: str, operator_id: int,
-    cancel_reason: Optional[str] = None,
-) -> Tuple[Optional[ResearchActivity], Optional[str]]:
+    db: AsyncSession,
+    school_id: int,
+    act_id: int,
+    target: str,
+    operator_id: int,
+    cancel_reason: str | None = None,
+) -> tuple[ResearchActivity | None, str | None]:
     activity = await get_activity(db, school_id, act_id)
     if not activity:
         return None, "活动不存在"
@@ -235,9 +260,13 @@ async def transition_status(
 # 参与人员管理
 # ═══════════════════════════════════════════════
 
+
 async def add_participant(
-    db: AsyncSession, school_id: int, act_id: int, data: ParticipantAdd,
-) -> Optional[ResearchActivityParticipant]:
+    db: AsyncSession,
+    school_id: int,
+    act_id: int,
+    data: ParticipantAdd,
+) -> ResearchActivityParticipant | None:
     activity = await get_activity(db, school_id, act_id)
     if not activity:
         return None
@@ -256,8 +285,10 @@ async def add_participant(
         return None
 
     p = ResearchActivityParticipant(
-        school_id=school_id, activity_id=act_id,
-        user_id=data.user_id, role=data.role,
+        school_id=school_id,
+        activity_id=act_id,
+        user_id=data.user_id,
+        role=data.role,
         attendance_status=ATTEND_REGISTERED,
     )
     db.add(p)
@@ -271,8 +302,10 @@ async def add_participant(
 
 
 async def list_participants(
-    db: AsyncSession, school_id: int, act_id: int,
-) -> Tuple[List[dict], int]:
+    db: AsyncSession,
+    school_id: int,
+    act_id: int,
+) -> tuple[list[dict], int]:
     result = await db.execute(
         select(ResearchActivityParticipant)
         .where(
@@ -290,25 +323,32 @@ async def list_participants(
 
     items = []
     for r in rows:
-        items.append({
-            "id": r.id, "activity_id": r.activity_id,
-            "user_id": r.user_id,
-            "user_name": name_map.get(r.user_id, f"用户{r.user_id}"),
-            "role": r.role,
-            "attendance_status": r.attendance_status,
-            "check_in_at": r.check_in_at, "check_out_at": r.check_out_at,
-            "contribution_score": r.contribution_score,
-            "contribution_note": r.contribution_note,
-            "note": r.note,
-            "created_at": r.created_at,
-        })
+        items.append(
+            {
+                "id": r.id,
+                "activity_id": r.activity_id,
+                "user_id": r.user_id,
+                "user_name": name_map.get(r.user_id, f"用户{r.user_id}"),
+                "role": r.role,
+                "attendance_status": r.attendance_status,
+                "check_in_at": r.check_in_at,
+                "check_out_at": r.check_out_at,
+                "contribution_score": r.contribution_score,
+                "contribution_note": r.contribution_note,
+                "note": r.note,
+                "created_at": r.created_at,
+            }
+        )
     return items, len(items)
 
 
 async def update_participant(
-    db: AsyncSession, school_id: int, act_id: int, participant_id: int,
+    db: AsyncSession,
+    school_id: int,
+    act_id: int,
+    participant_id: int,
     data: ParticipantUpdate,
-) -> Optional[ResearchActivityParticipant]:
+) -> ResearchActivityParticipant | None:
     result = await db.execute(
         select(ResearchActivityParticipant).where(
             and_(
@@ -322,8 +362,15 @@ async def update_participant(
     if not p:
         return None
 
-    for field in ["role", "attendance_status", "check_in_at", "check_out_at",
-                  "contribution_score", "contribution_note", "note"]:
+    for field in [
+        "role",
+        "attendance_status",
+        "check_in_at",
+        "check_out_at",
+        "contribution_score",
+        "contribution_note",
+        "note",
+    ]:
         val = getattr(data, field, None)
         if val is not None:
             setattr(p, field, val)
@@ -333,7 +380,9 @@ async def update_participant(
     return p
 
 
-async def remove_participant(db: AsyncSession, school_id: int, act_id: int, participant_id: int) -> bool:
+async def remove_participant(
+    db: AsyncSession, school_id: int, act_id: int, participant_id: int
+) -> bool:
     result = await db.execute(
         select(ResearchActivityParticipant).where(
             and_(
@@ -360,17 +409,20 @@ async def remove_participant(db: AsyncSession, school_id: int, act_id: int, part
 # 议题/议程管理
 # ═══════════════════════════════════════════════
 
+
 async def create_agenda(
-    db: AsyncSession, school_id: int, act_id: int, data: AgendaCreate,
-) -> Optional[ResearchActivityAgenda]:
+    db: AsyncSession,
+    school_id: int,
+    act_id: int,
+    data: AgendaCreate,
+) -> ResearchActivityAgenda | None:
     activity = await get_activity(db, school_id, act_id)
     if not activity:
         return None
 
     # 获取当前最大seq
     max_seq_result = await db.execute(
-        select(func.max(ResearchActivityAgenda.seq))
-        .where(
+        select(func.max(ResearchActivityAgenda.seq)).where(
             and_(
                 ResearchActivityAgenda.activity_id == act_id,
                 ResearchActivityAgenda.school_id == school_id,
@@ -380,10 +432,13 @@ async def create_agenda(
     max_seq = max_seq_result.scalar() or 0
 
     agenda = ResearchActivityAgenda(
-        school_id=school_id, activity_id=act_id,
+        school_id=school_id,
+        activity_id=act_id,
         seq=max_seq + 1,
-        title=data.title, presenter_id=data.presenter_id,
-        content=data.content, planned_duration=data.planned_duration,
+        title=data.title,
+        presenter_id=data.presenter_id,
+        content=data.content,
+        planned_duration=data.planned_duration,
         linked_plan_id=data.linked_plan_id,
         linked_observation_id=data.linked_observation_id,
         status=AGENDA_PENDING,
@@ -398,8 +453,10 @@ async def create_agenda(
 
 
 async def list_agendas(
-    db: AsyncSession, school_id: int, act_id: int,
-) -> Tuple[List[dict], int]:
+    db: AsyncSession,
+    school_id: int,
+    act_id: int,
+) -> tuple[list[dict], int]:
     result = await db.execute(
         select(ResearchActivityAgenda)
         .where(
@@ -417,26 +474,37 @@ async def list_agendas(
 
     items = []
     for r in rows:
-        items.append({
-            "id": r.id, "activity_id": r.activity_id,
-            "seq": r.seq, "title": r.title,
-            "presenter_id": r.presenter_id,
-            "presenter_name": name_map.get(r.presenter_id, f"用户{r.presenter_id}") if r.presenter_id else None,
-            "content": r.content,
-            "planned_duration": r.planned_duration,
-            "actual_duration": r.actual_duration,
-            "decision": r.decision, "status": r.status,
-            "linked_plan_id": r.linked_plan_id,
-            "linked_observation_id": r.linked_observation_id,
-            "created_at": r.created_at, "updated_at": r.updated_at,
-        })
+        items.append(
+            {
+                "id": r.id,
+                "activity_id": r.activity_id,
+                "seq": r.seq,
+                "title": r.title,
+                "presenter_id": r.presenter_id,
+                "presenter_name": name_map.get(r.presenter_id, f"用户{r.presenter_id}")
+                if r.presenter_id
+                else None,
+                "content": r.content,
+                "planned_duration": r.planned_duration,
+                "actual_duration": r.actual_duration,
+                "decision": r.decision,
+                "status": r.status,
+                "linked_plan_id": r.linked_plan_id,
+                "linked_observation_id": r.linked_observation_id,
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
+            }
+        )
     return items, len(items)
 
 
 async def update_agenda(
-    db: AsyncSession, school_id: int, act_id: int, agenda_id: int,
+    db: AsyncSession,
+    school_id: int,
+    act_id: int,
+    agenda_id: int,
     data: AgendaUpdate,
-) -> Optional[ResearchActivityAgenda]:
+) -> ResearchActivityAgenda | None:
     result = await db.execute(
         select(ResearchActivityAgenda).where(
             and_(
@@ -450,9 +518,17 @@ async def update_agenda(
     if not agenda:
         return None
 
-    for field in ["title", "presenter_id", "content", "planned_duration",
-                  "actual_duration", "decision", "status",
-                  "linked_plan_id", "linked_observation_id"]:
+    for field in [
+        "title",
+        "presenter_id",
+        "content",
+        "planned_duration",
+        "actual_duration",
+        "decision",
+        "status",
+        "linked_plan_id",
+        "linked_observation_id",
+    ]:
         val = getattr(data, field, None)
         if val is not None:
             setattr(agenda, field, val)
@@ -489,11 +565,15 @@ async def delete_agenda(db: AsyncSession, school_id: int, act_id: int, agenda_id
 # 教研活动看板统计
 # ═══════════════════════════════════════════════
 
+
 async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
-    total = (await db.execute(
-        select(func.count()).select_from(ResearchActivity)
-        .where(ResearchActivity.school_id == school_id)
-    )).scalar() or 0
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(ResearchActivity)
+            .where(ResearchActivity.school_id == school_id)
+        )
+    ).scalar() or 0
 
     # 按状态
     status_q = (
@@ -505,26 +585,35 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
     status_map = {row[0]: row[1] for row in status_rows}
 
     # 参与人次
-    total_participants = (await db.execute(
-        select(func.count()).select_from(ResearchActivityParticipant)
-        .where(ResearchActivityParticipant.school_id == school_id)
-    )).scalar() or 0
+    total_participants = (
+        await db.execute(
+            select(func.count())
+            .select_from(ResearchActivityParticipant)
+            .where(ResearchActivityParticipant.school_id == school_id)
+        )
+    ).scalar() or 0
 
     # 议题统计
-    total_agendas = (await db.execute(
-        select(func.count()).select_from(ResearchActivityAgenda)
-        .where(ResearchActivityAgenda.school_id == school_id)
-    )).scalar() or 0
+    total_agendas = (
+        await db.execute(
+            select(func.count())
+            .select_from(ResearchActivityAgenda)
+            .where(ResearchActivityAgenda.school_id == school_id)
+        )
+    ).scalar() or 0
 
-    resolved_agendas = (await db.execute(
-        select(func.count()).select_from(ResearchActivityAgenda)
-        .where(
-            and_(
-                ResearchActivityAgenda.school_id == school_id,
-                ResearchActivityAgenda.status == "resolved",
+    resolved_agendas = (
+        await db.execute(
+            select(func.count())
+            .select_from(ResearchActivityAgenda)
+            .where(
+                and_(
+                    ResearchActivityAgenda.school_id == school_id,
+                    ResearchActivityAgenda.status == "resolved",
+                )
             )
         )
-    )).scalar() or 0
+    ).scalar() or 0
 
     # 按类型
     type_q = (
@@ -593,10 +682,13 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
 # 辅助
 # ═══════════════════════════════════════════════
 
-def _activity_to_dict(activity: ResearchActivity, name_map: Dict[int, str]) -> dict:
+
+def _activity_to_dict(activity: ResearchActivity, name_map: dict[int, str]) -> dict:
     return {
-        "id": activity.id, "school_id": activity.school_id,
-        "title": activity.title, "description": activity.description,
+        "id": activity.id,
+        "school_id": activity.school_id,
+        "title": activity.title,
+        "description": activity.description,
         "activity_type": activity.activity_type,
         "subject_code": activity.subject_code,
         "grade_level": activity.grade_level,

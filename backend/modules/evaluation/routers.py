@@ -20,23 +20,29 @@ modules/evaluation/routers.py — 素质评价 API 端点
 """
 
 import logging
-from typing import Optional
-from datetime import datetime
 
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.routers import get_db, get_current_user, require_role
-from core.models import User, UserRole
-
 from .schemas import (
-    IndicatorCreate, IndicatorUpdate, IndicatorOut, IndicatorGroupedOut,
-    RuleUpdate, RuleOut,
-    ScoreCreate, ScoreOut, BatchScoreCreate, BatchScoreResult,
-    StudentScoreOut, ClassRankingOut,
-    ScoreLogOut, ScoreLogListOut,
-    MessageOut, SeedResultOut,
-    FinalEvaluationOut, DisciplineVetoOut,
+    BatchScoreCreate,
+    BatchScoreResult,
+    ClassRankingOut,
+    DisciplineVetoOut,
+    IndicatorCreate,
+    IndicatorGroupedOut,
+    IndicatorOut,
+    IndicatorUpdate,
+    MessageOut,
+    RuleOut,
+    RuleUpdate,
+    ScoreCreate,
+    ScoreLogListOut,
+    ScoreOut,
+    SeedResultOut,
+    StudentScoreOut,
 )
 from .services import EvaluationService
 
@@ -45,6 +51,7 @@ router = APIRouter(tags=["evaluation"])
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────
+
 
 def _format_score_log(log, student_name: str = "", creator_name: str = "") -> dict:
     """安全格式化评分日志"""
@@ -89,9 +96,10 @@ def _format_student_score(ss, student_name: str = "", student_no: str = "") -> d
 # 指标管理
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/indicators", response_model=list[IndicatorGroupedOut])
 async def list_indicators(
-    dimension: Optional[str] = Query(None, description="筛选维度: moral/academic/health/art/social"),
+    dimension: str | None = Query(None, description="筛选维度: moral/academic/health/art/social"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -110,7 +118,8 @@ async def create_indicator(
     """创建评价指标（德育处管理员）"""
     try:
         indicator = await EvaluationService.create_indicator(
-            db, current_user.school_id,
+            db,
+            current_user.school_id,
             name=body.name,
             parent_id=body.parent_id,
             dimension=body.dimension,
@@ -133,7 +142,9 @@ async def update_indicator(
 ):
     """更新评价指标"""
     indicator = await EvaluationService.update_indicator(
-        db, indicator_id, current_user.school_id,
+        db,
+        indicator_id,
+        current_user.school_id,
         **body.model_dump(exclude_none=True),
     )
     if not indicator:
@@ -176,6 +187,7 @@ async def delete_indicator(
 # 评分规则
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/rules", response_model=RuleOut)
 async def get_rules(
     db: AsyncSession = Depends(get_db),
@@ -196,7 +208,8 @@ async def update_rules(
     """更新评分规则（德育处管理员）"""
     try:
         rule = await EvaluationService.update_rules(
-            db, current_user.school_id,
+            db,
+            current_user.school_id,
             **body.model_dump(exclude_none=True),
         )
         return rule
@@ -207,6 +220,7 @@ async def update_rules(
 # ═══════════════════════════════════════════════════════════════
 # 评分录入
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/scores", response_model=ScoreOut, status_code=201)
 async def record_score(
@@ -283,12 +297,14 @@ async def batch_record_scores(
             )
             success += 1
         except Exception as e:
-            errors.append({
-                "index": i,
-                "student_id": sc.student_id,
-                "indicator_id": sc.indicator_id,
-                "error": str(e),
-            })
+            errors.append(
+                {
+                    "index": i,
+                    "student_id": sc.student_id,
+                    "indicator_id": sc.indicator_id,
+                    "error": str(e),
+                }
+            )
     return {"success": success, "failed": len(errors), "errors": errors}
 
 
@@ -296,10 +312,11 @@ async def batch_record_scores(
 # 学生查询
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/students/{student_id}/scores", response_model=StudentScoreOut)
 async def get_student_scores(
     student_id: int,
-    semester: Optional[str] = Query(None, description="学期，默认当前"),
+    semester: str | None = Query(None, description="学期，默认当前"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -341,7 +358,7 @@ async def get_student_scores(
 @router.get("/classes/{class_id}/ranking", response_model=ClassRankingOut)
 async def get_class_ranking(
     class_id: int,
-    semester: Optional[str] = Query(None, description="学期，默认当前"),
+    semester: str | None = Query(None, description="学期，默认当前"),
     limit: int = Query(50, ge=1, le=200, description="返回前 N 名"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -363,6 +380,7 @@ async def get_class_ranking(
 # 审计日志
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/students/{student_id}/logs", response_model=ScoreLogListOut)
 async def get_score_logs(
     student_id: int,
@@ -380,9 +398,8 @@ async def get_score_logs(
     creator_map = {}
     if creator_ids:
         from sqlalchemy import select as sa_select
-        r = await db.execute(
-            sa_select(User).where(User.id.in_(list(creator_ids)))
-        )
+
+        r = await db.execute(sa_select(User).where(User.id.in_(list(creator_ids))))
         for u in r.scalars().all():
             creator_map[u.id] = u.display_name or u.username
 
@@ -404,6 +421,7 @@ async def get_score_logs(
 # 种子数据
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post("/seed", response_model=SeedResultOut)
 async def seed_evaluation_data(
     db: AsyncSession = Depends(get_db),
@@ -424,10 +442,11 @@ async def seed_evaluation_data(
 # 处分强电桥接 — 期末综合评价 + 一票否决检查
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/students/{student_id}/final-evaluation")
 async def get_final_evaluation(
     student_id: int,
-    semester: Optional[str] = Query(None, description="学期，默认当前"),
+    semester: str | None = Query(None, description="学期，默认当前"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -452,7 +471,7 @@ async def get_final_evaluation(
 @router.get("/students/{student_id}/discipline-veto", response_model=DisciplineVetoOut)
 async def check_student_veto(
     student_id: int,
-    semester: Optional[str] = Query(None, description="学期，默认当前"),
+    semester: str | None = Query(None, description="学期，默认当前"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -468,11 +487,12 @@ async def check_student_veto(
 # 正向加分排行榜
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/ranking/positive")
 async def get_positive_score_ranking(
-    class_id: Optional[int] = Query(None, description="班级ID（不传则返回全校排名）"),
-    grade_id: Optional[int] = Query(None, description="年级ID"),
-    dimension: Optional[str] = Query(None, description="维度筛选（moral/academic/health/art/social）"),
+    class_id: int | None = Query(None, description="班级ID（不传则返回全校排名）"),
+    grade_id: int | None = Query(None, description="年级ID"),
+    dimension: str | None = Query(None, description="维度筛选（moral/academic/health/art/social）"),
     limit: int = Query(50, ge=1, le=200, description="返回记录数"),
     offset: int = Query(0, ge=0, description="偏移量"),
     db: AsyncSession = Depends(get_db),

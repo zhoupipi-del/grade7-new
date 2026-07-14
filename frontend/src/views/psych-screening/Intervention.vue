@@ -128,11 +128,10 @@
           </el-select>
         </el-form-item>
         <el-form-item label="风险等级">
-          <el-select v-model="createForm.severity" style="width: 100%">
+          <el-select v-model="createForm.mh_risk_before" style="width: 100%">
             <el-option label="低风险" value="low" />
             <el-option label="中风险" value="medium" />
             <el-option label="高风险" value="high" />
-            <el-option label="极高风险" value="critical" />
           </el-select>
         </el-form-item>
         <el-form-item label="干预类型">
@@ -140,11 +139,8 @@
             <el-option v-for="t in interventionTypes" :key="t.value" :label="t.label" :value="t.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="负责人">
-          <el-input v-model="createForm.assigned_to" placeholder="输入姓名" />
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="createForm.description" type="textarea" :rows="3" placeholder="干预措施详细描述" />
+        <el-form-item label="备注">
+          <el-input v-model="createForm.notes" type="textarea" :rows="3" placeholder="干预措施详细描述" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -164,14 +160,14 @@
       <el-form :model="followupForm" label-width="75px" label-position="left" style="margin-top: 16px">
         <el-form-item label="效果评定">
           <el-select v-model="followupForm.effect_rating" style="width: 100%">
-            <el-option label="好转" value="improved" />
-            <el-option label="稳定" value="stable" />
-            <el-option label="恶化" value="worsened" />
-            <el-option label="待观察" value="pending" />
+            <el-option label="显著好转" value="显著好转" />
+            <el-option label="略有好转" value="略有好转" />
+            <el-option label="无变化" value="无变化" />
+            <el-option label="恶化" value="恶化" />
           </el-select>
         </el-form-item>
         <el-form-item label="随访内容">
-          <el-input v-model="followupForm.content" type="textarea" :rows="4" placeholder="记录随访谈话内容..." />
+          <el-input v-model="followupForm.follow_up_notes" type="textarea" :rows="4" placeholder="记录随访谈话内容..." />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -220,18 +216,18 @@ const STATUS_LABELS: Record<string, string> = {
   pending: '待处理', tracking: '进行中', in_progress: '进行中', completed: '已完成', cancelled: '已取消',
 }
 const TYPE_LABELS: Record<string, string> = {
-  counseling: '心理咨询', parent_notify: '家长告知', crisis: '危机干预', referral: '转介', followup: '跟踪随访', other: '其他',
+  '心理谈话': '心理谈话', '家长联动': '家长联动', '心理辅导': '心理辅导', '危机干预': '危机干预', '转介专业机构': '转介专业机构', '其他': '其他',
 }
 const EFFECT_LABELS: Record<string, string> = {
-  improved: '好转', stable: '稳定', worsened: '恶化', pending: '待观察',
+  '显著好转': '显著好转', '略有好转': '略有好转', '无变化': '无变化', '恶化': '恶化',
 }
 const interventionTypes = [
-  { value: 'counseling', label: '心理咨询' },
-  { value: 'parent_notify', label: '家长告知' },
-  { value: 'crisis', label: '危机干预' },
-  { value: 'referral', label: '转介' },
-  { value: 'followup', label: '跟踪随访' },
-  { value: 'other', label: '其他' },
+  { value: '心理谈话', label: '心理谈话' },
+  { value: '家长联动', label: '家长联动' },
+  { value: '心理辅导', label: '心理辅导' },
+  { value: '危机干预', label: '危机干预' },
+  { value: '转介专业机构', label: '转介专业机构' },
+  { value: '其他', label: '其他' },
 ]
 
 const loading = ref(false)
@@ -250,7 +246,7 @@ const displayList = computed(() => {
 
 const stats = computed(() => {
   const all = interventions.value
-  const risk = all.filter(i => i.intervention_type === 'crisis' || i.mh_risk_before === 'high')
+  const risk = all.filter(i => i.intervention_type === '危机干预' || i.mh_risk_before === 'high')
   return {
     total: all.length,
     pending: all.filter(i => i.status === 'pending').length,
@@ -264,26 +260,25 @@ const createVisible = ref(false)
 const creating = ref(false)
 const createForm = ref({
   student_id: null as number | null,
-  severity: 'medium' as RiskLevel,
-  intervention_type: 'counseling' as InterventionType,
-  description: '',
-  assigned_to: '',
+  intervention_type: '心理谈话' as InterventionType,
+  notes: '',
+  mh_risk_before: 'medium',
 })
 const studentOptions = ref<any[]>([])
 const searchingStudent = ref(false)
 
 const followupVisible = ref(false)
 const followupSubmitting = ref(false)
-const followupForm = ref({ content: '', effect_rating: 'stable' as EffectRating })
+const followupForm = ref({ follow_up_notes: '', effect_rating: '无变化' as EffectRating })
 const currentItem = ref<any>(null)
 
 const timelineVisible = ref(false)
 const timeline = ref<any[]>([])
 
 function timelineColor(item: any) {
-  if (item.effect_rating === 'improved') return '#3fb950'
-  if (item.effect_rating === 'worsened') return '#f85149'
-  if (item.effect_rating === 'stable') return '#58a6ff'
+  if (item.effect_rating === '显著好转') return '#3fb950'
+  if (item.effect_rating === '恶化') return '#f85149'
+  if (item.effect_rating === '略有好转') return '#58a6ff'
   return '#d29922'
 }
 
@@ -305,7 +300,7 @@ async function searchStudents(query: string) {
   if (!query || query.length < 1) return
   searchingStudent.value = true
   try {
-    const res: any = await apiSearchStudents({ keyword: query })
+    const res: any = await apiSearchStudents({ q: query })
     studentOptions.value = res?.items || res || []
   } catch {} finally {
     searchingStudent.value = false
@@ -315,10 +310,9 @@ async function searchStudents(query: string) {
 function showCreateDialog() {
   createForm.value = {
     student_id: null,
-    severity: 'medium',
-    intervention_type: 'counseling',
-    description: '',
-    assigned_to: '',
+    intervention_type: '心理谈话',
+    notes: '',
+    mh_risk_before: 'medium',
   }
   studentOptions.value = []
   createVisible.value = true
@@ -328,7 +322,11 @@ async function doCreate() {
   if (!createForm.value.student_id) { ElMessage.warning('请选择学生'); return }
   creating.value = true
   try {
-    await createIntervention(createForm.value as any)
+    await createIntervention({
+      student_id: createForm.value.student_id,
+      intervention_type: createForm.value.intervention_type,
+      notes: createForm.value.notes,
+    })
     ElMessage.success('干预记录已创建')
     createVisible.value = false
     loadList()
@@ -339,12 +337,12 @@ async function doCreate() {
 
 function showFollowup(row: any) {
   currentItem.value = row
-  followupForm.value = { content: '', effect_rating: 'stable' }
+  followupForm.value = { follow_up_notes: '', effect_rating: '无变化' }
   followupVisible.value = true
 }
 
 async function doFollowup() {
-  if (!followupForm.value.content) { ElMessage.warning('请填写随访内容'); return }
+  if (!followupForm.value.follow_up_notes) { ElMessage.warning('请填写随访内容'); return }
   followupSubmitting.value = true
   try {
     await followupIntervention(currentItem.value.id, followupForm.value)
@@ -364,7 +362,7 @@ async function startIntervention(row: any) {
 
 async function completeIntervention(row: any) {
   try {
-    await followupIntervention(row.id, { content: '干预完成，效果需进一步评估', effect_rating: 'stable' })
+    await followupIntervention(row.id, { follow_up_notes: '干预完成，效果需进一步评估', effect_rating: '无变化' })
     ElMessage.success('干预已标记完成')
     loadList()
   } catch (e: any) {
@@ -522,10 +520,10 @@ onMounted(loadList)
 .badge-status.status-completed { background: rgba(63,185,80,0.12); color: #3fb950; border: 1px solid rgba(63,185,80,0.2); }
 .badge-status.status-cancelled { background: rgba(139,148,158,0.12); color: #8b949e; border: 1px solid rgba(139,148,158,0.2); }
 
-.effect-badge.effect-improved { background: rgba(63,185,80,0.12); color: #3fb950; border: 1px solid rgba(63,185,80,0.2); }
-.effect-badge.effect-stable { background: rgba(88,166,255,0.12); color: #58a6ff; border: 1px solid rgba(88,166,255,0.2); }
-.effect-badge.effect-worsened { background: rgba(248,81,73,0.12); color: #f85149; border: 1px solid rgba(248,81,73,0.2); }
-.effect-badge.effect-pending { background: rgba(210,153,34,0.12); color: #d29922; border: 1px solid rgba(210,153,34,0.2); }
+.effect-badge.effect-显著好转 { background: rgba(63,185,80,0.12); color: #3fb950; border: 1px solid rgba(63,185,80,0.2); }
+.effect-badge.effect-略有好转 { background: rgba(88,166,255,0.12); color: #58a6ff; border: 1px solid rgba(88,166,255,0.2); }
+.effect-badge.effect-恶化 { background: rgba(248,81,73,0.12); color: #f85149; border: 1px solid rgba(248,81,73,0.2); }
+.effect-badge.effect-无变化 { background: rgba(210,153,34,0.12); color: #d29922; border: 1px solid rgba(210,153,34,0.2); }
 
 .card-body { padding: 0 16px 12px; }
 .card-row {

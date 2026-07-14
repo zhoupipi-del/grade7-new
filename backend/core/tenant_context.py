@@ -14,22 +14,25 @@ core/tenant_context.py — 三级组织架构 TenantContext 中间件 + AccessSc
   - verify_entity_ownership 护城河不妥协 — 任何架构调整不破坏 18/18 PASS 安全基线
 """
 
-from typing import List, Optional, Any, Dict
-from enum import Enum
+from typing import Any
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import (
-    UserRole, ScopeType, School, Branch, Organization, CascadingConfig, User,
+    CascadingConfig,
+    School,
+    ScopeType,
+    User,
+    UserRole,
 )
-
 
 # ═══════════════════════════════════════════════════════════════
 # AccessScope — 用户可访问的 school_ids 列表
 # ═══════════════════════════════════════════════════════════════
 
-async def get_accessible_school_ids(user: User, db: AsyncSession) -> List[int]:
+
+async def get_accessible_school_ids(user: User, db: AsyncSession) -> list[int]:
     """
     根据用户角色和组织归属，计算该用户能访问的所有 school_ids。
 
@@ -87,7 +90,7 @@ async def get_accessible_school_ids(user: User, db: AsyncSession) -> List[int]:
 # ═══════════════════════════════════════════════════════════════
 
 # 模块默认配置兜底（当三级查找全部无命中时使用）
-DEFAULT_CONFIGS: Dict[str, Dict[str, Any]] = {
+DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
     "attendance": {"enabled": True, "auto_notify": True, "threshold_days": 5},
     "evaluation": {"enabled": True, "base_score": 100, "fallback_strategy": "base_score"},
     "discipline": {"enabled": True, "auto_escalation": True, "window_days": 30},
@@ -113,8 +116,8 @@ async def get_effective_config_with_source(
     module_key: str,
     school_id: int,
     db: AsyncSession,
-    branch_id: Optional[int] = None,
-    org_id: Optional[int] = None,
+    branch_id: int | None = None,
+    org_id: int | None = None,
 ) -> tuple:
     """
     级联配置查找链（带来源标识）— 优先级: School → Branch → Org → DEFAULT_CONFIG
@@ -126,9 +129,7 @@ async def get_effective_config_with_source(
     """
     # ── 自动补齐 org_id/branch_id ──
     if branch_id is None or org_id is None:
-        school = await db.execute(
-            select(School).where(School.id == school_id)
-        )
+        school = await db.execute(select(School).where(School.id == school_id))
         school_obj = school.scalar_one_or_none()
         if school_obj:
             if branch_id is None:
@@ -192,9 +193,9 @@ async def get_effective_config(
     module_key: str,
     school_id: int,
     db: AsyncSession,
-    branch_id: Optional[int] = None,
-    org_id: Optional[int] = None,
-) -> Dict[str, Any]:
+    branch_id: int | None = None,
+    org_id: int | None = None,
+) -> dict[str, Any]:
     """
     级联配置查找链 — 优先级: School → Branch → Org → DEFAULT_CONFIG
 
@@ -206,15 +207,14 @@ async def get_effective_config(
 
     如果 branch_id/org_id 未传入，自动从 School 表反查。
     """
-    config, _ = await get_effective_config_with_source(
-        module_key, school_id, db, branch_id, org_id
-    )
+    config, _ = await get_effective_config_with_source(module_key, school_id, db, branch_id, org_id)
     return config
 
 
 # ═══════════════════════════════════════════════════════════════
 # TenantContext — 请求级上下文注入
 # ═══════════════════════════════════════════════════════════════
+
 
 class TenantContext:
     """
@@ -236,12 +236,12 @@ class TenantContext:
       - WHERE school_id IN access_scope 等价于 WHERE school_id = :id
     """
 
-    def __init__(self, user: User, access_scope: List[int], db: AsyncSession):
+    def __init__(self, user: User, access_scope: list[int], db: AsyncSession):
         self.user = user
         self.access_scope = access_scope
         self.db = db
 
-    async def get_config(self, module_key: str) -> Dict[str, Any]:
+    async def get_config(self, module_key: str) -> dict[str, Any]:
         """快捷方法: 获取当前用户所在学校的级联配置"""
         return await get_effective_config(
             module_key=module_key,
@@ -278,7 +278,8 @@ async def build_tenant_context(user: User, db: AsyncSession) -> TenantContext:
 # 辅助函数 — 面向 Service 层的 scope 查询生成器
 # ═══════════════════════════════════════════════════════════════
 
-def build_scope_filter(model_class, access_scope: List[int]):
+
+def build_scope_filter(model_class, access_scope: list[int]):
     """
     根据 access_scope 生成 SQLAlchemy WHERE 条件。
 

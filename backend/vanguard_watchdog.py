@@ -11,17 +11,21 @@ vanguard_watchdog.py — 先遣队 D2 瞭望哨
 """
 
 import subprocess
-import sys
 from datetime import datetime
 
-DB_CMD = "docker exec grade7-new-db mysql -ugrade7 -p'waOPKoyFf4ByQD1h' wings3 -N -e"
+from core.db_utils import get_db_password
+
+DB_PASSWORD = get_db_password()
+DB_CMD = f"docker exec grade7-new-db mysql -ugrade7 -p'{DB_PASSWORD}' wings3 -N -e"
 
 
 def ssh_query(sql):
     """通过 SSH 执行 SQL，返回 stdout"""
     result = subprocess.run(
-        ['ssh', 'root@8.137.180.152', f'{DB_CMD} "{sql}"'],
-        capture_output=True, text=True, timeout=15
+        ["ssh", "root@8.137.180.152", f'{DB_CMD} "{sql}"'],
+        capture_output=True,
+        text=True,
+        timeout=15,
     )
     return result.stdout.strip()
 
@@ -29,20 +33,19 @@ def ssh_query(sql):
 def ssh_cmd(cmd):
     """执行 SSH 命令"""
     result = subprocess.run(
-        ['ssh', 'root@8.137.180.152', cmd],
-        capture_output=True, text=True, timeout=10
+        ["ssh", "root@8.137.180.152", cmd], capture_output=True, text=True, timeout=10
     )
     return result.stdout.strip()
 
 
 def section(title):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {title}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def main():
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"\n🐕 先遣队 D2 瞭望哨 · {now}")
 
     # ═══ 1. 系统健康度 ═══
@@ -51,7 +54,9 @@ def main():
     flask = ssh_cmd("systemctl is-active grade7-new")
     celery = ssh_cmd("systemctl is-active wings3-celery 2>/dev/null || echo 'N/A'")
     redis = ssh_cmd("docker exec grade7-redis redis-cli ping 2>/dev/null || echo 'PONG'")
-    mysql = ssh_cmd("docker exec grade7-new-db mysqladmin -ugrade7 -p'waOPKoyFf4ByQD1h' ping 2>/dev/null || echo 'mysqld is alive'")
+    mysql = ssh_cmd(
+        f"docker exec grade7-new-db mysqladmin -ugrade7 -p'{DB_PASSWORD}' ping 2>/dev/null || echo 'mysqld is alive'"
+    )
 
     print(f"  wings3 (FastAPI):     {wings3}")
     print(f"  grade7-new (Flask):   {flask}")
@@ -61,9 +66,15 @@ def main():
 
     # ═══ 2. 滑窗Hook触发状态 ═══
     section("2. 滑窗Hook触发状态")
-    draft_cnt = ssh_query("SELECT COUNT(*) FROM discipline_sanctions WHERE school_id=1 AND status='DRAFT_PENDING';")
-    active_cnt = ssh_query("SELECT COUNT(*) FROM discipline_sanctions WHERE school_id=1 AND status='ACTIVE';")
-    revoked_cnt = ssh_query("SELECT COUNT(*) FROM discipline_sanctions WHERE school_id=1 AND status='REVOKED';")
+    draft_cnt = ssh_query(
+        "SELECT COUNT(*) FROM discipline_sanctions WHERE school_id=1 AND status='DRAFT_PENDING';"
+    )
+    active_cnt = ssh_query(
+        "SELECT COUNT(*) FROM discipline_sanctions WHERE school_id=1 AND status='ACTIVE';"
+    )
+    revoked_cnt = ssh_query(
+        "SELECT COUNT(*) FROM discipline_sanctions WHERE school_id=1 AND status='REVOKED';"
+    )
 
     # 30天内serious>=3的红线候选
     candidates = ssh_query(
@@ -113,8 +124,12 @@ def main():
 
     # ═══ 5. 错误日志扫描 ═══
     section("5. 错误日志扫描（近5分钟）")
-    wings3_err = ssh_cmd("journalctl -u wings3 --no-pager --since '5 minutes ago' | grep -icE 'error|traceback' | head -1 || echo 0")
-    flask_err = ssh_cmd("journalctl -u grade7-new --no-pager --since '5 minutes ago' | grep -icE 'error|traceback|500' | head -1 || echo 0")
+    wings3_err = ssh_cmd(
+        "journalctl -u wings3 --no-pager --since '5 minutes ago' | grep -icE 'error|traceback' | head -1 || echo 0"
+    )
+    flask_err = ssh_cmd(
+        "journalctl -u grade7-new --no-pager --since '5 minutes ago' | grep -icE 'error|traceback|500' | head -1 || echo 0"
+    )
     wings3_err = int(wings3_err.strip() or 0)
     flask_err = int(flask_err.strip() or 0)
     print(f"  wings3 错误数:    {wings3_err}")
@@ -122,9 +137,11 @@ def main():
 
     # ═══ 6. 资源占用 ═══
     section("6. 资源占用")
-    cpu_mem = ssh_cmd("ps aux | grep -E 'uvicorn|gunicorn|celery' | grep -v grep | awk '{print $3, $4, $11, $12}' | head -6")
+    cpu_mem = ssh_cmd(
+        "ps aux | grep -E 'uvicorn|gunicorn|celery' | grep -v grep | awk '{print $3, $4, $11, $12}' | head -6"
+    )
     disk = ssh_cmd("df -h / | tail -1 | awk '{print $5}'")
-    print(f"  进程 CPU% MEM%:")
+    print("  进程 CPU% MEM%:")
     for line in cpu_mem.splitlines():
         print(f"    {line}")
     print(f"  磁盘使用率:       {disk}")
@@ -132,10 +149,14 @@ def main():
     # ═══ 结论 ═══
     section("瞭望哨结论")
     issues = []
-    if wings3 != 'active': issues.append('wings3 未运行')
-    if flask != 'active': issues.append('grade7-new 未运行')
-    if int(wings3_err or 0) > 0: issues.append(f'wings3 有 {wings3_err} 条错误')
-    if int(flask_err or 0) > 0: issues.append(f'flask 有 {flask_err} 条错误')
+    if wings3 != "active":
+        issues.append("wings3 未运行")
+    if flask != "active":
+        issues.append("grade7-new 未运行")
+    if int(wings3_err or 0) > 0:
+        issues.append(f"wings3 有 {wings3_err} 条错误")
+    if int(flask_err or 0) > 0:
+        issues.append(f"flask 有 {flask_err} 条错误")
 
     if not issues:
         print("  ✅ 全系统绿灯，前线数据正常滚动")
@@ -145,5 +166,5 @@ def main():
             print(f"    - {i}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

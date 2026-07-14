@@ -14,6 +14,8 @@ MODULE_NAME = "素质评价引擎"
 MODULE_CATEGORY = "evaluation"
 MODULE_DEPENDENCIES = []  # 核心依赖 core 已默认加载
 
+
 def register(router_prefix="/api/v1/evaluation"):
     from modules.evaluation.routers import router
+
     return router, router_prefix

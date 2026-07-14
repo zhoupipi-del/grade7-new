@@ -21,31 +21,25 @@ modules/risk_models/services.py — 四维风险预警雷达核心业务逻辑 (
   Phase 9: 推荐处置
 """
 
-import logging
-import time
-from datetime import datetime, date, timedelta
-from typing import Optional, List, Tuple, Dict
-from collections import defaultdict
-import math
 import json
+import logging
+import math
+import time
+from datetime import date, datetime, timedelta
 
-from sqlalchemy import select, func, and_, or_, case, cast, Float, text
-from sqlalchemy.orm import selectinload
+# 导入 PolicyEngine 读取配置
+from core.models import Class, Student, get_local_now
+from modules.attendance.models import AttendanceRecord
+from modules.behavior.models import DisciplineRecord
+from modules.evaluation.models import StudentScore
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
-    RiskWarning, WarningFeedback, RiskBaseline,
-    PsychSurvey, MentalHealthAssessment, PsychCrossAnalysis,
+    PsychSurvey,
+    RiskBaseline,
+    RiskWarning,
 )
-from core.models import Student, Class, Grade, User, UserRole
-from core.models import Base, SchoolMixin, get_local_now
-from modules.behavior.models import DisciplineRecord
-from modules.attendance.models import AttendanceRecord
-from modules.evaluation.models import StudentScore
-
-# 导入 PolicyEngine 读取配置
-import yaml
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +52,7 @@ def get_local_now() -> datetime:
 def load_policy_config() -> dict:
     """加载 policy.yaml 配置 (委托给模块级单例缓存，消除每请求磁盘 I/O)"""
     from .policy_cache import get_policy_config
+
     return get_policy_config()
 
 
@@ -127,7 +122,9 @@ class RiskDeviationIndexCalculator:
         self.min_rdi_to_warn = suppression.get("min_rdi_to_warn", 1.0)
         self.max_warnings_per_day = suppression.get("max_warnings_per_day", 3)
         self.suppress_repeated_warnings = suppression.get("suppress_repeated_warnings", True)
-        self.repeated_warning_cooldown_hours = suppression.get("repeated_warning_cooldown_hours", 48)
+        self.repeated_warning_cooldown_hours = suppression.get(
+            "repeated_warning_cooldown_hours", 48
+        )
 
     def _load_psych_config(self):
         """加载心理维度计算配置 (v3.1)"""
@@ -185,7 +182,7 @@ class RiskDeviationIndexCalculator:
         include_trend: bool = True,
         suppress_low_rdi: bool = True,
         include_psych: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """
         计算学生四维 RDI 风险偏离指数 (v3.1 9 Phase 流水线)
 
@@ -239,12 +236,15 @@ class RiskDeviationIndexCalculator:
             ewma_trend, is_escalating = await self._fetch_ewma_trend(student_id)
 
         # ── Phase 4: 四维复合 RDI 计算 ──
-        weights = self.policy.get("risk_warning", {}).get("rdi_weights", {
-            "behavior": 0.45,
-            "attendance": 0.15,
-            "score": 0.20,
-            "psych": 0.20,
-        })
+        weights = self.policy.get("risk_warning", {}).get(
+            "rdi_weights",
+            {
+                "behavior": 0.45,
+                "attendance": 0.15,
+                "score": 0.20,
+                "psych": 0.20,
+            },
+        )
 
         behavior_contribution = weights["behavior"] * behavior_dev["z_score"]
         attendance_contribution = weights["attendance"] * attendance_dev["z_score"]
@@ -345,9 +345,7 @@ class RiskDeviationIndexCalculator:
             suppression_reason = ""
 
         # ── Phase 9: 推荐处置动作 ──
-        recommended_action = self._recommend_action(
-            risk_level, is_escalating, psych_veto_triggered
-        )
+        recommended_action = self._recommend_action(risk_level, is_escalating, psych_veto_triggered)
 
         total_elapsed_ms = (time.time() - start_total) * 1000
         logger.info(
@@ -371,7 +369,9 @@ class RiskDeviationIndexCalculator:
             "attendance_rate": attendance_dev["raw_rate"],
             "score_avg": score_dev["raw_avg"],
             "psych_raw_z_total": round(psych_dev["z_total"], 4) if psych_dev["z_total"] else None,
-            "psych_raw_max_dim": round(psych_dev["z_max_dim"], 4) if psych_dev["z_max_dim"] else None,
+            "psych_raw_max_dim": round(psych_dev["z_max_dim"], 4)
+            if psych_dev["z_max_dim"]
+            else None,
             "behavior_baseline_mean": behavior_dev["baseline_mean"],
             "behavior_baseline_std": behavior_dev["baseline_std"],
             "attendance_baseline_mean": attendance_dev["baseline_mean"],
@@ -395,7 +395,7 @@ class RiskDeviationIndexCalculator:
     # Phase 2 NEW: 心理维度获取 (极端维度驱动模型)
     # ==========================================================================
 
-    async def _fetch_psych_deviation(self, student_id: int) -> Dict:
+    async def _fetch_psych_deviation(self, student_id: int) -> dict:
         """
         获取心理维度偏离度 — 极端维度驱动模型 (v3.1)
 
@@ -437,14 +437,16 @@ class RiskDeviationIndexCalculator:
         try:
             # 1. 获取 psych 基线 (ETL 已初始化 398 条)
             baseline_result = await self._execute_with_latency_monitor(
-                select(RiskBaseline.mean_value, RiskBaseline.std_value).where(
+                select(RiskBaseline.mean_value, RiskBaseline.std_value)
+                .where(
                     and_(
                         RiskBaseline.student_id == student_id,
                         RiskBaseline.baseline_type == "psych",
                         RiskBaseline.school_id == self.school_id,
                     )
-                ).limit(1),
-                "fetch_psych_baseline"
+                )
+                .limit(1),
+                "fetch_psych_baseline",
             )
             baseline_row = baseline_result.first()
 
@@ -462,15 +464,18 @@ class RiskDeviationIndexCalculator:
 
             # 2. 查询最新心理问卷的 dimension_scores (10维JSON)
             survey_result = await self._execute_with_latency_monitor(
-                select(PsychSurvey.dimension_scores, PsychSurvey.total_score).where(
+                select(PsychSurvey.dimension_scores, PsychSurvey.total_score)
+                .where(
                     and_(
                         PsychSurvey.student_id == student_id,
                         PsychSurvey.school_id == self.school_id,
                         PsychSurvey.is_valid == True,  # noqa: E712
                         PsychSurvey.dimension_scores.isnot(None),
                     )
-                ).order_by(PsychSurvey.completed_at.desc()).limit(1),
-                "fetch_psych_survey_dims"
+                )
+                .order_by(PsychSurvey.completed_at.desc())
+                .limit(1),
+                "fetch_psych_survey_dims",
             )
             survey_row = survey_result.first()
 
@@ -573,7 +578,7 @@ class RiskDeviationIndexCalculator:
                         RiskWarning.warned_at >= protection_start,
                     )
                 ),
-                "check_backslide_protection"
+                "check_backslide_protection",
             )
             intervention_count = result.scalar() or 0
 
@@ -595,7 +600,7 @@ class RiskDeviationIndexCalculator:
         student_id: int,
         window_short: int,
         window_medium: int,
-    ) -> Dict:
+    ) -> dict:
         """SQL查询1: 一次性获取学生信息 + 三维度偏差数据"""
         # 计算时间窗口
         short_start = date.today() - timedelta(days=window_short)
@@ -608,9 +613,7 @@ class RiskDeviationIndexCalculator:
                 Student.school_id == self.school_id,
             )
         )
-        student_result = await self._execute_with_latency_monitor(
-            student_query, "fetch_student"
-        )
+        student_result = await self._execute_with_latency_monitor(student_query, "fetch_student")
         student = student_result.scalar_one_or_none()
 
         if not student:
@@ -625,7 +628,7 @@ class RiskDeviationIndexCalculator:
                     DisciplineRecord.incident_date >= short_start,
                 )
             ),
-            "fetch_behavior_count"
+            "fetch_behavior_count",
         )
         behavior_short_count = behavior_count_result.scalar() or 0
 
@@ -652,10 +655,10 @@ class RiskDeviationIndexCalculator:
                     func.avg(
                         case(
                             (AttendanceRecord.status.in_(["late", "absent", "early"]), 1.0),
-                            else_=0.0
+                            else_=0.0,
                         )
                     ),
-                    0.0
+                    0.0,
                 )
             ).where(
                 and_(
@@ -664,7 +667,7 @@ class RiskDeviationIndexCalculator:
                     AttendanceRecord.record_date >= short_start,
                 )
             ),
-            "fetch_attendance_rate"
+            "fetch_attendance_rate",
         )
         attendance_short_rate = float(attendance_rate_result.scalar() or 0.0)
 
@@ -686,13 +689,16 @@ class RiskDeviationIndexCalculator:
 
         # === 4. 计算评价维度偏离 (Z-Score) ===
         score_result = await self._execute_with_latency_monitor(
-            select(StudentScore.total_score).where(
+            select(StudentScore.total_score)
+            .where(
                 and_(
                     StudentScore.student_id == student_id,
                     StudentScore.school_id == self.school_id,
                 )
-            ).order_by(StudentScore.updated_at.desc()).limit(1),
-            "fetch_score"
+            )
+            .order_by(StudentScore.updated_at.desc())
+            .limit(1),
+            "fetch_score",
         )
         score_short_avg = score_result.scalar()
         if score_short_avg is None:
@@ -725,18 +731,21 @@ class RiskDeviationIndexCalculator:
     # Phase 3: EWMA 趋势检测 (原逻辑保持不变)
     # ==========================================================================
 
-    async def _fetch_ewma_trend(self, student_id: int) -> Tuple[float, bool]:
+    async def _fetch_ewma_trend(self, student_id: int) -> tuple[float, bool]:
         """获取历史 RDI 序列，计算 EWMA 趋势"""
         lambda_param = 0.3
 
         result = await self._execute_with_latency_monitor(
-            select(RiskWarning.rdi_score).where(
+            select(RiskWarning.rdi_score)
+            .where(
                 and_(
                     RiskWarning.student_id == student_id,
                     RiskWarning.school_id == self.school_id,
                 )
-            ).order_by(RiskWarning.warned_at.asc()).limit(20),
-            "fetch_ewma_trend"
+            )
+            .order_by(RiskWarning.warned_at.asc())
+            .limit(20),
+            "fetch_ewma_trend",
         )
         historical_rdi = [float(row[0]) for row in result.all()]
 
@@ -762,11 +771,14 @@ class RiskDeviationIndexCalculator:
 
     def _determine_risk_level(self, rdi_score: float, is_escalating: bool) -> str:
         """三级预警判定"""
-        risk_levels = self.policy.get("risk_warning", {}).get("risk_levels", {
-            "normal": {"max_rdi": 1.0},
-            "attention": {"min_rdi": 1.0, "max_rdi": 2.0},
-            "intervention": {"min_rdi": 2.0},
-        })
+        risk_levels = self.policy.get("risk_warning", {}).get(
+            "risk_levels",
+            {
+                "normal": {"max_rdi": 1.0},
+                "attention": {"min_rdi": 1.0, "max_rdi": 2.0},
+                "intervention": {"min_rdi": 2.0},
+            },
+        )
 
         if rdi_score < risk_levels["attention"]["min_rdi"]:
             return "normal"
@@ -776,9 +788,8 @@ class RiskDeviationIndexCalculator:
             return "intervention"
 
     def _recommend_action(
-        self, risk_level: str, is_escalating: bool,
-        psych_veto_triggered: bool = False
-    ) -> Optional[str]:
+        self, risk_level: str, is_escalating: bool, psych_veto_triggered: bool = False
+    ) -> str | None:
         """推荐处置动作 (v3.1: 新增心理一票否决专属处置)"""
         actions = self.policy.get("risk_warning", {}).get("configured_actions", {})
 
@@ -804,7 +815,7 @@ class RiskDeviationIndexCalculator:
 
     async def _get_or_create_baseline(
         self, student_id: int, baseline_type: str, window_days: int
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """获取或创建基线 (均值, 标准差)"""
         baseline_query = select(RiskBaseline).where(
             and_(
@@ -829,10 +840,8 @@ class RiskDeviationIndexCalculator:
 
         # 冷启动检测
         count_result = await self._execute_with_latency_monitor(
-            select(func.count(RiskBaseline.id)).where(
-                RiskBaseline.school_id == self.school_id
-            ),
-            "cold_start_check"
+            select(func.count(RiskBaseline.id)).where(RiskBaseline.school_id == self.school_id),
+            "cold_start_check",
         )
         total_baselines = count_result.scalar() or 0
 
@@ -841,9 +850,7 @@ class RiskDeviationIndexCalculator:
                 f"🔥 冷启动检测: risk_baselines 表为空 (school_id={self.school_id})，"
                 f"触发全量预热 (window={window_days}天)..."
             )
-            warmup_result = await self.warmup_all_baselines(
-                self.db, self.school_id, window_days
-            )
+            warmup_result = await self.warmup_all_baselines(self.db, self.school_id, window_days)
             logger.info(f"🔥 全量预热完成: {warmup_result}")
 
             refetch_result = await self._execute_with_latency_monitor(
@@ -853,15 +860,13 @@ class RiskDeviationIndexCalculator:
             if baseline:
                 return baseline.mean_value, baseline.std_value
 
-        logger.info(f"🔄 计算新基线: student_id={student_id}, type={baseline_type}, window={window_days}")
-
-        mean_value, std_value = await self._compute_baseline(
-            student_id, baseline_type, window_days
+        logger.info(
+            f"🔄 计算新基线: student_id={student_id}, type={baseline_type}, window={window_days}"
         )
 
-        student = await self.db.scalar(
-            select(Student).where(Student.id == student_id)
-        )
+        mean_value, std_value = await self._compute_baseline(student_id, baseline_type, window_days)
+
+        student = await self.db.scalar(select(Student).where(Student.id == student_id))
         class_id = student.class_id if student else 1
 
         new_baseline = RiskBaseline(
@@ -880,19 +885,19 @@ class RiskDeviationIndexCalculator:
         return mean_value, std_value
 
     @staticmethod
-    async def warmup_all_baselines(
-        db: AsyncSession, school_id: int, window_days: int = 30
-    ) -> Dict:
+    async def warmup_all_baselines(db: AsyncSession, school_id: int, window_days: int = 30) -> dict:
         """冷启动批量预热 — 为全校学生计算并存储风险基线"""
         start_ts = time.time()
 
         existing_result = await db.execute(
-            select(RiskBaseline.student_id).where(
+            select(RiskBaseline.student_id)
+            .where(
                 and_(
                     RiskBaseline.school_id == school_id,
                     RiskBaseline.window_days == window_days,
                 )
-            ).distinct()
+            )
+            .distinct()
         )
         existing_student_ids = {row[0] for row in existing_result.fetchall()}
 
@@ -931,19 +936,19 @@ class RiskDeviationIndexCalculator:
         for student_id, class_id in students_to_compute:
             try:
                 for btype in baseline_types:
-                    mean_val, std_val = await calc._compute_baseline(
-                        student_id, btype, window_days
+                    mean_val, std_val = await calc._compute_baseline(student_id, btype, window_days)
+                    new_baselines.append(
+                        RiskBaseline(
+                            school_id=school_id,
+                            student_id=student_id,
+                            class_id=class_id or 1,
+                            baseline_type=btype,
+                            window_days=window_days,
+                            mean_value=mean_val,
+                            std_value=std_value,
+                            sample_size=window_days,
+                        )
                     )
-                    new_baselines.append(RiskBaseline(
-                        school_id=school_id,
-                        student_id=student_id,
-                        class_id=class_id or 1,
-                        baseline_type=btype,
-                        window_days=window_days,
-                        mean_value=mean_val,
-                        std_value=std_value,
-                        sample_size=window_days,
-                    ))
                 computed += 1
             except Exception as e:
                 logger.warning(f"基线计算失败 student_id={student_id}: {e}")
@@ -970,7 +975,7 @@ class RiskDeviationIndexCalculator:
 
     async def _compute_baseline(
         self, student_id: int, baseline_type: str, window_days: int
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """计算基线 (均值, 标准差)"""
         start_date = date.today() - timedelta(days=window_days)
 
@@ -983,7 +988,7 @@ class RiskDeviationIndexCalculator:
                         DisciplineRecord.incident_date >= start_date,
                     )
                 ),
-                f"compute_baseline_{baseline_type}"
+                f"compute_baseline_{baseline_type}",
             )
             total = result.scalar() or 0
             daily_avg = total / max(window_days, 1)
@@ -997,10 +1002,10 @@ class RiskDeviationIndexCalculator:
                         func.avg(
                             case(
                                 (AttendanceRecord.status.in_(["late", "absent", "early"]), 1.0),
-                                else_=0.0
+                                else_=0.0,
                             )
                         ),
-                        0.0
+                        0.0,
                     )
                 ).where(
                     and_(
@@ -1009,7 +1014,7 @@ class RiskDeviationIndexCalculator:
                         AttendanceRecord.record_date >= start_date,
                     )
                 ),
-                f"compute_baseline_{baseline_type}"
+                f"compute_baseline_{baseline_type}",
             )
             mean_val = float(result.scalar() or 0.0)
             std = math.sqrt(mean_val * (1 - mean_val)) if 0 < mean_val < 1 else 0.1
@@ -1026,7 +1031,7 @@ class RiskDeviationIndexCalculator:
                         StudentScore.school_id == self.school_id,
                     )
                 ),
-                f"compute_baseline_{baseline_type}"
+                f"compute_baseline_{baseline_type}",
             )
             row = result.one_or_none()
             if row and row[0] is not None:
@@ -1045,6 +1050,7 @@ class RiskDeviationIndexCalculator:
 # RiskWarningService — 四维版 (v3.1)
 # =============================================================================
 
+
 class RiskWarningService:
     """风险预警服务 — CRUD + 批量计算 (v3.1 四维版)"""
 
@@ -1052,16 +1058,14 @@ class RiskWarningService:
     async def create_warning(
         db: AsyncSession,
         school_id: int,
-        rdi_result: Dict,
-        trigger_event_type: Optional[str] = None,
-        trigger_event_id: Optional[int] = None,
+        rdi_result: dict,
+        trigger_event_type: str | None = None,
+        trigger_event_id: int | None = None,
     ) -> RiskWarning:
         """创建风险预警记录 — 四维版 (v3.1: 新增 psych_deviation + veto 字段)"""
         # 查询 Student 获取真实班级/年级
         student_result = await db.execute(
-            select(Student.class_id, Student.grade_id).where(
-                Student.id == rdi_result["student_id"]
-            )
+            select(Student.class_id, Student.grade_id).where(Student.id == rdi_result["student_id"])
         )
         row = student_result.first()
         if not row:
@@ -1098,9 +1102,9 @@ class RiskWarningService:
     async def get_dashboard(
         db: AsyncSession,
         school_id: int,
-        class_id: Optional[int] = None,
-        grade_id: Optional[int] = None,
-    ) -> Dict:
+        class_id: int | None = None,
+        grade_id: int | None = None,
+    ) -> dict:
         """获取风险看板数据"""
         return {
             "total_students": 0,
@@ -1116,6 +1120,7 @@ class RiskWarningService:
 # RiskMonitorService — 四维版 (v3.1)
 # =============================================================================
 
+
 class RiskMonitorService:
     """
     风险监控面板服务 — 黄/红预警学生实时监控 (v3.1 四维版)
@@ -1128,7 +1133,9 @@ class RiskMonitorService:
 
     @staticmethod
     def _determine_top_dimension(
-        behavior_dev: float, attendance_dev: float, score_dev: float,
+        behavior_dev: float,
+        attendance_dev: float,
+        score_dev: float,
         psych_dev: float = 0.0,
     ) -> str:
         """确定偏离最大的维度 (四维版)"""
@@ -1144,9 +1151,9 @@ class RiskMonitorService:
     async def get_monitor_panel(
         db: AsyncSession,
         school_id: int,
-        class_id: Optional[int] = None,
-        grade_id: Optional[int] = None,
-    ) -> Dict:
+        class_id: int | None = None,
+        grade_id: int | None = None,
+    ) -> dict:
         """获取风险监控面板数据 (四维版)"""
         now = get_local_now()
 
@@ -1197,7 +1204,7 @@ class RiskMonitorService:
         students = []
         yellow_count = 0
         red_count = 0
-        class_stats: Dict[int, Dict] = {}
+        class_stats: dict[int, dict] = {}
 
         for rw, s_name, s_no, c_name, g_id in rows:
             risk_color = "red" if rw.risk_level == "intervention" else "yellow"
@@ -1228,31 +1235,33 @@ class RiskMonitorService:
             else:
                 rec_action = "monitor"
 
-            students.append({
-                "student_id": rw.student_id,
-                "student_name": s_name or f"学生{rw.student_id}",
-                "student_no": s_no,
-                "class_id": rw.class_id,
-                "class_name": c_name,
-                "grade_id": g_id or rw.grade_id,
-                "rdi_score": round(rw.rdi_score, 2),
-                "risk_level": rw.risk_level,
-                "risk_color": risk_color,
-                "behavior_deviation": round(rw.behavior_deviation or 0.0, 2),
-                "attendance_deviation": round(rw.attendance_deviation or 0.0, 2),
-                "score_deviation": round(rw.score_deviation or 0.0, 2),
-                "psych_deviation": round(getattr(rw, "psych_deviation", 0.0) or 0.0, 2),
-                "top_dimension": top_dim,
-                "psych_veto_triggered": getattr(rw, "psych_veto_triggered", False) or False,
-                "veto_dimension": getattr(rw, "veto_dimension", None),
-                "is_escalating": rw.is_escalating or False,
-                "ewma_trend": round(rw.ewma_trend or 0.0, 2),
-                "latest_warning_id": rw.id,
-                "latest_warning_status": rw.status,
-                "warned_at": rw.warned_at,
-                "days_since_warning": days_since,
-                "recommended_action": rec_action,
-            })
+            students.append(
+                {
+                    "student_id": rw.student_id,
+                    "student_name": s_name or f"学生{rw.student_id}",
+                    "student_no": s_no,
+                    "class_id": rw.class_id,
+                    "class_name": c_name,
+                    "grade_id": g_id or rw.grade_id,
+                    "rdi_score": round(rw.rdi_score, 2),
+                    "risk_level": rw.risk_level,
+                    "risk_color": risk_color,
+                    "behavior_deviation": round(rw.behavior_deviation or 0.0, 2),
+                    "attendance_deviation": round(rw.attendance_deviation or 0.0, 2),
+                    "score_deviation": round(rw.score_deviation or 0.0, 2),
+                    "psych_deviation": round(getattr(rw, "psych_deviation", 0.0) or 0.0, 2),
+                    "top_dimension": top_dim,
+                    "psych_veto_triggered": getattr(rw, "psych_veto_triggered", False) or False,
+                    "veto_dimension": getattr(rw, "veto_dimension", None),
+                    "is_escalating": rw.is_escalating or False,
+                    "ewma_trend": round(rw.ewma_trend or 0.0, 2),
+                    "latest_warning_id": rw.id,
+                    "latest_warning_status": rw.status,
+                    "warned_at": rw.warned_at,
+                    "days_since_warning": days_since,
+                    "recommended_action": rec_action,
+                }
+            )
 
             cid = rw.class_id
             if cid not in class_stats:
@@ -1265,9 +1274,7 @@ class RiskMonitorService:
             class_stats[cid][risk_color] += 1
 
         # Step 4: 获取全校扫描总数
-        total_scanned_query = select(func.count(Student.id)).where(
-            Student.school_id == school_id
-        )
+        total_scanned_query = select(func.count(Student.id)).where(Student.school_id == school_id)
         if class_id is not None:
             total_scanned_query = total_scanned_query.where(Student.class_id == class_id)
         if grade_id is not None:
@@ -1276,11 +1283,11 @@ class RiskMonitorService:
         total_result = await db.execute(total_scanned_query)
         total_students = total_result.scalar() or 0
 
-        class_breakdown = sorted(class_stats.values(), key=lambda x: x["red"] * 100 + x["yellow"], reverse=True)
-
-        logger.info(
-            f"📊 四维监控面板: 扫描{total_students}人, 🟡{yellow_count}人, 🔴{red_count}人"
+        class_breakdown = sorted(
+            class_stats.values(), key=lambda x: x["red"] * 100 + x["yellow"], reverse=True
         )
+
+        logger.info(f"📊 四维监控面板: 扫描{total_students}人, 🟡{yellow_count}人, 🔴{red_count}人")
 
         return {
             "total_students_scanned": total_students,

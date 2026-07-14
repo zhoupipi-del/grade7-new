@@ -9,15 +9,12 @@ psych_profiles/services.py — 心理档案 + 筛查快照 + 双轨预警 Nexus 
   5. get_dashboard_stats — 仪表盘聚合统计
 """
 
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
-
-from sqlalchemy import select, func, and_, or_, desc, asc, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any
 
 from core.models import get_local_now
 from modules.psych_profiles.models import PsyProfile, PsyScreeningRecord
-
+from sqlalchemy import and_, desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ============================================================
 # 风险等级工具
@@ -40,12 +37,18 @@ def _classify_priority(academic_level: str, psy_level: str) -> tuple:
     p_rank = _risk_rank(psy_level)
 
     # 映射学业预警到心理四级 (student_risk_alerts 用 red/yellow)
-    a_psy_equivalent = "red" if academic_level == "RED" else ("yellow" if academic_level == "YELLOW" else "green")
+    a_psy_equivalent = (
+        "red" if academic_level == "RED" else ("yellow" if academic_level == "YELLOW" else "green")
+    )
 
     co_trigger = a_rank >= 1 and p_rank >= 2  # 学业黄+心理橙 以上
 
     if a_rank >= 3 and p_rank >= 2:  # 学业红 + 心理橙/红
-        return "CRITICAL", True, ["班主任+心理老师联合约谈", "家长联动告知", "启动危机干预流程", "持续追踪"]
+        return (
+            "CRITICAL",
+            True,
+            ["班主任+心理老师联合约谈", "家长联动告知", "启动危机干预流程", "持续追踪"],
+        )
     if a_rank >= 3 and p_rank >= 1:  # 学业红 + 心理黄
         return "URGENT", True, ["心理老师约谈", "班主任密切关注", "家长沟通"]
     if a_rank >= 1 and p_rank >= 3:  # 学业黄/红 + 心理红
@@ -61,7 +64,9 @@ def _classify_priority(academic_level: str, psy_level: str) -> tuple:
 # 一、心理档案 CRUD
 # ============================================================
 async def get_or_create_profile(
-    db: AsyncSession, school_id: int, student_id: int,
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
 ) -> PsyProfile:
     """获取或自动创建学生心理档案"""
     stmt = select(PsyProfile).where(
@@ -84,8 +89,10 @@ async def get_or_create_profile(
 
 
 async def get_profile(
-    db: AsyncSession, school_id: int, student_id: int,
-) -> Optional[PsyProfile]:
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
+) -> PsyProfile | None:
     stmt = select(PsyProfile).where(
         and_(PsyProfile.school_id == school_id, PsyProfile.student_id == student_id)
     )
@@ -96,8 +103,8 @@ async def get_profile(
 async def list_profiles(
     db: AsyncSession,
     school_id: int,
-    risk_level: Optional[str] = None,
-    tag: Optional[str] = None,
+    risk_level: str | None = None,
+    tag: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple:
@@ -136,8 +143,11 @@ def _risk_rank_col(col):
 
 
 async def update_profile(
-    db: AsyncSession, school_id: int, student_id: int, data: dict,
-) -> Optional[PsyProfile]:
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
+    data: dict,
+) -> PsyProfile | None:
     profile = await get_profile(db, school_id, student_id)
     if profile is None:
         return None
@@ -154,14 +164,18 @@ async def update_profile(
         _new_level = data["risk_level"]
         try:
             from core.event_bus import EventBus
-            EventBus().publish("psych.risk_changed", {
-                "school_id": school_id,
-                "student_id": student_id,
-                "previous_level": _previous_level,
-                "current_level": _new_level,
-                "source": "profile_update",
-                "trigger": "manual",
-            })
+
+            EventBus().publish(
+                "psych.risk_changed",
+                {
+                    "school_id": school_id,
+                    "student_id": student_id,
+                    "previous_level": _previous_level,
+                    "current_level": _new_level,
+                    "source": "profile_update",
+                    "trigger": "manual",
+                },
+            )
         except Exception:
             pass
 
@@ -174,8 +188,11 @@ async def update_profile(
 
 
 async def update_tags(
-    db: AsyncSession, school_id: int, student_id: int, tags: List[str],
-) -> Optional[PsyProfile]:
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
+    tags: list[str],
+) -> PsyProfile | None:
     profile = await get_profile(db, school_id, student_id)
     if profile is None:
         return None
@@ -185,7 +202,9 @@ async def update_tags(
 
 
 async def delete_profile(
-    db: AsyncSession, school_id: int, student_id: int,
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
 ) -> bool:
     profile = await get_profile(db, school_id, student_id)
     if profile is None:
@@ -196,8 +215,10 @@ async def delete_profile(
 
 
 async def recompute_profile_stats(
-    db: AsyncSession, school_id: int, student_id: int,
-) -> Optional[PsyProfile]:
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
+) -> PsyProfile | None:
     """从子表重新聚合统计 — 咨询次数/筛查次数/干预次数/最近活动"""
     profile = await get_or_create_profile(db, school_id, student_id)
     now = get_local_now()
@@ -214,10 +235,12 @@ async def recompute_profile_stats(
     # 最近筛查
     latest_screening_stmt = (
         select(PsyScreeningRecord)
-        .where(and_(
-            PsyScreeningRecord.school_id == school_id,
-            PsyScreeningRecord.student_id == student_id,
-        ))
+        .where(
+            and_(
+                PsyScreeningRecord.school_id == school_id,
+                PsyScreeningRecord.student_id == student_id,
+            )
+        )
         .order_by(desc(PsyScreeningRecord.test_date))
         .limit(1)
     )
@@ -234,20 +257,25 @@ async def recompute_profile_stats(
             # 🔌 事件总线盲发: 心理风险等级变更 (fire-and-forget)
             try:
                 from core.event_bus import EventBus
-                EventBus().publish("psych.risk_changed", {
-                    "school_id": school_id,
-                    "student_id": student_id,
-                    "previous_level": _prev_level,
-                    "current_level": latest_screening.risk_level,
-                    "source": "screening_recompute",
-                    "trigger": "auto_aggregate",
-                })
+
+                EventBus().publish(
+                    "psych.risk_changed",
+                    {
+                        "school_id": school_id,
+                        "student_id": student_id,
+                        "previous_level": _prev_level,
+                        "current_level": latest_screening.risk_level,
+                        "source": "screening_recompute",
+                        "trigger": "auto_aggregate",
+                    },
+                )
             except Exception:
                 pass
 
     # 2. 咨询次数 (psy_consult_records) — 延迟导入避免循环
     try:
         from modules.psych_counseling.models import PsyConsultRecord
+
         counsel_count_stmt = select(func.count(PsyConsultRecord.id)).where(
             and_(
                 PsyConsultRecord.school_id == school_id,
@@ -258,10 +286,12 @@ async def recompute_profile_stats(
 
         latest_counsel_stmt = (
             select(PsyConsultRecord)
-            .where(and_(
-                PsyConsultRecord.school_id == school_id,
-                PsyConsultRecord.student_id == student_id,
-            ))
+            .where(
+                and_(
+                    PsyConsultRecord.school_id == school_id,
+                    PsyConsultRecord.student_id == student_id,
+                )
+            )
             .order_by(desc(PsyConsultRecord.created_at))
             .limit(1)
         )
@@ -283,6 +313,7 @@ async def recompute_profile_stats(
     # 3. 干预次数 (intervention_records) — 延迟导入
     try:
         from modules.psych_screening.models import InterventionRecord
+
         interv_count_stmt = select(func.count(InterventionRecord.id)).where(
             and_(
                 InterventionRecord.school_id == school_id,
@@ -293,10 +324,12 @@ async def recompute_profile_stats(
 
         latest_interv_stmt = (
             select(InterventionRecord)
-            .where(and_(
-                InterventionRecord.school_id == school_id,
-                InterventionRecord.student_id == student_id,
-            ))
+            .where(
+                and_(
+                    InterventionRecord.school_id == school_id,
+                    InterventionRecord.student_id == student_id,
+                )
+            )
             .order_by(desc(InterventionRecord.intervention_date))
             .limit(1)
         )
@@ -314,7 +347,10 @@ async def recompute_profile_stats(
 # 二、筛查快照 CRUD
 # ============================================================
 async def create_screening(
-    db: AsyncSession, school_id: int, operator_id: int, data: dict,
+    db: AsyncSession,
+    school_id: int,
+    operator_id: int,
+    data: dict,
 ) -> PsyScreeningRecord:
     record = PsyScreeningRecord(
         school_id=school_id,
@@ -337,14 +373,18 @@ async def create_screening(
         # 🔌 事件总线盲发: 心理风险等级变更 (fire-and-forget)
         try:
             from core.event_bus import EventBus
-            EventBus().publish("psych.risk_changed", {
-                "school_id": school_id,
-                "student_id": data["student_id"],
-                "previous_level": _prev_level,
-                "current_level": data["risk_level"],
-                "source": "screening_create",
-                "trigger": "new_screening",
-            })
+
+            EventBus().publish(
+                "psych.risk_changed",
+                {
+                    "school_id": school_id,
+                    "student_id": data["student_id"],
+                    "previous_level": _prev_level,
+                    "current_level": data["risk_level"],
+                    "source": "screening_create",
+                    "trigger": "new_screening",
+                },
+            )
         except Exception:
             pass
     if _risk_rank(data.get("risk_level", "green")) > _risk_rank(profile.highest_risk_level):
@@ -357,8 +397,8 @@ async def create_screening(
 async def list_screenings(
     db: AsyncSession,
     school_id: int,
-    student_id: Optional[int] = None,
-    scale_name: Optional[str] = None,
+    student_id: int | None = None,
+    scale_name: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple:
@@ -384,14 +424,19 @@ async def list_screenings(
 
 
 async def get_student_screenings(
-    db: AsyncSession, school_id: int, student_id: int, limit: int = 10,
-) -> List[PsyScreeningRecord]:
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
+    limit: int = 10,
+) -> list[PsyScreeningRecord]:
     stmt = (
         select(PsyScreeningRecord)
-        .where(and_(
-            PsyScreeningRecord.school_id == school_id,
-            PsyScreeningRecord.student_id == student_id,
-        ))
+        .where(
+            and_(
+                PsyScreeningRecord.school_id == school_id,
+                PsyScreeningRecord.student_id == student_id,
+            )
+        )
         .order_by(desc(PsyScreeningRecord.test_date))
         .limit(limit)
     )
@@ -431,12 +476,15 @@ async def get_comprehensive_risks(
     # 1b. student_risk_alerts (学业预警)
     try:
         from modules.data_adapter.models import StudentRiskAlert
+
         alert_ids_stmt = (
             select(StudentRiskAlert.student_id)
-            .where(and_(
-                StudentRiskAlert.school_id == school_id,
-                StudentRiskAlert.status == "active",
-            ))
+            .where(
+                and_(
+                    StudentRiskAlert.school_id == school_id,
+                    StudentRiskAlert.status == "active",
+                )
+            )
             .distinct()
         )
         for (sid,) in (await db.execute(alert_ids_stmt)).all():
@@ -447,12 +495,15 @@ async def get_comprehensive_risks(
     # 1c. risk_warnings (RDI 四维预警)
     try:
         from modules.risk_models.models import RiskWarning
+
         rdi_ids_stmt = (
             select(RiskWarning.student_id)
-            .where(and_(
-                RiskWarning.school_id == school_id,
-                RiskWarning.status == "active",
-            ))
+            .where(
+                and_(
+                    RiskWarning.school_id == school_id,
+                    RiskWarning.status == "active",
+                )
+            )
             .distinct()
         )
         for (sid,) in (await db.execute(rdi_ids_stmt)).all():
@@ -483,9 +534,10 @@ async def get_comprehensive_risks(
     profiles = {p.student_id: p for p in profile_result.scalars().all()}
 
     # ── Step 2: 批量获取学业预警 (student_risk_alerts) ──
-    academic_alerts: Dict[int, list] = {}
+    academic_alerts: dict[int, list] = {}
     try:
         from modules.data_adapter.models import StudentRiskAlert
+
         alert_stmt = (
             select(StudentRiskAlert)
             .where(
@@ -504,9 +556,10 @@ async def get_comprehensive_risks(
         pass
 
     # ── Step 3: 批量获取 RDI 预警 (risk_warnings) ──
-    rdi_warnings: Dict[int, Any] = {}
+    rdi_warnings: dict[int, Any] = {}
     try:
         from modules.risk_models.models import RiskWarning
+
         rdi_stmt = (
             select(RiskWarning)
             .where(
@@ -526,7 +579,8 @@ async def get_comprehensive_risks(
         pass
 
     # ── Step 4: 批量获取学生基本信息 ──
-    from core.models import Student, Class
+    from core.models import Class, Student
+
     student_ids = list(all_student_ids)
     student_stmt = (
         select(Student, Class)
@@ -534,7 +588,7 @@ async def get_comprehensive_risks(
         .where(Student.id.in_(student_ids))
     )
     student_result = await db.execute(student_stmt)
-    student_info: Dict[int, dict] = {}
+    student_info: dict[int, dict] = {}
     for student, class_ in student_result.all():
         student_info[student.id] = {
             "name": student.name,
@@ -591,10 +645,12 @@ async def get_comprehensive_risks(
             try:
                 screening_stmt = (
                     select(PsyScreeningRecord)
-                    .where(and_(
-                        PsyScreeningRecord.school_id == school_id,
-                        PsyScreeningRecord.student_id == sid,
-                    ))
+                    .where(
+                        and_(
+                            PsyScreeningRecord.school_id == school_id,
+                            PsyScreeningRecord.student_id == sid,
+                        )
+                    )
                     .order_by(desc(PsyScreeningRecord.test_date))
                     .limit(1)
                 )
@@ -638,9 +694,12 @@ async def get_comprehensive_risks(
             }
         else:
             rdi = {
-                "score": None, "level": None,
-                "psych_deviation": None, "score_deviation": None,
-                "behavior_deviation": None, "attendance_deviation": None,
+                "score": None,
+                "level": None,
+                "psych_deviation": None,
+                "score_deviation": None,
+                "behavior_deviation": None,
+                "attendance_deviation": None,
                 "is_escalating": False,
                 "source": "risk_warnings",
             }
@@ -659,17 +718,19 @@ async def get_comprehensive_risks(
         if co_trigger_only and not co_trigger:
             continue
 
-        items.append({
-            "student_id": sid,
-            "student_name": info.get("name"),
-            "class_name": info.get("class_name"),
-            "academic_risk": academic,
-            "psy_risk": psy,
-            "rdi_risk": rdi,
-            "co_trigger": co_trigger,
-            "action_priority": priority,
-            "recommended_actions": actions,
-        })
+        items.append(
+            {
+                "student_id": sid,
+                "student_name": info.get("name"),
+                "class_name": info.get("class_name"),
+                "academic_risk": academic,
+                "psy_risk": psy,
+                "rdi_risk": rdi,
+                "co_trigger": co_trigger,
+                "action_priority": priority,
+                "recommended_actions": actions,
+            }
+        )
 
     # 按优先级排序
     items.sort(key=lambda x: priority_rank.get(x["action_priority"], 0), reverse=True)
@@ -677,7 +738,7 @@ async def get_comprehensive_risks(
     # 分页
     total = len(items)
     start = (page - 1) * page_size
-    items_page = items[start:start + page_size]
+    items_page = items[start : start + page_size]
 
     return {
         "total": total,
@@ -687,11 +748,14 @@ async def get_comprehensive_risks(
         "items": items_page,
     }
 
+
 async def get_student_nexus_detail(
-    db: AsyncSession, school_id: int, student_id: int,
-) -> Optional[dict]:
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
+) -> dict | None:
     """单个学生的双轨详细画像"""
-    from core.models import Student, Class, Grade
+    from core.models import Class, Grade, Student
 
     # 学生基本信息
     stmt = (
@@ -713,24 +777,29 @@ async def get_student_nexus_detail(
     academic_history = []
     try:
         from modules.data_adapter.models import StudentRiskAlert
+
         alert_stmt = (
             select(StudentRiskAlert)
-            .where(and_(
-                StudentRiskAlert.school_id == school_id,
-                StudentRiskAlert.student_id == student_id,
-            ))
+            .where(
+                and_(
+                    StudentRiskAlert.school_id == school_id,
+                    StudentRiskAlert.student_id == student_id,
+                )
+            )
             .order_by(desc(StudentRiskAlert.created_at))
             .limit(10)
         )
         for alert in (await db.execute(alert_stmt)).scalars().all():
-            academic_history.append({
-                "id": alert.id,
-                "risk_type": alert.risk_type,
-                "risk_level": alert.risk_level,
-                "trigger_reason": alert.trigger_reason,
-                "status": alert.status,
-                "created_at": alert.created_at.isoformat() if alert.created_at else None,
-            })
+            academic_history.append(
+                {
+                    "id": alert.id,
+                    "risk_type": alert.risk_type,
+                    "risk_level": alert.risk_level,
+                    "trigger_reason": alert.trigger_reason,
+                    "status": alert.status,
+                    "created_at": alert.created_at.isoformat() if alert.created_at else None,
+                }
+            )
     except ImportError:
         pass
 
@@ -738,20 +807,23 @@ async def get_student_nexus_detail(
     screenings = await get_student_screenings(db, school_id, student_id, limit=10)
     screening_history = []
     for s in screenings:
-        screening_history.append({
-            "id": s.id,
-            "scale_name": s.scale_name,
-            "total_score": s.total_score,
-            "risk_level": s.risk_level,
-            "risk_factors": s.risk_factors or [],
-            "conclusion": s.conclusion,
-            "test_date": s.test_date.isoformat() if s.test_date else None,
-        })
+        screening_history.append(
+            {
+                "id": s.id,
+                "scale_name": s.scale_name,
+                "total_score": s.total_score,
+                "risk_level": s.risk_level,
+                "risk_factors": s.risk_factors or [],
+                "conclusion": s.conclusion,
+                "test_date": s.test_date.isoformat() if s.test_date else None,
+            }
+        )
 
     # 咨询摘要
     counseling_summary = None
     try:
         from modules.psych_counseling.models import PsyConsultRecord
+
         counsel_count_stmt = select(func.count(PsyConsultRecord.id)).where(
             and_(
                 PsyConsultRecord.school_id == school_id,
@@ -762,10 +834,12 @@ async def get_student_nexus_detail(
 
         latest_counsel_stmt = (
             select(PsyConsultRecord)
-            .where(and_(
-                PsyConsultRecord.school_id == school_id,
-                PsyConsultRecord.student_id == student_id,
-            ))
+            .where(
+                and_(
+                    PsyConsultRecord.school_id == school_id,
+                    PsyConsultRecord.student_id == student_id,
+                )
+            )
             .order_by(desc(PsyConsultRecord.created_at))
             .limit(1)
         )
@@ -775,7 +849,9 @@ async def get_student_nexus_detail(
                 "total_count": counsel_count,
                 "latest_risk_level": latest_counsel.risk_level if latest_counsel else None,
                 "latest_category": latest_counsel.consult_category if latest_counsel else None,
-                "latest_date": latest_counsel.created_at.isoformat() if latest_counsel and latest_counsel.created_at else None,
+                "latest_date": latest_counsel.created_at.isoformat()
+                if latest_counsel and latest_counsel.created_at
+                else None,
                 "is_referred": latest_counsel.is_referred if latest_counsel else False,
             }
     except ImportError:
@@ -783,20 +859,27 @@ async def get_student_nexus_detail(
 
     # RDI 四维
     rdi_risk = {
-        "score": None, "level": None,
-        "psych_deviation": None, "score_deviation": None,
-        "behavior_deviation": None, "attendance_deviation": None,
-        "is_escalating": False, "source": "risk_warnings",
+        "score": None,
+        "level": None,
+        "psych_deviation": None,
+        "score_deviation": None,
+        "behavior_deviation": None,
+        "attendance_deviation": None,
+        "is_escalating": False,
+        "source": "risk_warnings",
     }
     try:
         from modules.risk_models.models import RiskWarning
+
         rdi_stmt = (
             select(RiskWarning)
-            .where(and_(
-                RiskWarning.school_id == school_id,
-                RiskWarning.student_id == student_id,
-                RiskWarning.status == "active",
-            ))
+            .where(
+                and_(
+                    RiskWarning.school_id == school_id,
+                    RiskWarning.student_id == student_id,
+                    RiskWarning.status == "active",
+                )
+            )
             .order_by(desc(RiskWarning.warned_at))
             .limit(1)
         )
@@ -818,18 +901,24 @@ async def get_student_nexus_detail(
     # 学业侧
     academic_level = "NONE"
     academic_info = {
-        "level": "NONE", "z_score": None, "trigger_subjects": [],
-        "trigger_reason": None, "source": "student_risk_alerts",
+        "level": "NONE",
+        "z_score": None,
+        "trigger_subjects": [],
+        "trigger_reason": None,
+        "source": "student_risk_alerts",
     }
     try:
         from modules.data_adapter.models import StudentRiskAlert
+
         alert_stmt = (
             select(StudentRiskAlert)
-            .where(and_(
-                StudentRiskAlert.school_id == school_id,
-                StudentRiskAlert.student_id == student_id,
-                StudentRiskAlert.status == "active",
-            ))
+            .where(
+                and_(
+                    StudentRiskAlert.school_id == school_id,
+                    StudentRiskAlert.student_id == student_id,
+                    StudentRiskAlert.status == "active",
+                )
+            )
             .order_by(desc(StudentRiskAlert.created_at))
             .limit(1)
         )
@@ -847,7 +936,7 @@ async def get_student_nexus_detail(
         pass
 
     # 心理侧
-    psy_level = (profile.risk_level if profile else "green")
+    psy_level = profile.risk_level if profile else "green"
     psy_info = {
         "level": _RISK_LABEL.get(psy_level, "GREEN"),
         "factors": [],
@@ -876,7 +965,9 @@ async def get_student_nexus_detail(
             "total_screening_count": profile.total_screening_count if profile else 0,
             "is_referred": profile.is_referred if profile else False,
             "notes": profile.notes if profile else None,
-        } if profile else None,
+        }
+        if profile
+        else None,
         "psy_screening_history": screening_history,
         "psy_counseling_summary": counseling_summary,
         "rdi_risk": rdi_risk,
@@ -892,9 +983,9 @@ async def get_student_nexus_detail(
 async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
     """心理档案仪表盘聚合统计"""
     # 档案总数
-    total_profiles = (await db.execute(
-        select(func.count(PsyProfile.id)).where(PsyProfile.school_id == school_id)
-    )).scalar() or 0
+    total_profiles = (
+        await db.execute(select(func.count(PsyProfile.id)).where(PsyProfile.school_id == school_id))
+    ).scalar() or 0
 
     # 风险分布
     risk_dist = {"green": 0, "yellow": 0, "orange": 0, "red": 0}
@@ -908,26 +999,37 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
             risk_dist[level] = cnt
 
     # 筛查总数
-    total_screenings = (await db.execute(
-        select(func.count(PsyScreeningRecord.id)).where(PsyScreeningRecord.school_id == school_id)
-    )).scalar() or 0
+    total_screenings = (
+        await db.execute(
+            select(func.count(PsyScreeningRecord.id)).where(
+                PsyScreeningRecord.school_id == school_id
+            )
+        )
+    ).scalar() or 0
 
     # 咨询总数
     total_counselings = 0
     try:
         from modules.psych_counseling.models import PsyConsultRecord
-        total_counselings = (await db.execute(
-            select(func.count(PsyConsultRecord.id)).where(PsyConsultRecord.school_id == school_id)
-        )).scalar() or 0
+
+        total_counselings = (
+            await db.execute(
+                select(func.count(PsyConsultRecord.id)).where(
+                    PsyConsultRecord.school_id == school_id
+                )
+            )
+        ).scalar() or 0
     except ImportError:
         pass
 
     # 转介总数
-    total_referrals = (await db.execute(
-        select(func.count(PsyProfile.id)).where(
-            and_(PsyProfile.school_id == school_id, PsyProfile.is_referred == True)
+    total_referrals = (
+        await db.execute(
+            select(func.count(PsyProfile.id)).where(
+                and_(PsyProfile.school_id == school_id, PsyProfile.is_referred == True)
+            )
         )
-    )).scalar() or 0
+    ).scalar() or 0
 
     # 双预警学生数
     nexus = await get_comprehensive_risks(db, school_id, co_trigger_only=True, page_size=9999)
@@ -942,33 +1044,41 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
     )
     recent_screenings = []
     for s in (await db.execute(recent_stmt)).scalars().all():
-        recent_screenings.append({
-            "id": s.id,
-            "student_id": s.student_id,
-            "scale_name": s.scale_name,
-            "risk_level": s.risk_level,
-            "test_date": s.test_date.isoformat() if s.test_date else None,
-        })
+        recent_screenings.append(
+            {
+                "id": s.id,
+                "student_id": s.student_id,
+                "scale_name": s.scale_name,
+                "risk_level": s.risk_level,
+                "test_date": s.test_date.isoformat() if s.test_date else None,
+            }
+        )
 
     # 最高风险学生 (5条)
     top_stmt = (
         select(PsyProfile)
-        .where(and_(
-            PsyProfile.school_id == school_id,
-            PsyProfile.risk_level.in_(["orange", "red"]),
-        ))
+        .where(
+            and_(
+                PsyProfile.school_id == school_id,
+                PsyProfile.risk_level.in_(["orange", "red"]),
+            )
+        )
         .order_by(desc(_risk_rank_col(PsyProfile.risk_level)), desc(PsyProfile.updated_at))
         .limit(5)
     )
     top_risk_students = []
     for p in (await db.execute(top_stmt)).scalars().all():
-        top_risk_students.append({
-            "student_id": p.student_id,
-            "risk_level": p.risk_level,
-            "tags": p.tags or [],
-            "total_counseling_count": p.total_counseling_count or 0,
-            "last_screening_date": p.last_screening_date.isoformat() if p.last_screening_date else None,
-        })
+        top_risk_students.append(
+            {
+                "student_id": p.student_id,
+                "risk_level": p.risk_level,
+                "tags": p.tags or [],
+                "total_counseling_count": p.total_counseling_count or 0,
+                "last_screening_date": p.last_screening_date.isoformat()
+                if p.last_screening_date
+                else None,
+            }
+        )
 
     # ── 学业侧统计 (四源union新增) ──
     total_academic_alerts = 0
@@ -977,12 +1087,15 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
     total_rdi_warnings = 0
     try:
         from modules.data_adapter.models import StudentRiskAlert
+
         alert_dist = (
             select(StudentRiskAlert.risk_level, func.count(StudentRiskAlert.id))
-            .where(and_(
-                StudentRiskAlert.school_id == school_id,
-                StudentRiskAlert.status == "active",
-            ))
+            .where(
+                and_(
+                    StudentRiskAlert.school_id == school_id,
+                    StudentRiskAlert.status == "active",
+                )
+            )
             .group_by(StudentRiskAlert.risk_level)
         )
         for level, cnt in (await db.execute(alert_dist)).all():
@@ -996,11 +1109,14 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
 
     try:
         from modules.risk_models.models import RiskWarning
-        total_rdi_warnings = (await db.execute(
-            select(func.count(RiskWarning.id)).where(
-                and_(RiskWarning.school_id == school_id, RiskWarning.status == "active")
+
+        total_rdi_warnings = (
+            await db.execute(
+                select(func.count(RiskWarning.id)).where(
+                    and_(RiskWarning.school_id == school_id, RiskWarning.status == "active")
+                )
             )
-        )).scalar() or 0
+        ).scalar() or 0
     except ImportError:
         pass
 
@@ -1023,15 +1139,14 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
 # ============================================================
 # 五、标签建议
 # ============================================================
-async def get_tag_suggestions(db: AsyncSession, school_id: int, limit: int = 30) -> List[dict]:
+async def get_tag_suggestions(db: AsyncSession, school_id: int, limit: int = 30) -> list[dict]:
     """从现有档案中提取高频标签建议"""
-    from sqlalchemy import JSON
     # MySQL JSON_LENGTH + JSON_TABLE 过于复杂, 取所有 tags 在内存中统计
     stmt = select(PsyProfile.tags).where(
         and_(PsyProfile.school_id == school_id, PsyProfile.tags.isnot(None))
     )
     result = await db.execute(stmt)
-    tag_count: Dict[str, int] = {}
+    tag_count: dict[str, int] = {}
     for row in result.all():
         tags = row[0]
         if isinstance(tags, list):

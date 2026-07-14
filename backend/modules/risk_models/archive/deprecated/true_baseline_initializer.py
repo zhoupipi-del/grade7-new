@@ -14,25 +14,24 @@ TrueBaselineInitializer — 真实基线初始化脚本
 
 import asyncio
 import logging
+import math
 import os
 import sys
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Tuple
-import math
+from datetime import date, datetime, timedelta
 
 # 添加项目路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import select, func, and_
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from core.models import Student
+from modules.attendance.models import AttendanceRecord
+from modules.behavior.models import DisciplineRecord
+from modules.evaluation.models import StudentScore
 
 # 导入模型
 from modules.risk_models.models import RiskBaseline
-from modules.behavior.models import DisciplineRecord
-from modules.attendance.models import AttendanceRecord
-from modules.evaluation.models import StudentScore
-from core.models import Student, SchoolMixin
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 # 配置日志
 log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../logs")
@@ -42,16 +41,13 @@ log_file = os.path.join(log_dir, "baseline_calibration.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(log_file, encoding="utf-8"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler(log_file, encoding="utf-8"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
 
 # 数据库配置（从环境变量或配置文件读取）
-DATABASE_URL = "mysql+aiomysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3"
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -63,15 +59,13 @@ async def calculate_baselines_for_school(school_id: int, window_days: int = 30):
     """
     async with AsyncSessionLocal() as db:
         # 1. 获取全校学生列表
-        students = await db.scalars(
-            select(Student).where(
-                Student.school_id == school_id
-            )
-        )
+        students = await db.scalars(select(Student).where(Student.school_id == school_id))
         student_list = students.all()
         total_students = len(student_list)
 
-        logger.info(f"开始为 school_id={school_id} 的 {total_students} 名学生计算 {window_days} 天窗口基线")
+        logger.info(
+            f"开始为 school_id={school_id} 的 {total_students} 名学生计算 {window_days} 天窗口基线"
+        )
         logger.info(f"聚合窗口: {date.today() - timedelta(days=window_days)} ~ {date.today()}")
 
         # 2. 批量计算三维度原始值
@@ -97,13 +91,19 @@ async def calculate_baselines_for_school(school_id: int, window_days: int = 30):
         attendance_mean, attendance_std = _calculate_mean_std(attendance_values)
         score_mean, score_std = _calculate_mean_std(score_values)
 
-        logger.info(f"=== 全校基线统计分布 ===")
-        logger.info(f"行为维度: mean={behavior_mean:.2f}, std={behavior_std:.2f}, "
-                    f"min={min(behavior_values)}, max={max(behavior_values)}")
-        logger.info(f"考勤维度: mean={attendance_mean:.2f}, std={attendance_std:.2f}, "
-                    f"min={min(attendance_values):.2f}, max={max(attendance_values):.2f}")
-        logger.info(f"评价维度: mean={score_mean:.2f}, std={score_std:.2f}, "
-                    f"min={min(score_values):.2f}, max={max(score_values):.2f}")
+        logger.info("=== 全校基线统计分布 ===")
+        logger.info(
+            f"行为维度: mean={behavior_mean:.2f}, std={behavior_std:.2f}, "
+            f"min={min(behavior_values)}, max={max(behavior_values)}"
+        )
+        logger.info(
+            f"考勤维度: mean={attendance_mean:.2f}, std={attendance_std:.2f}, "
+            f"min={min(attendance_values):.2f}, max={max(attendance_values):.2f}"
+        )
+        logger.info(
+            f"评价维度: mean={score_mean:.2f}, std={score_std:.2f}, "
+            f"min={min(score_values):.2f}, max={max(score_values):.2f}"
+        )
 
         # 4. 逐学生存储基线（如果已存在则更新）
         updated_count = 0
@@ -113,23 +113,41 @@ async def calculate_baselines_for_school(school_id: int, window_days: int = 30):
 
             # 行为基线
             await _upsert_baseline(
-                db, school_id, student_id, class_id,
-                "behavior", window_days,
-                behavior_mean, behavior_std, total_students
+                db,
+                school_id,
+                student_id,
+                class_id,
+                "behavior",
+                window_days,
+                behavior_mean,
+                behavior_std,
+                total_students,
             )
 
             # 考勤基线
             await _upsert_baseline(
-                db, school_id, student_id, class_id,
-                "attendance", window_days,
-                attendance_mean, attendance_std, total_students
+                db,
+                school_id,
+                student_id,
+                class_id,
+                "attendance",
+                window_days,
+                attendance_mean,
+                attendance_std,
+                total_students,
             )
 
             # 评价基线
             await _upsert_baseline(
-                db, school_id, student_id, class_id,
-                "score", window_days,
-                score_mean, score_std, total_students
+                db,
+                school_id,
+                student_id,
+                class_id,
+                "score",
+                window_days,
+                score_mean,
+                score_std,
+                total_students,
             )
 
             updated_count += 1
@@ -152,7 +170,7 @@ async def _calculate_behavior_count(db: AsyncSession, student_id: int, window_da
             and_(
                 DisciplineRecord.student_id == student_id,
                 DisciplineRecord.created_at >= window_start,
-                DisciplineRecord.status.in_(["active", "resolved"])  # 只统计有效记录
+                DisciplineRecord.status.in_(["active", "resolved"]),  # 只统计有效记录
             )
         )
     )
@@ -164,28 +182,34 @@ async def _calculate_attendance_rate(db: AsyncSession, student_id: int, window_d
     window_start = date.today() - timedelta(days=window_days)
 
     # 总考勤记录数
-    total_records = await db.scalar(
-        select(func.count()).where(
-            and_(
-                AttendanceRecord.student_id == student_id,
-                AttendanceRecord.created_at >= window_start
+    total_records = (
+        await db.scalar(
+            select(func.count()).where(
+                and_(
+                    AttendanceRecord.student_id == student_id,
+                    AttendanceRecord.created_at >= window_start,
+                )
             )
         )
-    ) or 0
+        or 0
+    )
 
     if total_records == 0:
         return 0.0
 
     # 异常考勤记录数（迟到/缺勤/早退等）
-    abnormal_records = await db.scalar(
-        select(func.count()).where(
-            and_(
-                AttendanceRecord.student_id == student_id,
-                AttendanceRecord.created_at >= window_start,
-                AttendanceRecord.status.in_(["late", "absent", "early_leave"])  # 异常状态
+    abnormal_records = (
+        await db.scalar(
+            select(func.count()).where(
+                and_(
+                    AttendanceRecord.student_id == student_id,
+                    AttendanceRecord.created_at >= window_start,
+                    AttendanceRecord.status.in_(["late", "absent", "early_leave"]),  # 异常状态
+                )
             )
         )
-    ) or 0
+        or 0
+    )
 
     return abnormal_records / total_records
 
@@ -201,7 +225,7 @@ async def _calculate_score_avg(db: AsyncSession, student_id: int) -> float:
     return score or 0.0
 
 
-def _calculate_mean_std(values: List[float]) -> Tuple[float, float]:
+def _calculate_mean_std(values: list[float]) -> tuple[float, float]:
     """计算均值和标准差"""
     if not values:
         return 0.0, 1.0
@@ -227,7 +251,7 @@ async def _upsert_baseline(
     window_days: int,
     mean_value: float,
     std_value: float,
-    sample_size: int
+    sample_size: int,
 ):
     """插入或更新基线记录"""
     # 查询是否已存在
@@ -237,7 +261,7 @@ async def _upsert_baseline(
                 RiskBaseline.school_id == school_id,
                 RiskBaseline.student_id == student_id,
                 RiskBaseline.baseline_type == baseline_type,
-                RiskBaseline.window_days == window_days
+                RiskBaseline.window_days == window_days,
             )
         )
     )
@@ -259,16 +283,13 @@ async def _upsert_baseline(
             mean_value=mean_value,
             std_value=std_value,
             sample_size=sample_size,
-            calibrated_at=datetime.now()
+            calibrated_at=datetime.now(),
         )
         db.add(new_baseline)
 
 
 async def _generate_distribution_summary(
-    db: AsyncSession,
-    school_id: int,
-    window_days: int,
-    logger
+    db: AsyncSession, school_id: int, window_days: int, logger
 ):
     """生成统计分布摘要（供总指挥查阅）"""
     logger.info(f"\n=== 基线分布摘要 (school_id={school_id}, window_days={window_days}) ===")
@@ -280,7 +301,7 @@ async def _generate_distribution_summary(
                 and_(
                     RiskBaseline.school_id == school_id,
                     RiskBaseline.baseline_type == baseline_type,
-                    RiskBaseline.window_days == window_days
+                    RiskBaseline.window_days == window_days,
                 )
             )
         )
@@ -310,12 +331,13 @@ async def _generate_distribution_summary(
 async def main():
     """主函数"""
     import argparse
+
     parser = argparse.ArgumentParser(description="真实基线初始化脚本")
     parser.add_argument("--school-id", type=int, default=1, help="学校ID")
     parser.add_argument("--window", type=int, default=30, help="聚合窗口天数")
     args = parser.parse_args()
 
-    logger.info(f"TrueBaselineInitializer 启动")
+    logger.info("TrueBaselineInitializer 启动")
     logger.info(f"参数: school_id={args.school_id}, window_days={args.window}")
 
     start_time = datetime.now()

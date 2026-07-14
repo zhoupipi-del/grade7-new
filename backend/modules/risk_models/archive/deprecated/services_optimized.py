@@ -9,29 +9,23 @@ modules/risk_models/services.py — 风险预警雷达核心业务逻辑 (SQL优
 """
 
 import logging
+import os
 import time
-from datetime import datetime, date, timedelta
-from typing import Optional, List, Tuple, Dict
-from collections import defaultdict
-import math
-
-from sqlalchemy import select, func, and_, or_, case, text
-from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import Select
-
-from .models import RiskWarning, WarningFeedback, RiskBaseline
-from core.models import Student, Class, Grade, User, UserRole
-from core.models import Base, SchoolMixin, get_local_now
-
-# 导入其他模块的 Model (真实数据源)
-from modules.behavior.models import DisciplineRecord
-from modules.attendance.models import AttendanceRecord
-from modules.evaluation.models import StudentScore
+from datetime import date, datetime, timedelta
 
 # 导入 PolicyEngine 读取配置
 import yaml
-import os
+from core.models import Student, get_local_now
+from modules.attendance.models import AttendanceRecord
+
+# 导入其他模块的 Model (真实数据源)
+from modules.behavior.models import DisciplineRecord
+from modules.evaluation.models import StudentScore
+from sqlalchemy import and_, case, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from .models import RiskBaseline, RiskWarning
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +39,7 @@ def load_policy_config() -> dict:
     """加载 policy.yaml 配置"""
     policy_path = os.path.join(os.path.dirname(__file__), "../../policy.yaml")
     try:
-        with open(policy_path, "r", encoding="utf-8") as f:
+        with open(policy_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
             return config.get("policy_engine", {})
     except Exception as e:
@@ -84,7 +78,9 @@ class RiskDeviationIndexCalculator:
         self.min_rdi_to_warn = suppression.get("min_rdi_to_warn", 1.0)
         self.max_warnings_per_day = suppression.get("max_warnings_per_day", 3)  # 总指挥调整为3
         self.suppress_repeated_warnings = suppression.get("suppress_repeated_warnings", True)
-        self.repeated_warning_cooldown_hours = suppression.get("repeated_warning_cooldown_hours", 48)
+        self.repeated_warning_cooldown_hours = suppression.get(
+            "repeated_warning_cooldown_hours", 48
+        )
 
     async def _execute_with_latency_monitor(self, query, operation_name: str):
         """
@@ -119,7 +115,7 @@ class RiskDeviationIndexCalculator:
         window_long: int = 90,
         include_trend: bool = True,
         suppress_low_rdi: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """
         计算学生 RDI 风险偏离指数
 
@@ -153,11 +149,14 @@ class RiskDeviationIndexCalculator:
         historical_rdi = student_data.get("historical_rdi", [])
 
         # === 计算复合 RDI (权重可配置) ===
-        weights = self.policy.get("risk_warning", {}).get("rdi_weights", {
-            "behavior": 0.4,
-            "attendance": 0.3,
-            "score": 0.3,
-        })
+        weights = self.policy.get("risk_warning", {}).get(
+            "rdi_weights",
+            {
+                "behavior": 0.4,
+                "attendance": 0.3,
+                "score": 0.3,
+            },
+        )
         rdi_score = (
             weights["behavior"] * behavior_dev["z_score"]
             + weights["attendance"] * attendance_dev["z_score"]
@@ -220,7 +219,7 @@ class RiskDeviationIndexCalculator:
         window_short: int,
         window_medium: int,
         include_trend: bool,
-    ) -> Dict:
+    ) -> dict:
         """
         SQL 1+2+3: 一次性获取所有数据 (优化到3次SQL)
 
@@ -255,24 +254,19 @@ class RiskDeviationIndexCalculator:
                 )
             )
         )
-        student_result = await self._execute_with_latency_monitor(
-            student_query, "fetch_student"
-        )
+        student_result = await self._execute_with_latency_monitor(student_query, "fetch_student")
         student = student_result.scalar_one_or_none()
 
         if not student:
             return {"student": None}
 
         # === SQL 2: 获取三维度基线 (1次查询获取3行) ===
-        baselines_query = (
-            select(RiskBaseline)
-            .where(
-                and_(
-                    RiskBaseline.student_id == student_id,
-                    RiskBaseline.window_days == window_medium,
-                    RiskBaseline.school_id == self.school_id,
-                    RiskBaseline.baseline_type.in_(["behavior", "attendance", "score"])
-                )
+        baselines_query = select(RiskBaseline).where(
+            and_(
+                RiskBaseline.student_id == student_id,
+                RiskBaseline.window_days == window_medium,
+                RiskBaseline.school_id == self.school_id,
+                RiskBaseline.baseline_type.in_(["behavior", "attendance", "score"]),
             )
         )
         baselines_result = await self._execute_with_latency_monitor(
@@ -310,14 +304,7 @@ class RiskDeviationIndexCalculator:
 
         # 3.2 考勤维度: 过去 window_short 天迟到率 (从 AttendanceRecord 查询)
         attendance_rate_subq = (
-            select(
-                func.avg(
-                    case(
-                        (AttendanceRecord.status.in_(["late", "absent"]), 1),
-                        else_=0
-                    )
-                )
-            )
+            select(func.avg(case((AttendanceRecord.status.in_(["late", "absent"]), 1), else_=0)))
             .select_from(AttendanceRecord)
             .where(
                 and_(
@@ -344,17 +331,21 @@ class RiskDeviationIndexCalculator:
 
         # 3.4 历史 RDI 序列 (从 RiskWarning 查询, 用于 EWMA 趋势)
         historical_rdi_subq = (
-            select(RiskWarning.rdi_score)
-            .where(
-                and_(
-                    RiskWarning.student_id == student_id,
-                    RiskWarning.school_id == self.school_id,
+            (
+                select(RiskWarning.rdi_score)
+                .where(
+                    and_(
+                        RiskWarning.student_id == student_id,
+                        RiskWarning.school_id == self.school_id,
+                    )
                 )
+                .order_by(RiskWarning.created_at.asc())
+                .limit(10)
+                .scalar_subquery()
             )
-            .order_by(RiskWarning.created_at.asc())
-            .limit(10)
-            .scalar_subquery()
-        ) if include_trend else None
+            if include_trend
+            else None
+        )
 
         # 主查询: 一次性获取3个当前值 + 历史RDI (SQL 3)
         select_columns = [
@@ -366,9 +357,7 @@ class RiskDeviationIndexCalculator:
         if include_trend:
             # 使用 ARRAY_AGG 或 GROUP_CONCAT 聚合历史RDI序列
             historical_rdi_query = (
-                select(
-                    func.json_arrayagg(RiskWarning.rdi_score).label("historical_rdi")
-                )
+                select(func.json_arrayagg(RiskWarning.rdi_score).label("historical_rdi"))
                 .where(
                     and_(
                         RiskWarning.student_id == student_id,
@@ -382,7 +371,9 @@ class RiskDeviationIndexCalculator:
                 historical_rdi_query, "fetch_historical_rdi"
             )
             historical_rdi_row = historical_rdi_result.one()
-            historical_rdi = historical_rdi_row[0] if historical_rdi_row and historical_rdi_row[0] else []
+            historical_rdi = (
+                historical_rdi_row[0] if historical_rdi_row and historical_rdi_row[0] else []
+            )
         else:
             historical_rdi = []
 
@@ -446,7 +437,7 @@ class RiskDeviationIndexCalculator:
             "historical_rdi": historical_rdi,
         }
 
-    def _calculate_ewma(self, historical_rdi: List[float]) -> Tuple[float, bool]:
+    def _calculate_ewma(self, historical_rdi: list[float]) -> tuple[float, bool]:
         """
         计算 EWMA 趋势
 
@@ -481,11 +472,14 @@ class RiskDeviationIndexCalculator:
 
         配置读取: policy.yaml → risk_warning → risk_levels
         """
-        risk_levels = self.policy.get("risk_warning", {}).get("risk_levels", {
-            "normal": {"max_rdi": 1.0},
-            "attention": {"min_rdi": 1.0, "max_rdi": 2.0},
-            "intervention": {"min_rdi": 2.0},
-        })
+        risk_levels = self.policy.get("risk_warning", {}).get(
+            "risk_levels",
+            {
+                "normal": {"max_rdi": 1.0},
+                "attention": {"min_rdi": 1.0, "max_rdi": 2.0},
+                "intervention": {"min_rdi": 2.0},
+            },
+        )
 
         if rdi_score < risk_levels["attention"]["min_rdi"]:
             return "normal"
@@ -494,7 +488,7 @@ class RiskDeviationIndexCalculator:
         else:
             return "intervention"
 
-    def _recommend_action(self, risk_level: str, is_escalating: bool) -> Optional[str]:
+    def _recommend_action(self, risk_level: str, is_escalating: bool) -> str | None:
         """
         推荐处置动作
 
@@ -516,7 +510,7 @@ class RiskDeviationIndexCalculator:
 
     async def _get_or_create_baseline(
         self, student_id: int, baseline_type: str, window_days: int
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """
         获取或创建基线 (均值, 标准差)
 
@@ -524,15 +518,12 @@ class RiskDeviationIndexCalculator:
         若不存在则计算并存储 (懒初始化)
         """
         # 查询已有基线
-        baseline_query = (
-            select(RiskBaseline)
-            .where(
-                and_(
-                    RiskBaseline.student_id == student_id,
-                    RiskBaseline.baseline_type == baseline_type,
-                    RiskBaseline.window_days == window_days,
-                    RiskBaseline.school_id == self.school_id,
-                )
+        baseline_query = select(RiskBaseline).where(
+            and_(
+                RiskBaseline.student_id == student_id,
+                RiskBaseline.baseline_type == baseline_type,
+                RiskBaseline.window_days == window_days,
+                RiskBaseline.school_id == self.school_id,
             )
         )
         baseline_result = await self._execute_with_latency_monitor(
@@ -544,7 +535,9 @@ class RiskDeviationIndexCalculator:
             return baseline.mean_value, baseline.std_value
 
         # 基线不存在，计算并存储 (懒初始化)
-        logger.info(f"Baseline not found for student={student_id}, type={baseline_type}, calculating...")
+        logger.info(
+            f"Baseline not found for student={student_id}, type={baseline_type}, calculating..."
+        )
 
         mean_value, std_value = await self._calculate_baseline_from_history(
             student_id, baseline_type, window_days
@@ -575,7 +568,7 @@ class RiskDeviationIndexCalculator:
 
     async def _calculate_baseline_from_history(
         self, student_id: int, baseline_type: str, window_days: int
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """
         从历史数据计算基线 (均值, 标准差)
 
@@ -593,7 +586,7 @@ class RiskDeviationIndexCalculator:
     async def generate_risk_warning(
         self,
         student_id: int,
-        rdi_result: Dict,
+        rdi_result: dict,
         commit: bool = True,
     ) -> RiskWarning:
         """
@@ -633,11 +626,11 @@ class RiskDeviationIndexCalculator:
 
     async def get_dashboard_data(
         self,
-        class_id: Optional[int] = None,
-        grade_id: Optional[int] = None,
-        risk_level: Optional[str] = None,
+        class_id: int | None = None,
+        grade_id: int | None = None,
+        risk_level: str | None = None,
         days: int = 7,
-    ) -> Dict:
+    ) -> dict:
         """
         获取风险预警看板数据
 

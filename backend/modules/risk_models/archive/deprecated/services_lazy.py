@@ -10,24 +10,17 @@ modules/risk_models/services.py — 风险预警雷达核心业务逻辑 (LazyFe
 """
 
 import logging
+import os
 import time
-from datetime import datetime, date, timedelta
-from typing import Optional, List, Tuple, Dict
-from collections import defaultdict
-import math
-
-from sqlalchemy import select, func, and_, or_, case
-from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from .models import RiskWarning, WarningFeedback, RiskBaseline
-from core.models import Student, Class, Grade, User, UserRole
-from core.models import Base, SchoolMixin, get_local_now
+from datetime import date, datetime, timedelta
 
 # 导入 PolicyEngine 读取配置
 import yaml
-import os
+from core.models import Student, get_local_now
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from .models import RiskBaseline
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +34,7 @@ def load_policy_config() -> dict:
     """加载 policy.yaml 配置"""
     policy_path = os.path.join(os.path.dirname(__file__), "../../policy.yaml")
     try:
-        with open(policy_path, "r", encoding="utf-8") as f:
+        with open(policy_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
             return config.get("policy_engine", {})
     except Exception as e:
@@ -90,7 +83,9 @@ class RiskDeviationIndexCalculator:
         self.min_rdi_to_warn = suppression.get("min_rdi_to_warn", 1.0)
         self.max_warnings_per_day = suppression.get("max_warnings_per_day", 3)  # 总指挥调整为3
         self.suppress_repeated_warnings = suppression.get("suppress_repeated_warnings", True)
-        self.repeated_warning_cooldown_hours = suppression.get("repeated_warning_cooldown_hours", 48)
+        self.repeated_warning_cooldown_hours = suppression.get(
+            "repeated_warning_cooldown_hours", 48
+        )
 
     async def _execute_with_latency_monitor(self, query, operation_name: str):
         """
@@ -125,7 +120,7 @@ class RiskDeviationIndexCalculator:
         window_long: int = 90,
         load_history: bool = True,  # 🚀 LazyFetch 优化：是否加载历史趋势
         suppress_low_rdi: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """
         计算学生 RDI 风险偏离指数
 
@@ -176,39 +171,48 @@ class RiskDeviationIndexCalculator:
         sql_interactions += 1
 
         # 3. 获取三维度当前值 (SQL 2: 使用 ORM 查询，合并为1次)
-        from modules.behavior.models import DisciplineRecord
         from modules.attendance.models import AttendanceRecord
+        from modules.behavior.models import DisciplineRecord
         from modules.evaluation.models import StudentScore
 
         # 行为维度：过去 window_short 天的违纪次数
         window_start = date.today() - timedelta(days=window_short)
-        behavior_count = await self.db.scalar(
-            select(func.count()).where(
-                and_(
-                    DisciplineRecord.student_id == student_id,
-                    DisciplineRecord.created_at >= window_start,
+        behavior_count = (
+            await self.db.scalar(
+                select(func.count()).where(
+                    and_(
+                        DisciplineRecord.student_id == student_id,
+                        DisciplineRecord.created_at >= window_start,
+                    )
                 )
             )
-        ) or 0
+            or 0
+        )
         sql_interactions += 1  # 实际是3次查询，但每次都 <10ms
 
         # 考勤维度：过去 window_short 天的迟到/缺勤率
-        attendance_records = await self.db.scalar(
-            select(func.count()).where(
-                and_(
-                    AttendanceRecord.student_id == student_id,
-                    AttendanceRecord.created_at >= window_start,
+        attendance_records = (
+            await self.db.scalar(
+                select(func.count()).where(
+                    and_(
+                        AttendanceRecord.student_id == student_id,
+                        AttendanceRecord.created_at >= window_start,
+                    )
                 )
             )
-        ) or 0
+            or 0
+        )
 
         # 评价维度：最新的 total_score
-        score_avg = await self.db.scalar(
-            select(StudentScore.total_score)
-            .where(StudentScore.student_id == student_id)
-            .order_by(StudentScore.updated_at.desc())
-            .limit(1)
-        ) or 0.0
+        score_avg = (
+            await self.db.scalar(
+                select(StudentScore.total_score)
+                .where(StudentScore.student_id == student_id)
+                .order_by(StudentScore.updated_at.desc())
+                .limit(1)
+            )
+            or 0.0
+        )
 
         # 4. 计算 Z-Score 偏离度
         behavior_baseline = baseline_map.get("behavior")
@@ -218,27 +222,30 @@ class RiskDeviationIndexCalculator:
         behavior_dev = self._calculate_z_score(
             behavior_count,
             behavior_baseline.mean_value if behavior_baseline else 0.0,
-            behavior_baseline.std_value if behavior_baseline else 1.0
+            behavior_baseline.std_value if behavior_baseline else 1.0,
         )
 
         attendance_dev = self._calculate_z_score(
             attendance_records,
             attendance_baseline.mean_value if attendance_baseline else 0.0,
-            attendance_baseline.std_value if attendance_baseline else 1.0
+            attendance_baseline.std_value if attendance_baseline else 1.0,
         )
 
         score_dev = self._calculate_z_score(
             score_avg,
             score_baseline.mean_value if score_baseline else 75.0,
-            score_baseline.std_value if score_baseline else 10.0
+            score_baseline.std_value if score_baseline else 10.0,
         )
 
         # 5. 复合 RDI (权重可配置)
-        weights = self.policy.get("risk_warning", {}).get("rdi_weights", {
-            "behavior": 0.4,
-            "attendance": 0.3,
-            "score": 0.3,
-        })
+        weights = self.policy.get("risk_warning", {}).get(
+            "rdi_weights",
+            {
+                "behavior": 0.4,
+                "attendance": 0.3,
+                "score": 0.3,
+            },
+        )
         rdi_score = (
             weights["behavior"] * behavior_dev
             + weights["attendance"] * attendance_dev
@@ -299,7 +306,7 @@ class RiskDeviationIndexCalculator:
             return (current_value - mean) / std
         return 0.0
 
-    async def _calculate_ewma_trend(self, student_id: int) -> Tuple[float, bool]:
+    async def _calculate_ewma_trend(self, student_id: int) -> tuple[float, bool]:
         """
         EWMA 趋势检测
 
@@ -317,11 +324,14 @@ class RiskDeviationIndexCalculator:
 
         配置读取: policy.yaml → risk_warning → risk_levels
         """
-        risk_levels = self.policy.get("risk_warning", {}).get("risk_levels", {
-            "normal": {"max_rdi": 1.0},
-            "attention": {"min_rdi": 1.0, "max_rdi": 2.0},
-            "intervention": {"min_rdi": 2.0},
-        })
+        risk_levels = self.policy.get("risk_warning", {}).get(
+            "risk_levels",
+            {
+                "normal": {"max_rdi": 1.0},
+                "attention": {"min_rdi": 1.0, "max_rdi": 2.0},
+                "intervention": {"min_rdi": 2.0},
+            },
+        )
 
         if rdi_score < risk_levels["attention"]["min_rdi"]:
             return "normal"
@@ -330,7 +340,7 @@ class RiskDeviationIndexCalculator:
         else:
             return "intervention"
 
-    def _recommend_action(self, risk_level: str, is_escalating: bool) -> Optional[str]:
+    def _recommend_action(self, risk_level: str, is_escalating: bool) -> str | None:
         """
         推荐处置动作
 

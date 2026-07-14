@@ -12,24 +12,30 @@ error_funnel/services.py — 错题断层漏斗引擎核心
   8. 从考试成绩批量导入错题
 """
 
-import os
 import json
-import httpx
 import logging
-from sqlalchemy import select, func, and_, update, delete
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, List, Tuple, Dict, Any
-from datetime import datetime
+import os
 
-from core.models import get_local_now, User, Student
-from modules.grades.models import GradeSubject, GradeRecord
+import httpx
+from core.models import Student, get_local_now
+from modules.grades.models import GradeRecord, GradeSubject
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .models import (
-    KnowledgePoint, ErrorBookItem, KnowledgeGap,
-    ERROR_CONCEPTUAL, ERROR_PROCEDURAL, ERROR_CARELESS, ERROR_OMISSION, ERROR_UNKNOWN,
-    SOURCE_HOMEWORK, SOURCE_EXAM, SOURCE_MANUAL,
-    GAP_NONE, GAP_WATCH, GAP_WARNING, GAP_CRITICAL,
-    GAP_ACTIVE, GAP_RESOLVED,
-    AI_PENDING, AI_COMPLETED, AI_FAILED,
+    ERROR_CONCEPTUAL,
+    ERROR_UNKNOWN,
+    GAP_ACTIVE,
+    GAP_CRITICAL,
+    GAP_NONE,
+    GAP_RESOLVED,
+    GAP_WARNING,
+    GAP_WATCH,
+    SOURCE_EXAM,
+    SOURCE_HOMEWORK,
+    ErrorBookItem,
+    KnowledgeGap,
+    KnowledgePoint,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,16 +50,15 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
 # 辅助函数
 # ──────────────────────────────────────────────
 
-async def _get_student_names_batch(db: AsyncSession, student_ids: List[int]) -> Dict[int, str]:
+
+async def _get_student_names_batch(db: AsyncSession, student_ids: list[int]) -> dict[int, str]:
     if not student_ids:
         return {}
-    result = await db.execute(
-        select(Student.id, Student.name).where(Student.id.in_(student_ids))
-    )
+    result = await db.execute(select(Student.id, Student.name).where(Student.id.in_(student_ids)))
     return {row[0]: row[1] for row in result.all()}
 
 
-async def _get_subject_names_batch(db: AsyncSession, subject_ids: List[int]) -> Dict[int, str]:
+async def _get_subject_names_batch(db: AsyncSession, subject_ids: list[int]) -> dict[int, str]:
     if not subject_ids:
         return {}
     result = await db.execute(
@@ -62,7 +67,9 @@ async def _get_subject_names_batch(db: AsyncSession, subject_ids: List[int]) -> 
     return {row[0]: row[1] for row in result.all()}
 
 
-async def _get_kp_names_batch(db: AsyncSession, school_id: int, kp_ids: List[int]) -> Dict[int, str]:
+async def _get_kp_names_batch(
+    db: AsyncSession, school_id: int, kp_ids: list[int]
+) -> dict[int, str]:
     """批量获取知识点名"""
     if not kp_ids:
         return {}
@@ -93,8 +100,11 @@ def _calculate_gap_level(error_count: int, consecutive_errors: int) -> str:
 # 知识点 CRUD
 # ──────────────────────────────────────────────
 
+
 async def create_knowledge_point(
-    db: AsyncSession, school_id: int, data: "KnowledgePointCreate",
+    db: AsyncSession,
+    school_id: int,
+    data: "KnowledgePointCreate",
 ) -> KnowledgePoint:
     """创建知识点"""
     kp = KnowledgePoint(
@@ -113,10 +123,11 @@ async def create_knowledge_point(
 
 
 async def list_knowledge_points(
-    db: AsyncSession, school_id: int,
-    subject_id: Optional[int] = None,
-    parent_id: Optional[int] = None,
-) -> List[dict]:
+    db: AsyncSession,
+    school_id: int,
+    subject_id: int | None = None,
+    parent_id: int | None = None,
+) -> list[dict]:
     """列出知识点 (平铺)"""
     conditions = [KnowledgePoint.school_id == school_id, KnowledgePoint.is_active == True]
     if subject_id:
@@ -133,24 +144,30 @@ async def list_knowledge_points(
 
     subject_map = await _get_subject_names_batch(db, list(set(kp.subject_id for kp in kps)))
 
-    return [{
-        "id": kp.id,
-        "school_id": kp.school_id,
-        "subject_id": kp.subject_id,
-        "subject_name": subject_map.get(kp.subject_id, ""),
-        "name": kp.name,
-        "code": kp.code,
-        "description": kp.description,
-        "parent_id": kp.parent_id,
-        "sort_order": kp.sort_order,
-        "is_active": kp.is_active,
-        "created_at": kp.created_at,
-    } for kp in kps]
+    return [
+        {
+            "id": kp.id,
+            "school_id": kp.school_id,
+            "subject_id": kp.subject_id,
+            "subject_name": subject_map.get(kp.subject_id, ""),
+            "name": kp.name,
+            "code": kp.code,
+            "description": kp.description,
+            "parent_id": kp.parent_id,
+            "sort_order": kp.sort_order,
+            "is_active": kp.is_active,
+            "created_at": kp.created_at,
+        }
+        for kp in kps
+    ]
 
 
 async def update_knowledge_point(
-    db: AsyncSession, school_id: int, kp_id: int, data: "KnowledgePointUpdate",
-) -> Optional[KnowledgePoint]:
+    db: AsyncSession,
+    school_id: int,
+    kp_id: int,
+    data: "KnowledgePointUpdate",
+) -> KnowledgePoint | None:
     """更新知识点"""
     result = await db.execute(
         select(KnowledgePoint).where(
@@ -174,8 +191,11 @@ async def update_knowledge_point(
 # 错题本 CRUD
 # ──────────────────────────────────────────────
 
+
 async def add_error_item(
-    db: AsyncSession, school_id: int, data: "ErrorItemCreate",
+    db: AsyncSession,
+    school_id: int,
+    data: "ErrorItemCreate",
 ) -> ErrorBookItem:
     """手动添加错题"""
     item = ErrorBookItem(
@@ -199,20 +219,29 @@ async def add_error_item(
 
     # 自动聚合到 knowledge_gaps
     if data.knowledge_point_ids:
-        await _aggregate_gaps(db, school_id, data.student_id, data.subject_id, data.knowledge_point_ids, data.source_desc)
+        await _aggregate_gaps(
+            db,
+            school_id,
+            data.student_id,
+            data.subject_id,
+            data.knowledge_point_ids,
+            data.source_desc,
+        )
 
     return item
 
 
 async def list_error_items(
-    db: AsyncSession, school_id: int,
-    student_id: Optional[int] = None,
-    subject_id: Optional[int] = None,
-    source_type: Optional[str] = None,
-    error_type: Optional[str] = None,
-    is_resolved: Optional[bool] = None,
-    page: int = 1, page_size: int = 20,
-) -> Tuple[List[dict], int]:
+    db: AsyncSession,
+    school_id: int,
+    student_id: int | None = None,
+    subject_id: int | None = None,
+    source_type: str | None = None,
+    error_type: str | None = None,
+    is_resolved: bool | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict], int]:
     """列出错题本条目"""
     conditions = [ErrorBookItem.school_id == school_id]
     if student_id:
@@ -228,9 +257,7 @@ async def list_error_items(
 
     where_clause = and_(*conditions)
 
-    count_result = await db.execute(
-        select(func.count(ErrorBookItem.id)).where(where_clause)
-    )
+    count_result = await db.execute(select(func.count(ErrorBookItem.id)).where(where_clause))
     total = count_result.scalar() or 0
 
     result = await db.execute(
@@ -260,37 +287,41 @@ async def list_error_items(
         kp_names = []
         if i.knowledge_point_ids:
             kp_names = [kp_map.get(kp_id, f"知识点{kp_id}") for kp_id in i.knowledge_point_ids]
-        enriched.append({
-            "id": i.id,
-            "school_id": i.school_id,
-            "student_id": i.student_id,
-            "student_name": student_map.get(i.student_id, f"学生{i.student_id}"),
-            "subject_id": i.subject_id,
-            "subject_name": subject_map.get(i.subject_id, ""),
-            "source_type": i.source_type,
-            "source_id": i.source_id,
-            "source_desc": i.source_desc,
-            "question_content": i.question_content,
-            "question_type": i.question_type,
-            "student_answer": i.student_answer,
-            "correct_answer": i.correct_answer,
-            "error_type": i.error_type,
-            "knowledge_point_ids": i.knowledge_point_ids or [],
-            "knowledge_point_names": kp_names,
-            "difficulty": i.difficulty,
-            "ai_analysis": i.ai_analysis,
-            "ai_status": i.ai_status,
-            "is_resolved": i.is_resolved,
-            "resolved_at": i.resolved_at,
-            "created_at": i.created_at,
-        })
+        enriched.append(
+            {
+                "id": i.id,
+                "school_id": i.school_id,
+                "student_id": i.student_id,
+                "student_name": student_map.get(i.student_id, f"学生{i.student_id}"),
+                "subject_id": i.subject_id,
+                "subject_name": subject_map.get(i.subject_id, ""),
+                "source_type": i.source_type,
+                "source_id": i.source_id,
+                "source_desc": i.source_desc,
+                "question_content": i.question_content,
+                "question_type": i.question_type,
+                "student_answer": i.student_answer,
+                "correct_answer": i.correct_answer,
+                "error_type": i.error_type,
+                "knowledge_point_ids": i.knowledge_point_ids or [],
+                "knowledge_point_names": kp_names,
+                "difficulty": i.difficulty,
+                "ai_analysis": i.ai_analysis,
+                "ai_status": i.ai_status,
+                "is_resolved": i.is_resolved,
+                "resolved_at": i.resolved_at,
+                "created_at": i.created_at,
+            }
+        )
 
     return enriched, total
 
 
 async def resolve_error_item(
-    db: AsyncSession, school_id: int, error_id: int,
-) -> Optional[ErrorBookItem]:
+    db: AsyncSession,
+    school_id: int,
+    error_id: int,
+) -> ErrorBookItem | None:
     """标记错题为已纠错"""
     result = await db.execute(
         select(ErrorBookItem).where(
@@ -312,9 +343,13 @@ async def resolve_error_item(
 # 作业错题归集 — 供 homework_mgmt 调用
 # ──────────────────────────────────────────────
 
+
 async def ingest_errors_from_homework(
-    db: AsyncSession, school_id: int, student_id: int,
-    assignment_id: int, error_items: List[dict],
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
+    assignment_id: int,
+    error_items: list[dict],
 ) -> int:
     """
     从作业批改中归集错题 — 由 homework_mgmt/services.py 调用
@@ -325,6 +360,7 @@ async def ingest_errors_from_homework(
     """
     # 获取作业信息用于 source_desc
     from modules.homework_mgmt.models import HwAssignment
+
     hw_result = await db.execute(
         select(HwAssignment).where(
             and_(HwAssignment.school_id == school_id, HwAssignment.id == assignment_id)
@@ -358,7 +394,11 @@ async def ingest_errors_from_homework(
         kp_ids = ei.get("knowledge_point_ids", [])
         if kp_ids:
             await _aggregate_gaps(
-                db, school_id, student_id, subject_id, kp_ids,
+                db,
+                school_id,
+                student_id,
+                subject_id,
+                kp_ids,
                 f"作业: {hw_title}",
             )
 
@@ -371,9 +411,13 @@ async def ingest_errors_from_homework(
 # 知识点断层聚合 — 漏斗核心
 # ──────────────────────────────────────────────
 
+
 async def _aggregate_gaps(
-    db: AsyncSession, school_id: int, student_id: int,
-    subject_id: int, knowledge_point_ids: List[int],
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
+    subject_id: int,
+    knowledge_point_ids: list[int],
     source_desc: str = "",
 ) -> None:
     """
@@ -423,11 +467,13 @@ async def _aggregate_gaps(
 
             # 🔌 事件总线: 新晋 critical (非 critical → critical) 才发射
             if old_level != GAP_CRITICAL and gap.gap_level == GAP_CRITICAL:
-                critical_events.append({
-                    "knowledge_point": kp_name,
-                    "consecutive_errors": gap.consecutive_errors,
-                    "error_count": gap.error_count,
-                })
+                critical_events.append(
+                    {
+                        "knowledge_point": kp_name,
+                        "consecutive_errors": gap.consecutive_errors,
+                        "error_count": gap.error_count,
+                    }
+                )
         else:
             # 新建记录
             gap = KnowledgeGap(
@@ -451,13 +497,17 @@ async def _aggregate_gaps(
     for evt in critical_events:
         try:
             from core.event_bus import EventBus
-            EventBus().publish("error_funnel.critical", {
-                "school_id": school_id,
-                "student_id": student_id,
-                "knowledge_point": evt["knowledge_point"],
-                "consecutive_errors": evt["consecutive_errors"],
-                "error_count": evt["error_count"],
-            })
+
+            EventBus().publish(
+                "error_funnel.critical",
+                {
+                    "school_id": school_id,
+                    "student_id": student_id,
+                    "knowledge_point": evt["knowledge_point"],
+                    "consecutive_errors": evt["consecutive_errors"],
+                    "error_count": evt["error_count"],
+                },
+            )
         except Exception:
             pass  # 事件总线不可用时静默降级
 
@@ -466,14 +516,17 @@ async def _aggregate_gaps(
 # 断层查询
 # ──────────────────────────────────────────────
 
+
 async def list_gaps(
-    db: AsyncSession, school_id: int,
-    student_id: Optional[int] = None,
-    subject_id: Optional[int] = None,
-    gap_level: Optional[str] = None,
-    gap_status: Optional[str] = None,
-    page: int = 1, page_size: int = 20,
-) -> Tuple[List[dict], int]:
+    db: AsyncSession,
+    school_id: int,
+    student_id: int | None = None,
+    subject_id: int | None = None,
+    gap_level: str | None = None,
+    gap_status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict], int]:
     """列出知识点断层"""
     conditions = [KnowledgeGap.school_id == school_id]
     if student_id:
@@ -487,9 +540,7 @@ async def list_gaps(
 
     where_clause = and_(*conditions)
 
-    count_result = await db.execute(
-        select(func.count(KnowledgeGap.id)).where(where_clause)
-    )
+    count_result = await db.execute(select(func.count(KnowledgeGap.id)).where(where_clause))
     total = count_result.scalar() or 0
 
     result = await db.execute(
@@ -510,32 +561,37 @@ async def list_gaps(
     student_map = await _get_student_names_batch(db, student_ids)
     subject_map = await _get_subject_names_batch(db, subject_ids)
 
-    return [{
-        "id": g.id,
-        "school_id": g.school_id,
-        "student_id": g.student_id,
-        "student_name": student_map.get(g.student_id, f"学生{g.student_id}"),
-        "subject_id": g.subject_id,
-        "subject_name": subject_map.get(g.subject_id, ""),
-        "knowledge_point_id": g.knowledge_point_id,
-        "knowledge_point_name": g.knowledge_point_name,
-        "error_count": g.error_count,
-        "consecutive_errors": g.consecutive_errors,
-        "last_error_date": g.last_error_date,
-        "last_error_source": g.last_error_source,
-        "gap_level": g.gap_level,
-        "gap_status": g.gap_status,
-        "resolved_at": g.resolved_at,
-        "ai_prescription": g.ai_prescription,
-        "ai_prescription_generated_at": g.ai_prescription_generated_at,
-        "created_at": g.created_at,
-        "updated_at": g.updated_at,
-    } for g in gaps], total
+    return [
+        {
+            "id": g.id,
+            "school_id": g.school_id,
+            "student_id": g.student_id,
+            "student_name": student_map.get(g.student_id, f"学生{g.student_id}"),
+            "subject_id": g.subject_id,
+            "subject_name": subject_map.get(g.subject_id, ""),
+            "knowledge_point_id": g.knowledge_point_id,
+            "knowledge_point_name": g.knowledge_point_name,
+            "error_count": g.error_count,
+            "consecutive_errors": g.consecutive_errors,
+            "last_error_date": g.last_error_date,
+            "last_error_source": g.last_error_source,
+            "gap_level": g.gap_level,
+            "gap_status": g.gap_status,
+            "resolved_at": g.resolved_at,
+            "ai_prescription": g.ai_prescription,
+            "ai_prescription_generated_at": g.ai_prescription_generated_at,
+            "created_at": g.created_at,
+            "updated_at": g.updated_at,
+        }
+        for g in gaps
+    ], total
 
 
 async def resolve_gap(
-    db: AsyncSession, school_id: int, gap_id: int,
-) -> Optional[KnowledgeGap]:
+    db: AsyncSession,
+    school_id: int,
+    gap_id: int,
+) -> KnowledgeGap | None:
     """标记断层为已解决"""
     result = await db.execute(
         select(KnowledgeGap).where(
@@ -558,9 +614,12 @@ async def resolve_gap(
 # AI 处方生成 — DeepSeek 对接
 # ──────────────────────────────────────────────
 
+
 async def generate_ai_prescription(
-    db: AsyncSession, school_id: int, gap_id: int,
-) -> Optional[dict]:
+    db: AsyncSession,
+    school_id: int,
+    gap_id: int,
+) -> dict | None:
     """
     为知识点断层生成 AI 处方
 
@@ -582,14 +641,17 @@ async def generate_ai_prescription(
 
     # 获取关联错题 (最近5条)
     error_result = await db.execute(
-        select(ErrorBookItem).where(
+        select(ErrorBookItem)
+        .where(
             and_(
                 ErrorBookItem.school_id == school_id,
                 ErrorBookItem.student_id == gap.student_id,
                 ErrorBookItem.subject_id == gap.subject_id,
                 ErrorBookItem.knowledge_point_ids.contains([gap.knowledge_point_id]),
             )
-        ).order_by(ErrorBookItem.created_at.desc()).limit(5)
+        )
+        .order_by(ErrorBookItem.created_at.desc())
+        .limit(5)
     )
     errors = error_result.scalars().all()
 
@@ -680,9 +742,13 @@ async def _call_deepseek(prompt: str, system_prompt: str, timeout: float = 30.0)
 # 从考试成绩批量导入错题
 # ──────────────────────────────────────────────
 
+
 async def batch_import_from_exam(
-    db: AsyncSession, school_id: int,
-    exam_id: int, subject_id: int, threshold: float = 60.0,
+    db: AsyncSession,
+    school_id: int,
+    exam_id: int,
+    subject_id: int,
+    threshold: float = 60.0,
 ) -> dict:
     """
     从考试成绩批量导入错题 — 得分率低于阈值的学生自动生成错题记录
@@ -706,9 +772,7 @@ async def batch_import_from_exam(
     records = result.scalars().all()
 
     # 获取科目信息
-    subject_result = await db.execute(
-        select(GradeSubject).where(GradeSubject.id == subject_id)
-    )
+    subject_result = await db.execute(select(GradeSubject).where(GradeSubject.id == subject_id))
     subject = subject_result.scalar_one_or_none()
     subject_name = subject.name if subject else f"科目{subject_id}"
     full_score = float(subject.full_score) if subject and subject.full_score else 100.0
@@ -751,7 +815,11 @@ async def batch_import_from_exam(
         # 聚合到 gaps
         if kp_ids:
             await _aggregate_gaps(
-                db, school_id, record.student_id, subject_id, kp_ids,
+                db,
+                school_id,
+                record.student_id,
+                subject_id,
+                kp_ids,
                 f"考试得分率{percentage}%",
             )
 
@@ -763,10 +831,12 @@ async def batch_import_from_exam(
 # 看板统计
 # ──────────────────────────────────────────────
 
+
 async def get_dashboard(
-    db: AsyncSession, school_id: int,
-    student_id: Optional[int] = None,
-    subject_id: Optional[int] = None,
+    db: AsyncSession,
+    school_id: int,
+    student_id: int | None = None,
+    subject_id: int | None = None,
 ) -> dict:
     """错题断层看板"""
     e_conditions = [ErrorBookItem.school_id == school_id]
@@ -782,57 +852,84 @@ async def get_dashboard(
     g_where = and_(*g_conditions)
 
     # 错题统计
-    total_errors = await db.scalar(
-        select(func.count(ErrorBookItem.id)).where(e_where)
-    ) or 0
+    total_errors = await db.scalar(select(func.count(ErrorBookItem.id)).where(e_where)) or 0
 
-    unresolved = await db.scalar(
-        select(func.count(ErrorBookItem.id)).where(
-            and_(e_where, ErrorBookItem.is_resolved == False)
+    unresolved = (
+        await db.scalar(
+            select(func.count(ErrorBookItem.id)).where(
+                and_(e_where, ErrorBookItem.is_resolved == False)
+            )
         )
-    ) or 0
+        or 0
+    )
 
     # 断层统计
-    total_gaps = await db.scalar(
-        select(func.count(KnowledgeGap.id)).where(g_where)
-    ) or 0
+    total_gaps = await db.scalar(select(func.count(KnowledgeGap.id)).where(g_where)) or 0
 
-    critical = await db.scalar(
-        select(func.count(KnowledgeGap.id)).where(
-            and_(g_where, KnowledgeGap.gap_level == GAP_CRITICAL, KnowledgeGap.gap_status == GAP_ACTIVE)
+    critical = (
+        await db.scalar(
+            select(func.count(KnowledgeGap.id)).where(
+                and_(
+                    g_where,
+                    KnowledgeGap.gap_level == GAP_CRITICAL,
+                    KnowledgeGap.gap_status == GAP_ACTIVE,
+                )
+            )
         )
-    ) or 0
+        or 0
+    )
 
-    warning = await db.scalar(
-        select(func.count(KnowledgeGap.id)).where(
-            and_(g_where, KnowledgeGap.gap_level == GAP_WARNING, KnowledgeGap.gap_status == GAP_ACTIVE)
+    warning = (
+        await db.scalar(
+            select(func.count(KnowledgeGap.id)).where(
+                and_(
+                    g_where,
+                    KnowledgeGap.gap_level == GAP_WARNING,
+                    KnowledgeGap.gap_status == GAP_ACTIVE,
+                )
+            )
         )
-    ) or 0
+        or 0
+    )
 
-    watch = await db.scalar(
-        select(func.count(KnowledgeGap.id)).where(
-            and_(g_where, KnowledgeGap.gap_level == GAP_WATCH, KnowledgeGap.gap_status == GAP_ACTIVE)
+    watch = (
+        await db.scalar(
+            select(func.count(KnowledgeGap.id)).where(
+                and_(
+                    g_where,
+                    KnowledgeGap.gap_level == GAP_WATCH,
+                    KnowledgeGap.gap_status == GAP_ACTIVE,
+                )
+            )
         )
-    ) or 0
+        or 0
+    )
 
-    resolved = await db.scalar(
-        select(func.count(KnowledgeGap.id)).where(
-            and_(g_where, KnowledgeGap.gap_status == GAP_RESOLVED)
+    resolved = (
+        await db.scalar(
+            select(func.count(KnowledgeGap.id)).where(
+                and_(g_where, KnowledgeGap.gap_status == GAP_RESOLVED)
+            )
         )
-    ) or 0
+        or 0
+    )
 
-    ai_count = await db.scalar(
-        select(func.count(KnowledgeGap.id)).where(
-            and_(g_where, KnowledgeGap.ai_prescription.isnot(None))
+    ai_count = (
+        await db.scalar(
+            select(func.count(KnowledgeGap.id)).where(
+                and_(g_where, KnowledgeGap.ai_prescription.isnot(None))
+            )
         )
-    ) or 0
+        or 0
+    )
 
     # TOP 错误知识点
     top_kp_result = await db.execute(
         select(
             KnowledgeGap.knowledge_point_name,
             func.sum(KnowledgeGap.error_count),
-        ).where(g_where)
+        )
+        .where(g_where)
         .group_by(KnowledgeGap.knowledge_point_name)
         .order_by(func.sum(KnowledgeGap.error_count).desc())
         .limit(10)
@@ -844,7 +941,8 @@ async def get_dashboard(
         select(
             ErrorBookItem.student_id,
             func.count(ErrorBookItem.id),
-        ).where(e_where)
+        )
+        .where(e_where)
         .group_by(ErrorBookItem.student_id)
         .order_by(func.count(ErrorBookItem.id).desc())
         .limit(10)
@@ -852,7 +950,11 @@ async def get_dashboard(
     top_stu_ids = [row[0] for row in top_stu_result.all()]
     student_map = await _get_student_names_batch(db, top_stu_ids)
     top_error_students = [
-        {"student_id": row[0], "student_name": student_map.get(row[0], f"学生{row[0]}"), "error_count": row[1]}
+        {
+            "student_id": row[0],
+            "student_name": student_map.get(row[0], f"学生{row[0]}"),
+            "error_count": row[1],
+        }
         for row in top_stu_result.all()
     ]
 
@@ -861,26 +963,27 @@ async def get_dashboard(
         select(
             ErrorBookItem.error_type,
             func.count(ErrorBookItem.id),
-        ).where(e_where)
+        )
+        .where(e_where)
         .group_by(ErrorBookItem.error_type)
     )
     error_type_dist = {row[0]: row[1] for row in type_result.all()}
 
     # 最近错题
     recent_result = await db.execute(
-        select(ErrorBookItem)
-        .where(e_where)
-        .order_by(ErrorBookItem.created_at.desc())
-        .limit(5)
+        select(ErrorBookItem).where(e_where).order_by(ErrorBookItem.created_at.desc()).limit(5)
     )
-    recent_errors = [{
-        "id": e.id,
-        "student_id": e.student_id,
-        "question_content": e.question_content[:100],
-        "error_type": e.error_type,
-        "source_desc": e.source_desc,
-        "created_at": e.created_at,
-    } for e in recent_result.scalars().all()]
+    recent_errors = [
+        {
+            "id": e.id,
+            "student_id": e.student_id,
+            "question_content": e.question_content[:100],
+            "error_type": e.error_type,
+            "source_desc": e.source_desc,
+            "created_at": e.created_at,
+        }
+        for e in recent_result.scalars().all()
+    ]
 
     return {
         "total_errors": total_errors,

@@ -7,16 +7,15 @@ modules/dashboard/routers.py — 大数据看板 API 端点
   CLASS_TEACHER → 仅本班微观视角（严禁横向窥探）
 """
 
-from typing import Optional
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.routers import get_current_user, get_db
-from core.models import User, UserRole
 from .services import (
     get_class_radar,
-    get_trends,
     get_correlation_scatter,
+    get_trends,
 )
 
 router = APIRouter()
@@ -25,6 +24,7 @@ router = APIRouter()
 # ═══════════════════════════════════════════════════════════════
 # RBAC scope 构建 — 根据角色限定数据可见范围
 # ═══════════════════════════════════════════════════════════════
+
 
 def _build_scope(user: User) -> dict:
     """
@@ -52,6 +52,7 @@ def _build_scope(user: User) -> dict:
 # 端点一：班级万字违纪率晴雨表
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/class-radar")
 async def class_radar(
     user: User = Depends(get_current_user),
@@ -71,6 +72,7 @@ async def class_radar(
 # ═══════════════════════════════════════════════════════════════
 # 端点二：违纪严重度堆叠收敛趋势
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/trends")
 async def trends(
@@ -93,6 +95,7 @@ async def trends(
 # ═══════════════════════════════════════════════════════════════
 # 端点三：德育 X 成绩四象限散点图（王牌）
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/correlation-scatter")
 async def correlation_scatter(

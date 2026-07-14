@@ -12,37 +12,37 @@ Habit Cards 路由层
   POST /parent/blindbox/share   — 裂变分享标记 (Task #1400)
 """
 
+from core.models import Student, User
+from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, HTTPException, status
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
-from core.models import User, Student
-from core.routers import get_db, get_current_user
 from modules.habit_cards.models import (
-    HabitCard, StudentCardWallet, CardTransaction, ParentBlindboxLog,
-)
-from modules.habit_cards.services import (
-    issue_cards_to_students,
-    open_blindbox_for_parent,
-    generate_ai_praise_letter,
-    get_blindbox_history,
-    get_student_wallet_summary,
+    CardTransaction,
+    HabitCard,
+    ParentBlindboxLog,
+    StudentCardWallet,
 )
 from modules.habit_cards.schemas import (
+    BlindboxHistoryItem,
+    BlindboxHistoryResponse,
+    BlindBoxOpenRequest,
+    BlindBoxOpenResponse,
     CardTemplateOut,
     IssueCardsRequest,
     IssueCardsResponse,
+    ParentBlindboxResponse,
+    ShareBlindboxRequest,
     WalletItemOut,
     WalletResponse,
-    BlindBoxOpenRequest,
-    BlindBoxOpenResponse,
-    ParentBlindboxResponse,
-    BlindboxHistoryItem,
-    BlindboxHistoryResponse,
-    ShareBlindboxRequest,
 )
+from modules.habit_cards.services import (
+    generate_ai_praise_letter,
+    get_blindbox_history,
+    get_student_wallet_summary,
+    issue_cards_to_students,
+    open_blindbox_for_parent,
+)
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["habit-cards"])
 
@@ -50,6 +50,7 @@ router = APIRouter(tags=["habit-cards"])
 # ============================================================
 # GET /templates — 获取全校活跃卡牌模板
 # ============================================================
+
 
 @router.get("/templates", response_model=dict)
 async def list_card_templates(
@@ -63,10 +64,14 @@ async def list_card_templates(
     if current_user.role != "MS_ADMIN":
         school_id = effective_school_id
 
-    stmt = select(HabitCard).where(
-        HabitCard.school_id == school_id,
-        HabitCard.is_active == True,
-    ).order_by(HabitCard.card_rarity.desc(), HabitCard.card_name)
+    stmt = (
+        select(HabitCard)
+        .where(
+            HabitCard.school_id == school_id,
+            HabitCard.is_active == True,
+        )
+        .order_by(HabitCard.card_rarity.desc(), HabitCard.card_name)
+    )
     res = await db.execute(stmt)
     cards = res.scalars().all()
 
@@ -79,6 +84,7 @@ async def list_card_templates(
 # ============================================================
 # POST /issue — 教师批量闪击发卡
 # ============================================================
+
 
 @router.post("/issue", response_model=IssueCardsResponse)
 async def batch_issue_cards(
@@ -114,6 +120,7 @@ async def batch_issue_cards(
 # GET /wallet/{student_id} — 学生卡牌钱包 + AI 表彰信
 # ============================================================
 
+
 @router.get("/wallet/{student_id}", response_model=WalletResponse)
 async def get_student_wallet(
     student_id: int,
@@ -123,14 +130,17 @@ async def get_student_wallet(
     """调阅学生卡牌钱包及 AI 即时表彰信"""
     school_id = current_user.school_id
 
-    stmt = select(StudentCardWallet, HabitCard).join(
-        HabitCard, StudentCardWallet.card_id == HabitCard.id
-    ).where(
-        StudentCardWallet.student_id == student_id,
-        StudentCardWallet.school_id == school_id,
-        StudentCardWallet.quantity > 0,
-    ).order_by(
-        StudentCardWallet.last_earned_at.desc(),
+    stmt = (
+        select(StudentCardWallet, HabitCard)
+        .join(HabitCard, StudentCardWallet.card_id == HabitCard.id)
+        .where(
+            StudentCardWallet.student_id == student_id,
+            StudentCardWallet.school_id == school_id,
+            StudentCardWallet.quantity > 0,
+        )
+        .order_by(
+            StudentCardWallet.last_earned_at.desc(),
+        )
     )
 
     res = await db.execute(stmt)
@@ -168,6 +178,7 @@ async def get_student_wallet(
 # POST /blindbox/open — 家长盲盒翻牌
 # ============================================================
 
+
 @router.post("/blindbox/open", response_model=BlindBoxOpenResponse)
 async def open_blindbox(
     payload: BlindBoxOpenRequest,
@@ -197,6 +208,7 @@ async def open_blindbox(
 # GET /transactions/{student_id} — 发卡流水
 # ============================================================
 
+
 @router.get("/transactions/{student_id}")
 async def get_card_transactions(
     student_id: int,
@@ -206,10 +218,15 @@ async def get_card_transactions(
     """查看学生的发卡流水记录"""
     school_id = current_user.school_id
 
-    stmt = select(CardTransaction).where(
-        CardTransaction.student_id == student_id,
-        CardTransaction.school_id == school_id,
-    ).order_by(CardTransaction.created_at.desc()).limit(50)
+    stmt = (
+        select(CardTransaction)
+        .where(
+            CardTransaction.student_id == student_id,
+            CardTransaction.school_id == school_id,
+        )
+        .order_by(CardTransaction.created_at.desc())
+        .limit(50)
+    )
 
     res = await db.execute(stmt)
     txs = res.scalars().all()
@@ -234,6 +251,7 @@ async def get_card_transactions(
 # ============================================================
 # 家长盲盒 H5 落地页 依赖与端点 (Task #1400)
 # ============================================================
+
 
 async def require_parent_binding(
     current_user: User = Depends(get_current_user),
@@ -278,6 +296,7 @@ async def require_parent_binding(
 
 # ── GET /parent/blindbox: H5 盲盒自动翻牌 ──
 
+
 @router.get("/parent/blindbox", response_model=ParentBlindboxResponse)
 async def parent_auto_blindbox(
     current_user: User = Depends(get_current_user),
@@ -286,7 +305,8 @@ async def parent_auto_blindbox(
     """家长 H5 落地页自动盲盒翻牌 — 无需传参, 自动识别绑定学生"""
     # 绑定校验
     parent_user, student = await require_parent_binding(
-        current_user=current_user, db=db,
+        current_user=current_user,
+        db=db,
     )
 
     try:
@@ -299,7 +319,9 @@ async def parent_auto_blindbox(
 
         # 获取钱包摘要
         total_cards, total_points = await get_student_wallet_summary(
-            db, current_user.school_id, student.id,
+            db,
+            current_user.school_id,
+            student.id,
         )
 
         return ParentBlindboxResponse(
@@ -324,6 +346,7 @@ async def parent_auto_blindbox(
 
 # ── GET /parent/blindbox/history: 盲盒历史 ──
 
+
 @router.get("/parent/blindbox/history", response_model=BlindboxHistoryResponse)
 async def parent_blindbox_history(
     current_user: User = Depends(get_current_user),
@@ -331,7 +354,8 @@ async def parent_blindbox_history(
 ):
     """家长查看盲盒开启历史记录 (最近 20 条)"""
     parent_user, student = await require_parent_binding(
-        current_user=current_user, db=db,
+        current_user=current_user,
+        db=db,
     )
 
     history = await get_blindbox_history(
@@ -352,6 +376,7 @@ async def parent_blindbox_history(
 
 # ── POST /parent/blindbox/share: 裂变分享标记 ──
 
+
 @router.post("/parent/blindbox/share")
 async def parent_mark_share(
     payload: ShareBlindboxRequest,
@@ -360,7 +385,8 @@ async def parent_mark_share(
 ):
     """家长分享盲盒表彰信后标记裂变渠道"""
     parent_user, student = await require_parent_binding(
-        current_user=current_user, db=db,
+        current_user=current_user,
+        db=db,
     )
 
     # 查找盲盒日志并标记 shared_to

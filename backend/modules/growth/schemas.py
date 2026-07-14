@@ -4,10 +4,11 @@ modules/growth/schemas.py — 成长档案 Pydantic 契约层
 保留原有只读时间轴模型（TimelineItem / GrowthTimelineResponse），
 新增 P0 重型契约：事件写入 / 周期快照 / 五维雷达 / 全息画像。
 """
-from datetime import datetime, date
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
 
+from datetime import date, datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 # ═══════════════════════════════════════════════════════════
 #  原有：只读时间轴事件类型（7路融合）
@@ -29,10 +30,10 @@ class TimelineItem(BaseModel):
     occurred_at: datetime = Field(..., description="事件发生时间")
     event_date: date = Field(..., description="事件发生日期")
     title: str = Field(..., description="事件标题")
-    description: Optional[str] = Field(None, description="事件详情")
+    description: str | None = Field(None, description="事件详情")
     severity: str = Field(default="info", description="严重程度")
-    related_id: Optional[int] = Field(None, description="关联表主键ID")
-    source_table: Optional[str] = Field(None, description="数据源表名")
+    related_id: int | None = Field(None, description="关联表主键ID")
+    source_table: str | None = Field(None, description="数据源表名")
 
     class Config:
         from_attributes = True
@@ -43,7 +44,7 @@ class GrowthTimelineResponse(BaseModel):
     student_name: str
     class_name: str
     total_events: int
-    timeline: List[TimelineItem] = Field(default_factory=list)
+    timeline: list[TimelineItem] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -53,19 +54,24 @@ class GrowthTimelineResponse(BaseModel):
 #  P0 新增：成长事件写入契约
 # ═══════════════════════════════════════════════════════════
 
+
 class TimelineEventCreate(BaseModel):
     """手动/系统注入成长事件"""
+
     student_id: int = Field(..., description="学生ID")
-    dimension: str = Field(..., description="五育维度: academic/attendance/behavior/psychology/activity")
+    dimension: str = Field(
+        ..., description="五育维度: academic/attendance/behavior/psychology/activity"
+    )
     severity: str = Field("info", description="级别: info/bonus/warning/critical")
     event_type: str = Field(..., max_length=50, description="事件标识，如 hw_missing, gap_critical")
     title: str = Field(..., max_length=200, description="事件标题")
     occurred_at: datetime = Field(..., description="事件真实发生时间")
-    payload: Optional[Dict[str, Any]] = Field(None, description="多态结构化载荷")
+    payload: dict[str, Any] | None = Field(None, description="多态结构化载荷")
 
 
 class TimelineEventResponse(BaseModel):
     """成长事件响应"""
+
     id: int
     student_id: int
     dimension: str
@@ -73,8 +79,8 @@ class TimelineEventResponse(BaseModel):
     event_type: str
     title: str
     occurred_at: datetime
-    payload: Optional[Dict[str, Any]] = None
-    reporter_name: Optional[str] = None
+    payload: dict[str, Any] | None = None
+    reporter_name: str | None = None
     created_at: datetime
 
     class Config:
@@ -85,8 +91,10 @@ class TimelineEventResponse(BaseModel):
 #  P0 新增：周期快照契约
 # ═══════════════════════════════════════════════════════════
 
+
 class RadarDimensions(BaseModel):
     """五维雷达图得分"""
+
     academic: float = Field(..., ge=0.0, le=100.0, description="学业指数")
     attendance: float = Field(..., ge=0.0, le=100.0, description="考勤表现")
     behavior: float = Field(..., ge=0.0, le=100.0, description="日常品行")
@@ -96,15 +104,17 @@ class RadarDimensions(BaseModel):
 
 class SnapshotMetricsSummary(BaseModel):
     """期末关键数量摘要"""
+
     total_absent_count: int = Field(0, description="累计缺勤次数")
     critical_gap_count: int = Field(0, description="当前顽固错题断层数")
     behavior_violation_count: int = Field(0, description="累计违纪次数")
     honor_count: int = Field(0, description="获得荣誉次数")
-    additional_info: Dict[str, Any] = Field(default_factory=dict, description="额外扩展统计")
+    additional_info: dict[str, Any] = Field(default_factory=dict, description="额外扩展统计")
 
 
 class GrowthSnapshotResponse(BaseModel):
     """周期快照响应"""
+
     id: int
     student_id: int
     snapshot_type: str = Field(..., description="monthly / semester")
@@ -113,8 +123,8 @@ class GrowthSnapshotResponse(BaseModel):
     scores: RadarDimensions
     metrics_summary: SnapshotMetricsSummary
 
-    teacher_comment: Optional[str] = Field(None, description="班主任评语")
-    ai_growth_prescription: Optional[str] = Field(None, description="AI全息发展处方")
+    teacher_comment: str | None = Field(None, description="班主任评语")
+    ai_growth_prescription: str | None = Field(None, description="AI全息发展处方")
     created_at: datetime
 
     class Config:
@@ -125,13 +135,16 @@ class GrowthSnapshotResponse(BaseModel):
 #  P0 新增：班主任评语 + 快照生成请求
 # ═══════════════════════════════════════════════════════════
 
+
 class TeacherCommentUpdate(BaseModel):
     """班主任手工录入评语"""
+
     teacher_comment: str = Field(..., min_length=5, max_length=2000, description="期末综合评语")
 
 
 class SnapshotGenerateRequest(BaseModel):
     """快照生成请求"""
+
     student_id: int = Field(..., description="学生ID")
     snapshot_type: str = Field("monthly", description="monthly / semester")
     period_label: str = Field(..., description="时间标签，如 2026-07")
@@ -141,18 +154,20 @@ class SnapshotGenerateRequest(BaseModel):
 #  P0 新增：全息成长主页契约
 # ═══════════════════════════════════════════════════════════
 
+
 class StudentHolisticProfile(BaseModel):
     """学生全息成长画像 — 所有数据的终极汇聚出口"""
+
     student_id: int
     student_name: str
     class_name: str
 
-    current_snapshot: Optional[GrowthSnapshotResponse] = None
-    historical_snapshots: List[GrowthSnapshotResponse] = Field(default_factory=list)
-    recent_events: List[TimelineEventResponse] = Field(default_factory=list)
+    current_snapshot: GrowthSnapshotResponse | None = None
+    historical_snapshots: list[GrowthSnapshotResponse] = Field(default_factory=list)
+    recent_events: list[TimelineEventResponse] = Field(default_factory=list)
 
     # 原有7路融合时间轴（保留兼容）
-    legacy_timeline: Optional[GrowthTimelineResponse] = None
+    legacy_timeline: GrowthTimelineResponse | None = None
 
     class Config:
         from_attributes = True
@@ -162,24 +177,32 @@ class StudentHolisticProfile(BaseModel):
 #  P0 新增：成长看板统计
 # ═══════════════════════════════════════════════════════════
 
+
 class GrowthDashboard(BaseModel):
     """成长档案看板"""
+
     total_students: int = Field(0, description="总学生数")
     total_events: int = Field(0, description="总事件数")
     total_snapshots: int = Field(0, description="总快照数")
     critical_events: int = Field(0, description="critical级事件数")
     warning_events: int = Field(0, description="warning级事件数")
     bonus_events: int = Field(0, description="bonus级事件数")
-    dimension_distribution: List[Dict[str, Any]] = Field(default_factory=list, description="维度分布")
-    recent_critical_events: List[TimelineEventResponse] = Field(default_factory=list, description="近期critical事件")
+    dimension_distribution: list[dict[str, Any]] = Field(
+        default_factory=list, description="维度分布"
+    )
+    recent_critical_events: list[TimelineEventResponse] = Field(
+        default_factory=list, description="近期critical事件"
+    )
 
 
 # ═══════════════════════════════════════════════════════════
 #  CEP 复合预警 Alert 契约 — SSE 泵站前端沙箱消费
 # ═══════════════════════════════════════════════════════════
 
+
 class CompositeAlertDetail(BaseModel):
     """复合预警详情 — 前端沙箱 GET /alerts/{id} 响应"""
+
     id: int
     school_id: int
     student_id: int
@@ -188,10 +211,10 @@ class CompositeAlertDetail(BaseModel):
     reason_meta: str = Field(..., description="触发元数据 JSON")
     ai_prescription: str = Field(..., description="V3 AI 引擎生成的靶向处方 (Markdown)")
     is_resolved: bool = Field(False, description="是否已签署归档")
-    resolved_at: Optional[datetime] = None
-    resolved_by: Optional[int] = None
-    resolution_note: Optional[str] = Field(None, description="处置备注")
-    final_prescription: Optional[str] = Field(None, description="人工微调后的最终处方")
+    resolved_at: datetime | None = None
+    resolved_by: int | None = None
+    resolution_note: str | None = Field(None, description="处置备注")
+    final_prescription: str | None = Field(None, description="人工微调后的最终处方")
     created_at: datetime
 
     class Config:
@@ -200,15 +223,21 @@ class CompositeAlertDetail(BaseModel):
 
 class AlertResolveRequest(BaseModel):
     """签署处方归档请求 — 前端沙箱 POST /alerts/{id}/resolve"""
-    final_prescription: str = Field(..., min_length=10, description="人工微调后的最终处方（可基于 V3 原始修正）")
-    resolution_note: Optional[str] = Field(None, max_length=500, description="处置备注（教师手动填写）")
+
+    final_prescription: str = Field(
+        ..., min_length=10, description="人工微调后的最终处方（可基于 V3 原始修正）"
+    )
+    resolution_note: str | None = Field(
+        None, max_length=500, description="处置备注（教师手动填写）"
+    )
 
 
 class AlertResolveResponse(BaseModel):
     """签署归档响应"""
+
     id: int
     is_resolved: bool
     resolved_at: datetime
     resolved_by: int
-    resolution_note: Optional[str] = None
+    resolution_note: str | None = None
     final_prescription: str

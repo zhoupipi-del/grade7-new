@@ -30,4 +30,5 @@ def register(router_prefix="/api/v1/reports"):
       RDI白皮书轨: /rdi-summary, /export/high-risk, /class-report/{cid}
     """
     from modules.reports.routers import router
+
     return router, router_prefix

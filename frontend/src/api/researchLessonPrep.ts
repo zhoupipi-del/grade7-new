@@ -79,6 +79,9 @@ export interface PlanDetailResponse extends PlanResponse {
   latest_content: LessonContent | null
   latest_version_number: number | null
   unresolved_review_count: number
+  content_markdown: string | null
+  ai_bias_prescription: string | null
+  ai_prescription_generated_at: string | null
 }
 
 export interface VersionResponse {
@@ -172,6 +175,17 @@ export interface StatusTransitionPayload {
 
 export interface PlanForkPayload {
   title: string
+}
+
+export interface AIBiasGeneratePayload {
+  grade_id?: number
+  class_id?: number
+}
+
+export interface AIBiasResponse {
+  plan_id: number
+  ai_bias_prescription: string
+  generated_at: string
 }
 
 export interface ListParams {
@@ -275,6 +289,11 @@ export function rejectPlan(planId: number, payload: StatusTransitionPayload) {
 /** POST — Fork派生新教案 */
 export function forkPlan(planId: number, payload: PlanForkPayload) {
   return request.post<any, PlanDetailResponse>(`/research_lesson_prep/${planId}/fork`, payload)
+}
+
+/** POST — 生成AI教学偏方（学情逆向处方：error_funnel断层→DeepSeek→Markdown教学偏方） */
+export function generateAiBias(planId: number, payload?: AIBiasGeneratePayload) {
+  return request.post<any, AIBiasResponse>(`/research_lesson_prep/${planId}/generate-ai-bias`, payload || {})
 }
 
 /* ──────────────── 辅助函数 ──────────────── */

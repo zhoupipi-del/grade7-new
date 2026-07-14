@@ -11,22 +11,27 @@ research_lesson_prep/models.py — 集体备课协同编辑引擎
   (任一非PUBLISHED状态均可回退至DRAFT)
 """
 
+from core.models import Base, SchoolMixin, get_local_now
 from sqlalchemy import (
-    Column, BigInteger, String, Integer, Boolean, DateTime, Text, JSON,
-    ForeignKey, Index, UniqueConstraint,
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
-
-from core.models import Base, get_local_now
-from core.models import SchoolMixin
-
 
 # ──────────────────────────────────────────────
 # 状态枚举常量
 # ──────────────────────────────────────────────
-STATUS_DRAFT = "draft"                    # 主备手稿
-STATUS_COLLECTIVE_REVIEW = "review"       # 集体协同评议
-STATUS_ADMIN_APPROVE = "approved"         # 组长定稿审核
-STATUS_PUBLISHED = "published"            # 全校引用
+STATUS_DRAFT = "draft"  # 主备手稿
+STATUS_COLLECTIVE_REVIEW = "review"  # 集体协同评议
+STATUS_ADMIN_APPROVE = "approved"  # 组长定稿审核
+STATUS_PUBLISHED = "published"  # 全校引用
 
 VALID_TRANSITIONS = {
     STATUS_DRAFT: [STATUS_COLLECTIVE_REVIEW],
@@ -36,10 +41,10 @@ VALID_TRANSITIONS = {
 }
 
 # 课型
-LESSON_TYPE_NEW = "new"          # 新授课
-LESSON_TYPE_REVIEW = "review"    # 复习课
-LESSON_TYPE_EXAM = "exam"        # 考试讲评
-LESSON_TYPE_TEST = "test"        # 测试课
+LESSON_TYPE_NEW = "new"  # 新授课
+LESSON_TYPE_REVIEW = "review"  # 复习课
+LESSON_TYPE_EXAM = "exam"  # 考试讲评
+LESSON_TYPE_TEST = "test"  # 测试课
 LESSON_TYPE_ACTIVITY = "activity"  # 活动课
 
 
@@ -56,15 +61,27 @@ class ResearchLessonPlan(Base, SchoolMixin):
     subject_code = Column(String(20), nullable=False, comment="学科代码: chinese/math/english/...")
     grade_level = Column(String(20), nullable=False, comment="年级: grade_7/grade_8/...")
     lesson_type = Column(
-        String(20), default=LESSON_TYPE_NEW,
+        String(20),
+        default=LESSON_TYPE_NEW,
         comment="课型: new/review/exam/test/activity",
     )
     duration = Column(Integer, default=1, comment="课时数(默认1课时)")
     tags = Column(JSON, default=list, comment='标签: ["函数", "大单元", "跨学科"]')
 
+    # ── Markdown+LaTeX 教案正文 (Wings 3.1 AI全息备课仓) ──
+    content_markdown = Column(Text, comment="Markdown+LaTeX 教案正文 (协同编辑的完整文本内容)")
+
+    # ── AI学情逆向处方 (Wings 3.1 从error_funnel逆向注入) ──
+    ai_bias_prescription = Column(
+        Text, comment="AI学情逆向处方 (DeepSeek从错题断层逆向生成的教学偏方)"
+    )
+    ai_prescription_generated_at = Column(DateTime, comment="AI处方最后生成时间")
+
     # ── 状态机 ──
     status = Column(
-        String(20), default=STATUS_DRAFT, nullable=False,
+        String(20),
+        default=STATUS_DRAFT,
+        nullable=False,
         comment="状态: draft/review/approved/published",
     )
     status_updated_at = Column(DateTime, comment="状态最后变更时间")
@@ -110,7 +127,8 @@ class ResearchPlanVersion(Base, SchoolMixin):
 
     # ── 结构化教案内容 ──
     content_json = Column(
-        JSON, nullable=False,
+        JSON,
+        nullable=False,
         comment=(
             "结构化教案: {"
             "teaching_objectives:[], key_points:[], difficulties:[], "
@@ -118,6 +136,11 @@ class ResearchPlanVersion(Base, SchoolMixin):
             "homework:[], blackboard_design, reflection"
             "}"
         ),
+    )
+
+    # ── Markdown正文快照 (Wings 3.1 AI全息备课仓) ──
+    content_markdown = Column(
+        Text, comment="Markdown+LaTeX 正文快照 (每次保存时锁定一份不可变副本)"
     )
 
     # ── 变更说明 ──
@@ -144,7 +167,8 @@ class ResearchPlanReview(Base, SchoolMixin):
 
     # ── 批注定位 ──
     target_section = Column(
-        String(100), nullable=False,
+        String(100),
+        nullable=False,
         comment="指向教案组件: teaching_objectives / teaching_process[0] / homework / ...",
     )
     target_anchor = Column(String(200), comment="锚点文本 (批注所引用的原文片段)")
@@ -152,7 +176,8 @@ class ResearchPlanReview(Base, SchoolMixin):
     # ── 批注内容 ──
     comment = Column(Text, nullable=False, comment="批注正文")
     severity = Column(
-        String(20), default="suggestion",
+        String(20),
+        default="suggestion",
         comment="严重度: suggestion(建议) / issue(问题) / critical(严重缺陷)",
     )
 

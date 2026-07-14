@@ -9,19 +9,16 @@ Data Adapter 服务层 — Phase-Aware 清洗分发器
 """
 
 import io
-from typing import Optional
 
 from .cleaner import (
-    CleanResult,
-    CleanError,
-    clean_grades_row,
-    deduplicate_columns,
-    ALL_TEMPLATES,
     TEMPLATE_LIJIANG_FINAL,
     TEMPLATE_LIJIANG_MIDTERM,
     TEMPLATE_LIJIANG_ROSTER,
+    CleanError,
+    CleanResult,
+    clean_grades_row,
+    deduplicate_columns,
 )
-
 
 # ============================================================
 # 模板注册表
@@ -60,7 +57,7 @@ TEMPLATE_SENIOR_GENERIC = {
         "normalize_subject_name": True,
         "strip_name_spaces": True,
         "absent_as_null": True,
-        "skip_all_absent": False,   # 高中选科 — 未选科目缺考是正常的
+        "skip_all_absent": False,  # 高中选科 — 未选科目缺考是正常的
     },
     "error_handling": {
         "on_error": "skip",
@@ -80,7 +77,7 @@ def get_all_templates() -> list[dict]:
 
 def select_template(
     phase: str,
-    template_code: Optional[str] = None,
+    template_code: str | None = None,
 ) -> tuple[str, dict]:
     """
     根据学段和模板代号选择清洗模板
@@ -112,6 +109,7 @@ def select_template(
 # Excel 读取
 # ============================================================
 
+
 def read_excel_to_dicts(
     file_content: bytes,
     filename: str,
@@ -130,9 +128,7 @@ def read_excel_to_dicts(
             import openpyxl
         except ImportError:
             raise ValueError("服务器未安装 openpyxl, 无法读取 .xlsx 文件")
-        wb = openpyxl.load_workbook(
-            io.BytesIO(file_content), read_only=True, data_only=True
-        )
+        wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
         ws = wb.active
         rows = list(ws.iter_rows(values_only=True))
         wb.close()
@@ -142,8 +138,7 @@ def read_excel_to_dicts(
             import xlrd
         except ImportError:
             raise ValueError(
-                "服务器未安装 xlrd, 无法读取 .xls 文件. "
-                "请将文件另存为 .xlsx 格式后重新上传"
+                "服务器未安装 xlrd, 无法读取 .xls 文件. 请将文件另存为 .xlsx 格式后重新上传"
             )
         wb = xlrd.open_workbook(file_contents=file_content)
         ws = wb.sheet_by_index(0)
@@ -156,10 +151,7 @@ def read_excel_to_dicts(
         return [], []
 
     # 第一行作为表头
-    raw_headers = [
-        str(h).strip() if h is not None else f"col_{i}"
-        for i, h in enumerate(rows[0])
-    ]
+    raw_headers = [str(h).strip() if h is not None else f"col_{i}" for i, h in enumerate(rows[0])]
     dedup_result = deduplicate_columns(raw_headers)
 
     # deduplicate_columns 返回 dict 列表, 提取 header 字符串
@@ -200,12 +192,13 @@ def read_excel_to_dicts(
 # Phase-Aware 清洗分发器
 # ============================================================
 
+
 def process_scores(
     file_content: bytes,
     filename: str,
     phase: str,
-    template_code: Optional[str] = None,
-    selected_subjects: Optional[dict] = None,
+    template_code: str | None = None,
+    selected_subjects: dict | None = None,
     preview_only: bool = False,
     preview_rows: int = 5,
 ) -> tuple[str, dict, CleanResult]:
@@ -231,11 +224,15 @@ def process_scores(
 
     if not data_rows:
         result = CleanResult()
-        result.errors.append(CleanError(
-            row=0, column="", raw_value="",
-            error_type="parse_failed",
-            message="Excel 文件为空或无数据行",
-        ))
+        result.errors.append(
+            CleanError(
+                row=0,
+                column="",
+                raw_value="",
+                error_type="parse_failed",
+                message="Excel 文件为空或无数据行",
+            )
+        )
         return code, template, result
 
     # 3. 预览模式
@@ -254,11 +251,15 @@ def process_scores(
     for idx, raw_row in enumerate(data_rows, start=1):
         # 错误上限熔断
         if len(result.errors) >= max_errors:
-            result.errors.append(CleanError(
-                row=idx, column="", raw_value="",
-                error_type="parse_failed",
-                message=f"达到最大错误数 {max_errors}, 中止清洗",
-            ))
+            result.errors.append(
+                CleanError(
+                    row=idx,
+                    column="",
+                    raw_value="",
+                    error_type="parse_failed",
+                    message=f"达到最大错误数 {max_errors}, 中止清洗",
+                )
+            )
             break
 
         cleaned = clean_grades_row(idx, raw_row, field_mapping, result)
@@ -293,9 +294,7 @@ def _filter_senior_subjects(
 
         if selected:
             keep = set(selected) | mandatory
-            row["scores"] = {
-                k: v for k, v in row.get("scores", {}).items() if k in keep
-            }
+            row["scores"] = {k: v for k, v in row.get("scores", {}).items() if k in keep}
 
         filtered_data.append(row)
 
@@ -307,20 +306,23 @@ def _filter_senior_subjects(
 # 工具函数
 # ============================================================
 
+
 def serialize_errors(errors: list, limit: int = 20) -> list[dict]:
     """将 CleanError 列表序列化为可 JSON 化的 dict"""
     result = []
     for err in errors[:limit]:
         if isinstance(err, CleanError):
-            result.append({
-                "row": err.row,
-                "column": err.column,
-                "raw_value": str(err.raw_value)[:100],
-                "error_type": err.error_type.value
-                if hasattr(err.error_type, "value")
-                else str(err.error_type),
-                "message": err.message,
-            })
+            result.append(
+                {
+                    "row": err.row,
+                    "column": err.column,
+                    "raw_value": str(err.raw_value)[:100],
+                    "error_type": err.error_type.value
+                    if hasattr(err.error_type, "value")
+                    else str(err.error_type),
+                    "message": err.message,
+                }
+            )
         elif isinstance(err, dict):
             result.append(err)
     return result
@@ -330,8 +332,8 @@ def serialize_errors(errors: list, limit: int = 20) -> list[dict]:
 # 新高考 "3+1+2" 等级赋分核心自动机 (Scaling Engine)
 # ============================================================
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 def compute_new_gaokao_scaled_scores(df_subject_scores: pd.DataFrame) -> pd.DataFrame:
@@ -355,26 +357,28 @@ def compute_new_gaokao_scaled_scores(df_subject_scores: pd.DataFrame) -> pd.Data
     df = df_subject_scores.copy()
 
     # 2. 剥离缺考样本，缺考不参与大盘排名与赋分比例计算
-    df_active = df[df['is_absent'] == False].copy()
-    df_absent = df[df['is_absent'] == True].copy()
+    df_active = df[df["is_absent"] == False].copy()
+    df_absent = df[df["is_absent"] == True].copy()
 
     total_active = len(df_active)
     if total_active == 0:
         # 如果全员缺考，直接返回原样
-        df['cohort_rank'] = None
-        df['cohort_total'] = 0
-        df['percentile'] = None
-        df['grade_level'] = None
-        df['scaled_score'] = None
+        df["cohort_rank"] = None
+        df["cohort_total"] = 0
+        df["percentile"] = None
+        df["grade_level"] = None
+        df["scaled_score"] = None
         return df
 
     # 3. 计算绝对排名 (使用 min 模式，同分并列同名次，如 1, 2, 2, 4)
     # 并强制按原始分降序排列
-    df_active['cohort_rank'] = df_active['raw_score'].rank(method='min', ascending=False).astype(int)
-    df_active['cohort_total'] = total_active
+    df_active["cohort_rank"] = (
+        df_active["raw_score"].rank(method="min", ascending=False).astype(int)
+    )
+    df_active["cohort_total"] = total_active
 
     # 4. 计算百分比排位 (当前名次 / 总有效人数)
-    df_active['percentile'] = df_active['cohort_rank'] / total_active
+    df_active["percentile"] = df_active["cohort_rank"] / total_active
 
     # 5. 定义新高考五级标准区间箱
     # 阈值：A<=15%, B<=50%, C<=85%, D<=98%, E<=100%
@@ -393,43 +397,43 @@ def compute_new_gaokao_scaled_scores(df_subject_scores: pd.DataFrame) -> pd.Data
                 return box["level"]
         return "E"
 
-    df_active['grade_level'] = df_active['percentile'].apply(assign_grade_level)
+    df_active["grade_level"] = df_active["percentile"].apply(assign_grade_level)
 
     # 7. 级联核心：分等级区间执行【线性插值算法】
-    df_active['scaled_score'] = np.nan  # 初始化赋分列
+    df_active["scaled_score"] = np.nan  # 初始化赋分列
 
     for box in GRADE_BOXES:
         level = box["level"]
         y_min, y_max = box["y_min"], box["y_max"]
 
         # 捞出当前等级区间内的所有学生
-        mask = df_active['grade_level'] == level
+        mask = df_active["grade_level"] == level
         df_level = df_active[mask]
 
         if df_level.empty:
             continue
 
         # 抓取当前等级内，全大盘学生中暴露出的最大原始分和最小原始分
-        x_max = df_level['raw_score'].max()
-        x_min = df_level['raw_score'].min()
+        x_max = df_level["raw_score"].max()
+        x_min = df_level["raw_score"].min()
 
         # 边界防御：如果这个等级内所有人的原始分一模一样 (x_max == x_min)，防止除以 0 导致溢出
         if x_max == x_min:
-            df_active.loc[mask, 'scaled_score'] = y_max
+            df_active.loc[mask, "scaled_score"] = y_max
         else:
             # 🚀 拍入标准新高考插值公式
-            raw_scores = df_level['raw_score']
+            raw_scores = df_level["raw_score"]
             scaled_vals = y_min + ((y_max - y_min) * (raw_scores - x_min)) / (x_max - x_min)
             # 四舍五入取整并落盘
-            df_active.loc[mask, 'scaled_score'] = np.round(scaled_vals).astype(int)
+            df_active.loc[mask, "scaled_score"] = np.round(scaled_vals).astype(int)
 
     # 8. 合并缺考数据，保持数据集完整性
     if not df_absent.empty:
-        df_absent['cohort_rank'] = None
-        df_absent['cohort_total'] = total_active
-        df_absent['percentile'] = None
-        df_absent['grade_level'] = None
-        df_absent['scaled_score'] = None
+        df_absent["cohort_rank"] = None
+        df_absent["cohort_total"] = total_active
+        df_absent["percentile"] = None
+        df_absent["grade_level"] = None
+        df_absent["scaled_score"] = None
         df_result = pd.concat([df_active, df_absent])
     else:
         df_result = df_active
@@ -441,33 +445,36 @@ def compute_new_gaokao_scaled_scores(df_subject_scores: pd.DataFrame) -> pd.Data
 # 必考/首选科目: 只算排名, 不赋分
 # ============================================================
 
+
 def _compute_ranking_only(df_engine_input: pd.DataFrame) -> pd.DataFrame:
     """语数英/物理/历史: 只算 cohort_rank + percentile, scaled_score = None"""
     df = df_engine_input.copy()
-    df_active = df[df['is_absent'] == False].copy()
-    df_absent = df[df['is_absent'] == True].copy()
+    df_active = df[df["is_absent"] == False].copy()
+    df_absent = df[df["is_absent"] == True].copy()
 
     total_active = len(df_active)
     if total_active == 0:
-        df['cohort_rank'] = None
-        df['cohort_total'] = 0
-        df['percentile'] = None
-        df['grade_level'] = None
-        df['scaled_score'] = None
+        df["cohort_rank"] = None
+        df["cohort_total"] = 0
+        df["percentile"] = None
+        df["grade_level"] = None
+        df["scaled_score"] = None
         return df
 
-    df_active['cohort_rank'] = df_active['raw_score'].rank(method='min', ascending=False).astype(int)
-    df_active['cohort_total'] = total_active
-    df_active['percentile'] = df_active['cohort_rank'] / total_active
-    df_active['grade_level'] = None
-    df_active['scaled_score'] = None
+    df_active["cohort_rank"] = (
+        df_active["raw_score"].rank(method="min", ascending=False).astype(int)
+    )
+    df_active["cohort_total"] = total_active
+    df_active["percentile"] = df_active["cohort_rank"] / total_active
+    df_active["grade_level"] = None
+    df_active["scaled_score"] = None
 
     if not df_absent.empty:
-        df_absent['cohort_rank'] = None
-        df_absent['cohort_total'] = total_active
-        df_absent['percentile'] = None
-        df_absent['grade_level'] = None
-        df_absent['scaled_score'] = None
+        df_absent["cohort_rank"] = None
+        df_absent["cohort_total"] = total_active
+        df_absent["percentile"] = None
+        df_absent["grade_level"] = None
+        df_absent["scaled_score"] = None
         df_result = pd.concat([df_active, df_absent])
     else:
         df_result = df_active
@@ -499,14 +506,15 @@ SCALED_SUBJECTS = {"chemistry", "biology", "politics", "geography"}
 # 辅助: 解析或自动创建班级
 # ============================================================
 
+
 async def _resolve_or_create_classes(
     db,
     school_id: int,
     cleaned_data: list[dict],
 ) -> dict[str, int]:
     """返回 {class_name: class_id}, 不存在的班级自动创建"""
-    from sqlalchemy import select
     from core.models import Class, Grade
+    from sqlalchemy import select
 
     class_names = set()
     for item in cleaned_data:
@@ -534,9 +542,7 @@ async def _resolve_or_create_classes(
         if grade_row:
             grade_id = grade_row.id
         else:
-            new_grade = Grade(
-                name="高中", school_id=school_id, sort_order=1, is_active=True
-            )
+            new_grade = Grade(name="高中", school_id=school_id, sort_order=1, is_active=True)
             db.add(new_grade)
             await db.flush()
             grade_id = new_grade.id
@@ -554,6 +560,7 @@ async def _resolve_or_create_classes(
 # 辅助: 解析或自动创建学生
 # ============================================================
 
+
 async def _resolve_or_create_students(
     db,
     school_id: int,
@@ -562,8 +569,9 @@ async def _resolve_or_create_students(
 ) -> dict[str, int]:
     """返回 {student_name: student_id}, 不存在的学生自动创建"""
     import time
+
+    from core.models import Class, Student
     from sqlalchemy import select
-    from core.models import Student, Class
 
     student_names = set()
     for item in cleaned_data:
@@ -594,9 +602,7 @@ async def _resolve_or_create_students(
         if not class_id:
             continue
 
-        class_result = await db.execute(
-            select(Class.grade_id).where(Class.id == class_id)
-        )
+        class_result = await db.execute(select(Class.grade_id).where(Class.id == class_id))
         class_row = class_result.first()
         grade_id = class_row.grade_id if class_row else None
 
@@ -621,6 +627,7 @@ async def _resolve_or_create_students(
 # 新高考统一全流道落盘管道 (async)
 # ============================================================
 
+
 async def process_and_save_senior_scores_pipeline(
     db,
     exam_id: int,
@@ -638,6 +645,7 @@ async def process_and_save_senior_scores_pipeline(
     返回: {subject_code: {total, active}} 汇总
     """
     from sqlalchemy import delete as sa_delete
+
     from .models import ExamGradesDetail
 
     # 1. 解析/创建班级和学生
@@ -663,13 +671,15 @@ async def process_and_save_senior_scores_pipeline(
                 continue
 
             is_absent = score is None
-            rows.append({
-                "student_id": student_id,
-                "admin_class_id": class_id,
-                "subject_code": subject_code,
-                "raw_score": float(score) if score is not None else 0.0,
-                "is_absent": is_absent,
-            })
+            rows.append(
+                {
+                    "student_id": student_id,
+                    "admin_class_id": class_id,
+                    "subject_code": subject_code,
+                    "raw_score": float(score) if score is not None else 0.0,
+                    "is_absent": is_absent,
+                }
+            )
 
     if not rows:
         return {"error": "no data to persist"}
@@ -683,11 +693,13 @@ async def process_and_save_senior_scores_pipeline(
     for subject_code in df_cleaned["subject_code"].unique():
         df_sub = df_cleaned[df_cleaned["subject_code"] == subject_code].copy()
 
-        df_engine_input = pd.DataFrame({
-            "student_id": df_sub["student_id"].values,
-            "raw_score": df_sub["raw_score"].values,
-            "is_absent": df_sub["is_absent"].values,
-        })
+        df_engine_input = pd.DataFrame(
+            {
+                "student_id": df_sub["student_id"].values,
+                "raw_score": df_sub["raw_score"].values,
+                "is_absent": df_sub["is_absent"].values,
+            }
+        )
 
         if subject_code in SCALED_SUBJECTS:
             df_engine_output = compute_new_gaokao_scaled_scores(df_engine_input)
@@ -707,10 +719,14 @@ async def process_and_save_senior_scores_pipeline(
                 teaching_class_id=None,
                 subject_code=subject_code,
                 raw_score=float(row["raw_score"]) if not row["is_absent"] else 0.0,
-                scaled_score=float(row["scaled_score"]) if pd.notna(row.get("scaled_score")) else None,
+                scaled_score=float(row["scaled_score"])
+                if pd.notna(row.get("scaled_score"))
+                else None,
                 is_absent=bool(row["is_absent"]),
                 cohort_rank=int(row["cohort_rank"]) if pd.notna(row.get("cohort_rank")) else None,
-                cohort_total=int(row["cohort_total"]) if pd.notna(row.get("cohort_total")) else None,
+                cohort_total=int(row["cohort_total"])
+                if pd.notna(row.get("cohort_total"))
+                else None,
                 percentile=float(row["percentile"]) if pd.notna(row.get("percentile")) else None,
                 grade_level=row.get("grade_level") if pd.notna(row.get("grade_level")) else None,
             )
@@ -737,6 +753,7 @@ async def process_and_save_senior_scores_pipeline(
 # 全校大盘 Z-Score 热力图矩阵引擎 (宏观战役 #1392)
 # ============================================================
 
+
 async def calculate_exam_zscore_matrix(db, exam_id: int, school_id: int) -> dict:
     """
     【全校大盘 Z-Score 强弱热力图矩阵引擎】
@@ -755,9 +772,10 @@ async def calculate_exam_zscore_matrix(db, exam_id: int, school_id: int) -> dict
       matrix_data:     [[c_idx, s_idx, z_score], ...]
       global_subject_stats: {subject: {mean, std}}
     """
-    from sqlalchemy import select
-    from .models import ExamGradesDetail
     from core.models import Class
+    from sqlalchemy import select
+
+    from .models import ExamGradesDetail
 
     # 1. 查全量有效成绩 (非缺考)
     stmt = select(
@@ -782,16 +800,12 @@ async def calculate_exam_zscore_matrix(db, exam_id: int, school_id: int) -> dict
         }
 
     # 转 DataFrame
-    df_records = pd.DataFrame(
-        rows, columns=["admin_class_id", "subject_code", "raw_score"]
-    )
+    df_records = pd.DataFrame(rows, columns=["admin_class_id", "subject_code", "raw_score"])
     df_records["raw_score"] = df_records["raw_score"].astype(float)
 
     # 2. 全校大盘级别: 学科均值与标准差
     group_stats = (
-        df_records.groupby("subject_code")["raw_score"]
-        .agg(["mean", "std"])
-        .to_dict("index")
+        df_records.groupby("subject_code")["raw_score"].agg(["mean", "std"]).to_dict("index")
     )
 
     # 3. 级联计算每个学生的个人单科 Z-Score
@@ -810,9 +824,7 @@ async def calculate_exam_zscore_matrix(db, exam_id: int, school_id: int) -> dict
 
     # 4. 核心聚合: 按班级 × 学科 联合分组, 求班级平均 Z-Score
     df_matrix = (
-        df_records.groupby(["admin_class_id", "subject_code"])["z_score"]
-        .mean()
-        .reset_index()
+        df_records.groupby(["admin_class_id", "subject_code"])["z_score"].mean().reset_index()
     )
 
     # 5. 提取去重的班级轴与学科轴
@@ -820,9 +832,7 @@ async def calculate_exam_zscore_matrix(db, exam_id: int, school_id: int) -> dict
     unique_subjects = sorted([str(sub) for sub in df_matrix["subject_code"].unique()])
 
     # 6. 查班级名称
-    class_stmt = select(Class.id, Class.name).where(
-        Class.id.in_(unique_class_ids)
-    )
+    class_stmt = select(Class.id, Class.name).where(Class.id.in_(unique_class_ids))
     class_result = await db.execute(class_stmt)
     class_id_to_name = {row.id: row.name for row in class_result}
 
@@ -839,11 +849,13 @@ async def calculate_exam_zscore_matrix(db, exam_id: int, school_id: int) -> dict
         z_val = round(float(row["z_score"]), 3)
         if z_val == 0:
             z_val = 0.0  # 消除 -0.0
-        matrix_data.append([
-            c_idx,
-            s_idx,
-            z_val,
-        ])
+        matrix_data.append(
+            [
+                c_idx,
+                s_idx,
+                z_val,
+            ]
+        )
 
     return {
         "classes": [class_id_to_name[cid] for cid in unique_class_ids],
@@ -861,6 +873,7 @@ async def calculate_exam_zscore_matrix(db, exam_id: int, school_id: int) -> dict
 # ============================================================
 # RDI 跨周期血缘追溯与风险触发自动机 (Task #1395)
 # ============================================================
+
 
 async def execute_rdi_risk_analysis_pipeline(
     db,
@@ -881,7 +894,8 @@ async def execute_rdi_risk_analysis_pipeline(
     返回:
       {status, alerts_triggered, red_count, yellow_count, msg}
     """
-    from sqlalchemy import select, delete
+    from sqlalchemy import delete, select
+
     from .models import ExamGradesDetail, StudentRiskAlert
 
     # 1. 异步拉取全量有效成绩
@@ -913,11 +927,7 @@ async def execute_rdi_risk_analysis_pipeline(
     df = pd.DataFrame(records)
     df["raw_score"] = df["raw_score"].astype(float)
 
-    stats_map = (
-        df.groupby("subject_code")["raw_score"]
-        .agg(["mean", "std"])
-        .to_dict("index")
-    )
+    stats_map = df.groupby("subject_code")["raw_score"].agg(["mean", "std"]).to_dict("index")
 
     # 3. 级联计算个人 Z-Score
     def _get_individual_z(row):
@@ -976,8 +986,7 @@ async def execute_rdi_risk_analysis_pipeline(
             subject_reasons.append(f"[{sub_code}] Z={z_val}")
 
         reason = (
-            f"在本次大考中，学科 {' / '.join(subject_reasons)} "
-            f"的标准分(Z-Score)处于全校极弱势象限"
+            f"在本次大考中，学科 {' / '.join(subject_reasons)} 的标准分(Z-Score)处于全校极弱势象限"
         )
 
         # 组装 3 层血缘有向无环图 (DAG) — 多学科节点
@@ -986,17 +995,19 @@ async def execute_rdi_risk_analysis_pipeline(
 
         # Layer 1: 单一风险洞察节点
         l1_id = f"L1_ALERT_{stu_id}"
-        nodes.append({
-            "id": l1_id,
-            "layer": "risk_insight",
-            "label": f"学业{level_cn}危机预警",
-            "data": {
-                "risk_type": "academic",
-                "risk_level": risk_level,
-                "trigger_reason": reason,
-                "triggered_subjects": len(stu_df),
-            },
-        })
+        nodes.append(
+            {
+                "id": l1_id,
+                "layer": "risk_insight",
+                "label": f"学业{level_cn}危机预警",
+                "data": {
+                    "risk_type": "academic",
+                    "risk_level": risk_level,
+                    "trigger_reason": reason,
+                    "triggered_subjects": len(stu_df),
+                },
+            }
+        )
 
         # Layer 2 + Layer 3: 每个触发学科一个聚合节点 + 一个源节点
         for _, row in stu_df.iterrows():
@@ -1005,54 +1016,42 @@ async def execute_rdi_risk_analysis_pipeline(
             if z_val == 0:
                 z_val = 0.0
 
-            scaled_val = (
-                float(row["scaled_score"])
-                if pd.notna(row.get("scaled_score"))
-                else None
-            )
-            rank_val = (
-                int(row["cohort_rank"])
-                if pd.notna(row.get("cohort_rank"))
-                else None
-            )
-            pct_val = (
-                float(row["percentile"])
-                if pd.notna(row.get("percentile"))
-                else None
-            )
-            grade_val = (
-                str(row["grade_level"])
-                if pd.notna(row.get("grade_level"))
-                else None
-            )
+            scaled_val = float(row["scaled_score"]) if pd.notna(row.get("scaled_score")) else None
+            rank_val = int(row["cohort_rank"]) if pd.notna(row.get("cohort_rank")) else None
+            pct_val = float(row["percentile"]) if pd.notna(row.get("percentile")) else None
+            grade_val = str(row["grade_level"]) if pd.notna(row.get("grade_level")) else None
 
             l2_id = f"L2_AGG_{stu_id}_{sub_code}"
             l3_id = f"L3_SRC_{stu_id}_{class_id_val}_{sub_code}"
 
-            nodes.append({
-                "id": l2_id,
-                "layer": "aggregation_metrics",
-                "label": f"学科[{sub_code}]并网计算中间体",
-                "data": {
-                    "raw_score": float(row["raw_score"]),
-                    "scaled_score": scaled_val,
-                    "cohort_rank": rank_val,
-                    "percentile": pct_val,
-                    "grade_level": grade_val,
-                    "computed_z_score": z_val,
-                },
-            })
-            nodes.append({
-                "id": l3_id,
-                "layer": "source_ingestion",
-                "label": "行政班级教务数据源锚点",
-                "data": {
-                    "admin_class_id": class_id_val,
-                    "school_id": school_id,
-                    "exam_id": exam_id,
-                    "ingestion_engine": "Wings_New_Gaokao_Automaton_v3",
-                },
-            })
+            nodes.append(
+                {
+                    "id": l2_id,
+                    "layer": "aggregation_metrics",
+                    "label": f"学科[{sub_code}]并网计算中间体",
+                    "data": {
+                        "raw_score": float(row["raw_score"]),
+                        "scaled_score": scaled_val,
+                        "cohort_rank": rank_val,
+                        "percentile": pct_val,
+                        "grade_level": grade_val,
+                        "computed_z_score": z_val,
+                    },
+                }
+            )
+            nodes.append(
+                {
+                    "id": l3_id,
+                    "layer": "source_ingestion",
+                    "label": "行政班级教务数据源锚点",
+                    "data": {
+                        "admin_class_id": class_id_val,
+                        "school_id": school_id,
+                        "exam_id": exam_id,
+                        "ingestion_engine": "Wings_New_Gaokao_Automaton_v3",
+                    },
+                }
+            )
             edges.append({"source": l3_id, "target": l2_id})
             edges.append({"source": l2_id, "target": l1_id})
 
@@ -1092,8 +1091,7 @@ async def execute_rdi_risk_analysis_pipeline(
         "red_count": red_count,
         "yellow_count": yellow_count,
         "msg": (
-            f"RDI 血缘自动机计算完毕，成功拦截并落盘 "
-            f"{len(new_alert_objects)} 条危重红黄灯数据链路"
+            f"RDI 血缘自动机计算完毕，成功拦截并落盘 {len(new_alert_objects)} 条危重红黄灯数据链路"
         ),
     }
 
@@ -1110,8 +1108,8 @@ if __name__ == "__main__":
     # 模拟 10 个考生的原始化学成绩，包含同分并列和缺考
     mock_data = {
         "student_id": [101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
-        "raw_score":  [95,  90,  85,  85,  70,  65,  60,  55,  40,  0],
-        "is_absent":  [False, False, False, False, False, False, False, False, False, True],
+        "raw_score": [95, 90, 85, 85, 70, 65, 60, 55, 40, 0],
+        "is_absent": [False, False, False, False, False, False, False, False, False, True],
     }
     df_mock = pd.DataFrame(mock_data)
 
@@ -1139,12 +1137,16 @@ if __name__ == "__main__":
 
     # 2. 验证第一名 (95分) 是否成功拿到了等级 A 并赋分 100
     top_student = df_out[df_out["student_id"] == 101].iloc[0]
-    assert top_student["grade_level"] == "A" and top_student["scaled_score"] == 100, "等级 A 赋分规则计算跑偏"
+    assert top_student["grade_level"] == "A" and top_student["scaled_score"] == 100, (
+        "等级 A 赋分规则计算跑偏"
+    )
     print("  [PASS] student_id=101 → raw=95 → Grade A → scaled=100")
 
     # 3. 验证缺考考生的各项统计指标是否安全置空
     absent_student = df_out[df_out["student_id"] == 110].iloc[0]
-    assert pd.isna(absent_student["scaled_score"]) and absent_student["is_absent"] == True, "缺考过滤阀失效"
+    assert pd.isna(absent_student["scaled_score"]) and absent_student["is_absent"] == True, (
+        "缺考过滤阀失效"
+    )
     print("  [PASS] student_id=110 → 缺考 → scaled=None (安全置空)")
 
     # 4. 额外断言：赋分区间边界合规性
@@ -1158,7 +1160,9 @@ if __name__ == "__main__":
     s104 = df_out[df_out["student_id"] == 104].iloc[0]
     assert s103["grade_level"] == s104["grade_level"], "同分学生等级不一致"
     assert s103["scaled_score"] == s104["scaled_score"], "同分学生赋分不一致"
-    print(f"  [PASS] student_id=103 & 104 (raw=85) → 同等级={s103['grade_level']}, 同赋分={int(s103['scaled_score'])}")
+    print(
+        f"  [PASS] student_id=103 & 104 (raw=85) → 同等级={s103['grade_level']}, 同赋分={int(s103['scaled_score'])}"
+    )
 
     print("\n" + "=" * 60)
     print("  [ALL PASS] 新高考等级赋分引擎单测硬核通过！算法无溢出漏洞。")

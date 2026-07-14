@@ -15,4 +15,5 @@ MODULE_PHASES = ["primary", "integrated"]
 
 def register(router_prefix="/api/v1/habit-cards"):
     from modules.habit_cards.routers import router
+
     return router, router_prefix

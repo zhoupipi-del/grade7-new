@@ -193,7 +193,7 @@ const paginatedQuestions = computed(() => {
 async function doSearch() {
   searchLoading.value = true
   try {
-    const params: any = { keyword: searchKeyword.value || undefined }
+    const params: any = { q: searchKeyword.value || undefined }
     if (filterGradeId.value) params.grade_id = filterGradeId.value
     const res = await searchStudents(params)
     students.value = (res as any)?.items || res || []
@@ -230,9 +230,8 @@ async function submitAll() {
     const answerList = Object.entries(answers.value).map(([qId, score]) => {
       const q = questions.value.find(x => x.id === Number(qId))
       return {
-        question_id: Number(qId),
+        question_no: q?.order_no || Number(qId),
         score,
-        dimension_code: q?.dimension_code || '',
       }
     })
     const res = await submitSurvey({

@@ -13,10 +13,11 @@ policy_cache.py — policy.yaml 模块级单例缓存
   4. Fail-Soft — 加载失败返回空 dict，不阻断主业务（与原有行为一致）
 """
 
+import logging
 import os
 import threading
+
 import yaml
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +27,13 @@ _cached_config: dict = {}
 _cached_mtime: float = 0.0
 
 # policy.yaml 路径（相对于本文件: modules/risk_models/policy_cache.py）
-_POLICY_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "policy.yaml")
-)
+_POLICY_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "policy.yaml"))
 
 
 def _load_from_disk() -> dict:
     """从磁盘加载 policy.yaml 并返回 policy_engine 区块"""
     try:
-        with open(_POLICY_PATH, "r", encoding="utf-8") as f:
+        with open(_POLICY_PATH, encoding="utf-8") as f:
             config = yaml.safe_load(f)
             return config.get("policy_engine", {}) if config else {}
     except Exception as e:

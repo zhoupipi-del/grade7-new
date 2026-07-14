@@ -10,12 +10,18 @@ TenantApprovalChain 是审批链的"配置模板"，存储各学校对各业务�
   L3 执行层 — 快照拷贝 (工单创建时冻结规则，不受后续模板变更影响)
 """
 
-from sqlalchemy import (
-    Column, BigInteger, Integer, String, Boolean, DateTime, JSON,
-    UniqueConstraint, Index,
-)
-
 from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 
 
 class TenantApprovalChain(Base, SchoolMixin):
@@ -40,6 +46,7 @@ class TenantApprovalChain(Base, SchoolMixin):
     唯一约束: (school_id, business_type, version)
     激活约束: 同一 (school_id, business_type) 只有一个 is_active=True
     """
+
     __tablename__ = "tenant_approval_chains"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -62,7 +69,6 @@ class TenantApprovalChain(Base, SchoolMixin):
     updated_at = Column(DateTime, default=get_local_now, onupdate=get_local_now)
 
     __table_args__ = (
-        UniqueConstraint("school_id", "business_type", "version",
-                         name="uq_tac_business_version"),
+        UniqueConstraint("school_id", "business_type", "version", name="uq_tac_business_version"),
         Index("idx_tac_active", "school_id", "business_type", "is_active"),
     )

@@ -9,13 +9,12 @@ Celery Worker 进程独立运行，与 FastAPI Uvicorn 完全解耦。
   - 快照优先策略: 24h 内有效快照直接读取，否则 fallback 到实时聚合
 """
 
-import json
-import os
 import logging
-from datetime import datetime, date, timedelta
-from celery.exceptions import SoftTimeLimitExceeded
+import os
+from datetime import datetime
 
-from sqlalchemy import create_engine as _create_engine, text as _text
+from celery.exceptions import SoftTimeLimitExceeded
+from sqlalchemy import create_engine as _create_engine
 from sqlalchemy.orm import sessionmaker as _sm
 
 from .celery_app import celery_engine
@@ -30,10 +29,9 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 模块级同步引擎 (替代 per-call create_engine)
 # ═══════════════════════════════════════════════════════════════
 
-_SYNC_DB_URL = os.environ.get(
-    "DATABASE_URL_SYNC",
-    "mysql+pymysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3"
-)
+from core.db_utils import require_sync_db_url
+
+_SYNC_DB_URL = require_sync_db_url()
 _sync_engine = _create_engine(_SYNC_DB_URL, pool_pre_ping=True, pool_recycle=300, pool_size=5)
 _SyncSession = _sm(bind=_sync_engine)
 
@@ -52,8 +50,8 @@ LEVEL_PENALTY_MAP = {
     "WARNING": -5,
     "SERIOUS_WARN": -10,
     "DEMERIT": -20,
-    "PROBATION": None,   # None = 一票否决（不扣分，直接标记不合格）
-    "EXPULSION": None,   # None = 开除（不在评价体系内）
+    "PROBATION": None,  # None = 一票否决（不扣分，直接标记不合格）
+    "EXPULSION": None,  # None = 开除（不在评价体系内）
 }
 
 # 触发一票否决的处分等级
@@ -81,8 +79,9 @@ SNAPSHOT_MAX_AGE_HOURS = 24
 
 
 @celery_engine.task(bind=True, name="generate_class_moral_report")
-def generate_class_moral_report(self, school_id: int, class_id: int, semester: str,
-                                 created_by: int = None):
+def generate_class_moral_report(
+    self, school_id: int, class_id: int, semester: str, created_by: int = None
+):
     """
     【核心重资产任务】班级期末德育综合报告 PDF
 
@@ -105,23 +104,29 @@ def generate_class_moral_report(self, school_id: int, class_id: int, semester: s
                 "total": total_steps,
                 "progress": int(step / total_steps * 100),
                 "status_text": text,
-            }
+            },
         )
 
     try:
         # ═══ 阶段 0: 快照探测 ═══
         from .models import ReportSnapshot
+
         report_data = None
         snapshot_used = False
 
         session = _get_sync_session()
         try:
-            snapshot = session.query(ReportSnapshot).filter(
-                ReportSnapshot.class_id == class_id,
-                ReportSnapshot.semester == semester,
-                ReportSnapshot.school_id == school_id,
-                ReportSnapshot.is_stale == False,
-            ).order_by(ReportSnapshot.computed_at.desc()).first()
+            snapshot = (
+                session.query(ReportSnapshot)
+                .filter(
+                    ReportSnapshot.class_id == class_id,
+                    ReportSnapshot.semester == semester,
+                    ReportSnapshot.school_id == school_id,
+                    ReportSnapshot.is_stale == False,
+                )
+                .order_by(ReportSnapshot.computed_at.desc())
+                .first()
+            )
 
             if snapshot and snapshot.computed_at:
                 age = datetime.now() - snapshot.computed_at
@@ -130,7 +135,9 @@ def generate_class_moral_report(self, school_id: int, class_id: int, semester: s
                     snapshot_used = True
                     logger.info(
                         "[Reports] 快照命中 | class=%s semester=%s age=%sh",
-                        class_id, semester, round(age.total_seconds() / 3600, 1),
+                        class_id,
+                        semester,
+                        round(age.total_seconds() / 3600, 1),
                     )
         finally:
             session.close()
@@ -149,6 +156,7 @@ def generate_class_moral_report(self, school_id: int, class_id: int, semester: s
         # ═══ 阶段 3: PDF 渲染 ═══
         progress(2, "正在注入德育评语并编译 PDF 文档...")
         from .pdf_utils import generate_class_moral_report_pdf
+
         pdf_bytes, filename = generate_class_moral_report_pdf(report_data)
 
         # ═══ 阶段 4: 归档输出 ═══
@@ -164,7 +172,10 @@ def generate_class_moral_report(self, school_id: int, class_id: int, semester: s
 
         logger.info(
             "[Reports] PDF 生成成功: %s (%sKB) 耗时=%ss 快照=%s",
-            filename, file_size_kb, elapsed, "命中" if snapshot_used else "实时",
+            filename,
+            file_size_kb,
+            elapsed,
+            "命中" if snapshot_used else "实时",
         )
 
         return {
@@ -200,13 +211,14 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
               discipline_records, attendance_records, students
     """
     from sqlalchemy import text
+
     session = _get_sync_session()
 
     try:
         # ── 1. 班级基本信息 ──
         cls = session.execute(
             text("SELECT id, name, grade_id FROM classes WHERE id = :id AND school_id = :sid"),
-            {"id": class_id, "sid": school_id}
+            {"id": class_id, "sid": school_id},
         ).fetchone()
         if not cls:
             raise ValueError(f"班级 {class_id} 不存在")
@@ -221,7 +233,7 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
                 WHERE class_id = :cid AND school_id = :sid AND is_active = 1
                 ORDER BY student_no
             """),
-            {"cid": class_id, "sid": school_id}
+            {"cid": class_id, "sid": school_id},
         ).fetchall()
 
         students = [
@@ -243,7 +255,7 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
                 FROM student_scores
                 WHERE student_id IN :stids AND semester = :sem AND school_id = :sid
             """),
-            {"stids": tuple(student_ids), "sem": semester, "sid": school_id}
+            {"stids": tuple(student_ids), "sem": semester, "sid": school_id},
         ).fetchall()
 
         score_map = {}
@@ -266,13 +278,15 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
                 ORDER BY period_label DESC
                 LIMIT 10
             """),
-            {"cid": class_id, "sid": school_id}
+            {"cid": class_id, "sid": school_id},
         ).fetchall()
 
         flag_history = [
             {
-                "period_type": f[1], "period_label": f[2],
-                "final_score": float(f[3] or 0), "rank": int(f[4] or 0),
+                "period_type": f[1],
+                "period_label": f[2],
+                "final_score": float(f[3] or 0),
+                "rank": int(f[4] or 0),
                 "has_flag": bool(f[5]),
             }
             for f in flags_raw
@@ -287,7 +301,7 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
                   AND verify_status = 'VERIFIED'
                 GROUP BY student_id
             """),
-            {"stids": tuple(student_ids), "sid": school_id}
+            {"stids": tuple(student_ids), "sid": school_id},
         ).fetchall()
 
         discipline_map = {}
@@ -303,7 +317,7 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
                 WHERE student_id IN :stids AND school_id = :sid
                   AND status = 'ACTIVE'
             """),
-            {"stids": tuple(student_ids), "sid": school_id}
+            {"stids": tuple(student_ids), "sid": school_id},
         ).fetchall()
 
         # 构建学生 → 处分列表的映射
@@ -312,13 +326,15 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
             sid = s[0]
             if sid not in sanctions_map:
                 sanctions_map[sid] = []
-            sanctions_map[sid].append({
-                "level": s[1],
-                "label": LEVEL_LABELS.get(s[1], s[1]),
-                "reason": s[2][:100] if s[2] else "",
-                "document_no": s[3],
-                "punish_date": s[4].isoformat() if s[4] else None,
-            })
+            sanctions_map[sid].append(
+                {
+                    "level": s[1],
+                    "label": LEVEL_LABELS.get(s[1], s[1]),
+                    "reason": s[2][:100] if s[2] else "",
+                    "document_no": s[3],
+                    "punish_date": s[4].isoformat() if s[4] else None,
+                }
+            )
 
         # ── 6. 考勤汇总 ──
         att_raw = session.execute(
@@ -333,7 +349,7 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
                 WHERE student_id IN :stids AND school_id = :sid
                 GROUP BY student_id
             """),
-            {"stids": tuple(student_ids), "sid": school_id}
+            {"stids": tuple(student_ids), "sid": school_id},
         ).fetchall()
 
         attendance_map = {}
@@ -350,7 +366,9 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
             sid = s["id"]
             s["scores"] = score_map.get(sid, {})
             s["discipline"] = discipline_map.get(sid, {"count": 0, "total_points": 0})
-            s["attendance"] = attendance_map.get(sid, {"present": 0, "late": 0, "absent": 0, "leave": 0})
+            s["attendance"] = attendance_map.get(
+                sid, {"present": 0, "late": 0, "absent": 0, "leave": 0}
+            )
 
             # ── 注入处分信息 + 一票否决裁定 + final_grade 判定 ──
             active_sanctions = sanctions_map.get(sid, [])
@@ -387,7 +405,8 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
                 + s["scores"].get("academic", 0.0) * weights.get("academic", 0.25)
                 + s["scores"].get("health", 0.0) * weights.get("health", 0.20)
                 + s["scores"].get("art", 0.0) * weights.get("art", 0.15)
-                + s["scores"].get("social", 0.0) * weights.get("social", 0.15), 1
+                + s["scores"].get("social", 0.0) * weights.get("social", 0.15),
+                1,
             )
 
             # 最终等级判定
@@ -456,7 +475,7 @@ def _compute_rankings(report_data: dict) -> dict:
         ranked = sorted(
             [s for s in students if s["scores"].get(dim, 0) > 0],
             key=lambda s: s["scores"].get(dim, 0),
-            reverse=True
+            reverse=True,
         )
         for rank, s in enumerate(ranked, 1):
             if "ranks" not in s:
@@ -471,6 +490,7 @@ def _compute_rankings(report_data: dict) -> dict:
 # 夜间预计算任务 — PDF 渲染的"数据弹药库"
 # ═══════════════════════════════════════════════════════════════
 
+
 @celery_engine.task(name="reports.precompute_snapshots")
 def precompute_snapshots(school_id: int = 1):
     """
@@ -482,8 +502,9 @@ def precompute_snapshots(school_id: int = 1):
     遍历全校所有班级 → 调用 _aggregate_class_data → 存入 ReportSnapshot
     白天用户触发 PDF 时直接读取快照，跳过 Stage 1。
     """
-    from .models import ReportSnapshot
     from sqlalchemy import text as _sql_text
+
+    from .models import ReportSnapshot
 
     t0 = datetime.now()
     session = _get_sync_session()
@@ -514,11 +535,15 @@ def precompute_snapshots(school_id: int = 1):
                 data = _aggregate_class_data(school_id, class_id, semester)
 
                 # Upsert 快照
-                existing = session.query(ReportSnapshot).filter(
-                    ReportSnapshot.class_id == class_id,
-                    ReportSnapshot.semester == semester,
-                    ReportSnapshot.school_id == school_id,
-                ).first()
+                existing = (
+                    session.query(ReportSnapshot)
+                    .filter(
+                        ReportSnapshot.class_id == class_id,
+                        ReportSnapshot.semester == semester,
+                        ReportSnapshot.school_id == school_id,
+                    )
+                    .first()
+                )
 
                 if existing:
                     existing.snapshot_data = data
@@ -541,7 +566,9 @@ def precompute_snapshots(school_id: int = 1):
                 success += 1
                 logger.info(
                     "[Reports] 快照预计算成功 | class=%s(%s) students=%s",
-                    class_id, class_name, len(data.get("students", [])),
+                    class_id,
+                    class_name,
+                    len(data.get("students", [])),
                 )
 
             except Exception as exc:
@@ -549,13 +576,20 @@ def precompute_snapshots(school_id: int = 1):
                 failed += 1
                 logger.error(
                     "[Reports] 快照预计算失败 | class=%s(%s): %s",
-                    class_id, class_name, exc,
+                    class_id,
+                    class_name,
+                    exc,
                 )
 
         elapsed = round((datetime.now() - t0).total_seconds(), 2)
         logger.info(
             "[Reports] 夜间预计算完成 | school=%s semester=%s total=%s success=%s failed=%s 耗时=%ss",
-            school_id, semester, total, success, failed, elapsed,
+            school_id,
+            semester,
+            total,
+            success,
+            failed,
+            elapsed,
         )
 
         return {
@@ -576,6 +610,7 @@ def precompute_snapshots(school_id: int = 1):
 # 每日系统合规审计 — 原 Flask audit_report.py 迁移项
 # ═══════════════════════════════════════════════════════════════
 
+
 @celery_engine.task(name="reports.periodic_audit_report")
 def periodic_audit_report():
     """
@@ -592,7 +627,6 @@ def periodic_audit_report():
     队列: periodic
     """
     from sqlalchemy import text as _sql_text
-    from datetime import timedelta
 
     t0 = datetime.now()
     logger.info("[AUDIT] 启动系统全量合规审计...")
@@ -611,12 +645,14 @@ def periodic_audit_report():
             """)
         ).fetchone()
         stale_count = stale_approvals[0] if stale_approvals else 0
-        audit_results.append({
-            "check": "stale_approvals",
-            "label": "僵尸审批工单 (pending>7天)",
-            "count": stale_count,
-            "status": "PASS" if stale_count == 0 else "WARN",
-        })
+        audit_results.append(
+            {
+                "check": "stale_approvals",
+                "label": "僵尸审批工单 (pending>7天)",
+                "count": stale_count,
+                "status": "PASS" if stale_count == 0 else "WARN",
+            }
+        )
 
         # 2. 过期风险预警
         expired_warnings = session.execute(
@@ -629,12 +665,14 @@ def periodic_audit_report():
             """)
         ).fetchone()
         expired_count = expired_warnings[0] if expired_warnings else 0
-        audit_results.append({
-            "check": "expired_warnings",
-            "label": "过期风险预警 (active但已过期)",
-            "count": expired_count,
-            "status": "PASS" if expired_count == 0 else "WARN",
-        })
+        audit_results.append(
+            {
+                "check": "expired_warnings",
+                "label": "过期风险预警 (active但已过期)",
+                "count": expired_count,
+                "status": "PASS" if expired_count == 0 else "WARN",
+            }
+        )
 
         # 3. 孤儿处分记录
         orphan_sanctions = session.execute(
@@ -646,12 +684,14 @@ def periodic_audit_report():
             """)
         ).fetchone()
         orphan_count = orphan_sanctions[0] if orphan_sanctions else 0
-        audit_results.append({
-            "check": "orphan_sanctions",
-            "label": "孤儿处分记录 (student_id不存在)",
-            "count": orphan_count,
-            "status": "PASS" if orphan_count == 0 else "FAIL",
-        })
+        audit_results.append(
+            {
+                "check": "orphan_sanctions",
+                "label": "孤儿处分记录 (student_id不存在)",
+                "count": orphan_count,
+                "status": "PASS" if orphan_count == 0 else "FAIL",
+            }
+        )
 
         # 4. 无快照学生
         no_snapshot = session.execute(
@@ -663,12 +703,14 @@ def periodic_audit_report():
             """)
         ).fetchone()
         no_snap_count = no_snapshot[0] if no_snapshot else 0
-        audit_results.append({
-            "check": "no_snapshot",
-            "label": "无评价快照学生",
-            "count": no_snap_count,
-            "status": "PASS" if no_snap_count == 0 else "WARN",
-        })
+        audit_results.append(
+            {
+                "check": "no_snapshot",
+                "label": "无评价快照学生",
+                "count": no_snap_count,
+                "status": "PASS" if no_snap_count == 0 else "WARN",
+            }
+        )
 
         # 5. 积压未读通知 (> 30天)
         stale_notifs = session.execute(
@@ -680,25 +722,32 @@ def periodic_audit_report():
             """)
         ).fetchone()
         stale_notif_count = stale_notifs[0] if stale_notifs else 0
-        audit_results.append({
-            "check": "stale_notifications",
-            "label": "积压未读通知 (>30天)",
-            "count": stale_notif_count,
-            "status": "PASS" if stale_notif_count == 0 else "WARN",
-        })
+        audit_results.append(
+            {
+                "check": "stale_notifications",
+                "label": "积压未读通知 (>30天)",
+                "count": stale_notif_count,
+                "status": "PASS" if stale_notif_count == 0 else "WARN",
+            }
+        )
 
         elapsed = round((datetime.now() - t0).total_seconds(), 2)
         overall = "PASS" if all(r["status"] == "PASS" for r in audit_results) else "WARN"
 
         logger.info(
             "[AUDIT] 审计完成 | overall=%s checks=%s 耗时=%ss",
-            overall, len(audit_results), elapsed,
+            overall,
+            len(audit_results),
+            elapsed,
         )
         for r in audit_results:
             log_level = logger.info if r["status"] == "PASS" else logger.warning
             log_level(
                 "[AUDIT] %s: %s = %s (%s)",
-                r["status"], r["label"], r["count"], r["check"],
+                r["status"],
+                r["label"],
+                r["count"],
+                r["check"],
             )
 
         return {

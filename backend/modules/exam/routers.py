@@ -44,26 +44,44 @@ modules/exam/routers.py — 考试管理 API 端点（24 个端点）
     GET    /entry-windows/check    — 检查录入权限 (认证用户)
 """
 
-from typing import Optional
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.models import User, UserRole
-from core.routers import get_db, get_current_user, require_role
-from .services import (
-    SubjectScheduleService, RoomService, ArrangementService,
-    SeatService, InvigilatorService, EntryWindowService,
-)
 from .schemas import (
-    SubjectScheduleCreate, SubjectScheduleUpdate, SubjectScheduleOut,
-    RoomCreate, RoomUpdate, RoomOut, RoomItem, RoomSeedRequest, RoomSeedResult,
-    ArrangementCreate, ArrangementUpdate, ArrangementOut,
-    SeatAssignRequest, SeatAssignResult, SeatAssignmentOut, SeatOverrideUpdate,
-    InvigilatorCreate, InvigilatorOut,
-    EntryWindowCreate, EntryWindowOut,
-    EntryWindowBulkCreateRequest, EntryWindowBulkCreateResult,
+    ArrangementCreate,
+    ArrangementOut,
+    ArrangementUpdate,
+    EntryWindowBulkCreateRequest,
+    EntryWindowBulkCreateResult,
+    EntryWindowCreate,
+    EntryWindowOut,
+    InvigilatorCreate,
+    InvigilatorOut,
+    RoomCreate,
+    RoomItem,
+    RoomOut,
+    RoomSeedRequest,
+    RoomSeedResult,
+    RoomUpdate,
+    SeatAssignmentOut,
+    SeatAssignRequest,
+    SeatAssignResult,
+    SeatOverrideUpdate,
+    SubjectScheduleCreate,
+    SubjectScheduleOut,
+    SubjectScheduleUpdate,
+)
+from .services import (
+    ArrangementService,
+    EntryWindowService,
+    InvigilatorService,
+    RoomService,
+    SeatService,
+    SubjectScheduleService,
 )
 
 router = APIRouter(tags=["exam"])
@@ -72,6 +90,7 @@ router = APIRouter(tags=["exam"])
 # ═══════════════════════════════════════════════════════════════
 # 考试科目安排 (5)
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post(
     "/subjects",
@@ -88,7 +107,9 @@ async def create_subject_schedule(
     """创建考试科目安排。同一考试同一科目不可重复。"""
     try:
         return await SubjectScheduleService.create(
-            db=db, school_id=current_user.school_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            data=body,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -108,8 +129,10 @@ async def list_subject_schedules(
 ):
     """列出某场考试的科目安排，按 sort_order 排序。"""
     return await SubjectScheduleService.list_by_exam(
-        db=db, school_id=current_user.school_id,
-        exam_id=exam_id, active_only=active_only,
+        db=db,
+        school_id=current_user.school_id,
+        exam_id=exam_id,
+        active_only=active_only,
     )
 
 
@@ -124,7 +147,9 @@ async def get_subject_schedule(
     current_user: User = Depends(get_current_user),
 ):
     result = await SubjectScheduleService.get(
-        db=db, school_id=current_user.school_id, schedule_id=schedule_id,
+        db=db,
+        school_id=current_user.school_id,
+        schedule_id=schedule_id,
     )
     if not result:
         raise HTTPException(status_code=404, detail="科目安排不存在")
@@ -145,8 +170,10 @@ async def update_subject_schedule(
 ):
     try:
         return await SubjectScheduleService.update(
-            db=db, school_id=current_user.school_id,
-            schedule_id=schedule_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            schedule_id=schedule_id,
+            data=body,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -166,7 +193,9 @@ async def delete_subject_schedule(
 ):
     try:
         await SubjectScheduleService.delete(
-            db=db, school_id=current_user.school_id, schedule_id=schedule_id,
+            db=db,
+            school_id=current_user.school_id,
+            schedule_id=schedule_id,
         )
         return {"detail": "已删除"}
     except ValueError as e:
@@ -176,6 +205,7 @@ async def delete_subject_schedule(
 # ═══════════════════════════════════════════════════════════════
 # 考场管理 (6)
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post(
     "/rooms",
@@ -191,7 +221,9 @@ async def create_room(
 ):
     try:
         return await RoomService.create(
-            db=db, school_id=current_user.school_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            data=body,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -204,14 +236,16 @@ async def create_room(
     description="获取学校所有考场，可按类型过滤",
 )
 async def list_rooms(
-    room_type: Optional[str] = Query(default=None, description="类型: classroom/hall/lab"),
+    room_type: str | None = Query(default=None, description="类型: classroom/hall/lab"),
     active_only: bool = Query(default=False, description="仅返回启用的"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     return await RoomService.list(
-        db=db, school_id=current_user.school_id,
-        room_type=room_type, active_only=active_only,
+        db=db,
+        school_id=current_user.school_id,
+        room_type=room_type,
+        active_only=active_only,
     )
 
 
@@ -226,7 +260,9 @@ async def get_room(
     current_user: User = Depends(get_current_user),
 ):
     room = await RoomService.get(
-        db=db, school_id=current_user.school_id, room_id=room_id,
+        db=db,
+        school_id=current_user.school_id,
+        room_id=room_id,
     )
     if not room:
         raise HTTPException(status_code=404, detail="考场不存在")
@@ -247,8 +283,10 @@ async def update_room(
 ):
     try:
         return await RoomService.update(
-            db=db, school_id=current_user.school_id,
-            room_id=room_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            room_id=room_id,
+            data=body,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -269,7 +307,9 @@ async def toggle_room(
 ):
     try:
         return await RoomService.toggle_active(
-            db=db, school_id=current_user.school_id, room_id=room_id,
+            db=db,
+            school_id=current_user.school_id,
+            room_id=room_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -289,13 +329,16 @@ async def seed_rooms(
 ):
     """从 classes 表自动生成考场，room_code 格式 R-{class_id}。"""
     return await RoomService.seed_from_classes(
-        db=db, school_id=current_user.school_id, data=body,
+        db=db,
+        school_id=current_user.school_id,
+        data=body,
     )
 
 
 # ═══════════════════════════════════════════════════════════════
 # 考试安排 (4)
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post(
     "/arrangements",
@@ -311,7 +354,9 @@ async def create_arrangement(
 ):
     try:
         return await ArrangementService.create(
-            db=db, school_id=current_user.school_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            data=body,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -325,17 +370,20 @@ async def create_arrangement(
     description="按考试/科目/考场/日期过滤",
 )
 async def list_arrangements(
-    exam_id: Optional[int] = Query(default=None, description="考试ID"),
-    subject_id: Optional[int] = Query(default=None, description="科目ID"),
-    room_id: Optional[int] = Query(default=None, description="考场ID"),
-    exam_date: Optional[date] = Query(default=None, description="考试日期"),
+    exam_id: int | None = Query(default=None, description="考试ID"),
+    subject_id: int | None = Query(default=None, description="科目ID"),
+    room_id: int | None = Query(default=None, description="考场ID"),
+    exam_date: date | None = Query(default=None, description="考试日期"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     arrangements = await ArrangementService.list(
-        db=db, school_id=current_user.school_id,
-        exam_id=exam_id, subject_id=subject_id,
-        room_id=room_id, exam_date=exam_date,
+        db=db,
+        school_id=current_user.school_id,
+        exam_id=exam_id,
+        subject_id=subject_id,
+        room_id=room_id,
+        exam_date=exam_date,
     )
     return [ArrangementOut.model_validate(a) for a in arrangements]
 
@@ -354,8 +402,10 @@ async def update_arrangement(
 ):
     try:
         return await ArrangementService.update(
-            db=db, school_id=current_user.school_id,
-            arrangement_id=arrangement_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            arrangement_id=arrangement_id,
+            data=body,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -375,7 +425,8 @@ async def delete_arrangement(
 ):
     try:
         await ArrangementService.delete(
-            db=db, school_id=current_user.school_id,
+            db=db,
+            school_id=current_user.school_id,
             arrangement_id=arrangement_id,
         )
         return {"detail": "已删除"}
@@ -387,12 +438,13 @@ async def delete_arrangement(
 # 座位分配 (3)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post(
     "/seats/assign",
     response_model=SeatAssignResult,
     summary="批量编排座位",
     description="按 random/serpentine 方式批量分配座位，需 MS_ADMIN。\n\n"
-                "⚠️ 补丁3: is_manual_override=1 的座位在重排时跳过，保护特殊需求。",
+    "⚠️ 补丁3: is_manual_override=1 的座位在重排时跳过，保护特殊需求。",
 )
 async def assign_seats(
     body: SeatAssignRequest,
@@ -410,7 +462,9 @@ async def assign_seats(
     """
     try:
         return await SeatService.assign_seats(
-            db=db, school_id=current_user.school_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            data=body,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -424,14 +478,17 @@ async def assign_seats(
 async def list_seats(
     exam_id: int = Query(..., description="考试ID"),
     subject_id: int = Query(..., description="科目ID"),
-    room_id: Optional[int] = Query(default=None, description="按考场过滤"),
+    room_id: int | None = Query(default=None, description="按考场过滤"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """查询座位分配，按考场+座位号排序。"""
     return await SeatService.list_by_exam_subject(
-        db=db, school_id=current_user.school_id,
-        exam_id=exam_id, subject_id=subject_id, room_id=room_id,
+        db=db,
+        school_id=current_user.school_id,
+        exam_id=exam_id,
+        subject_id=subject_id,
+        room_id=room_id,
     )
 
 
@@ -440,8 +497,8 @@ async def list_seats(
     response_model=SeatAssignmentOut,
     summary="手动修改座位（补丁3）",
     description="手动修改学生座位，自动标记 is_manual_override=1。\n\n"
-                "用于特殊需求：伤残/视力障碍/靠门第一排等。\n"
-                "修改后算法重排时跳过此座位。",
+    "用于特殊需求：伤残/视力障碍/靠门第一排等。\n"
+    "修改后算法重排时跳过此座位。",
 )
 async def override_seat(
     assignment_id: int,
@@ -452,8 +509,10 @@ async def override_seat(
 ):
     try:
         return await SeatService.manual_override(
-            db=db, school_id=current_user.school_id,
-            assignment_id=assignment_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            assignment_id=assignment_id,
+            data=body,
         )
     except ValueError as e:
         if "已被其他学生占用" in str(e):
@@ -467,13 +526,14 @@ async def override_seat(
 # 监考安排 (4)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post(
     "/invigilators",
     response_model=InvigilatorOut,
     summary="指派监考教师",
     description="为某考场指派主/副监考教师，需 MS_ADMIN。\n\n"
-                "⚠️ 补丁2: 同一教师同一日期的时间段不可重叠，\n"
-                "冲突时返回 409 Conflict。",
+    "⚠️ 补丁2: 同一教师同一日期的时间段不可重叠，\n"
+    "冲突时返回 409 Conflict。",
 )
 async def assign_invigilator(
     body: InvigilatorCreate,
@@ -490,7 +550,9 @@ async def assign_invigilator(
     """
     try:
         return await InvigilatorService.assign(
-            db=db, school_id=current_user.school_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            data=body,
         )
     except ValueError as e:
         if "TIME_OVERLAP_CONFLICT" in str(e):
@@ -506,19 +568,23 @@ async def assign_invigilator(
     description="按考试/科目/考场/教师/日期过滤，含教师姓名和考场名",
 )
 async def list_invigilators(
-    exam_id: Optional[int] = Query(default=None, description="考试ID"),
-    subject_id: Optional[int] = Query(default=None, description="科目ID"),
-    room_id: Optional[int] = Query(default=None, description="考场ID"),
-    user_id: Optional[int] = Query(default=None, description="教师用户ID"),
-    exam_date: Optional[date] = Query(default=None, description="考试日期"),
+    exam_id: int | None = Query(default=None, description="考试ID"),
+    subject_id: int | None = Query(default=None, description="科目ID"),
+    room_id: int | None = Query(default=None, description="考场ID"),
+    user_id: int | None = Query(default=None, description="教师用户ID"),
+    exam_date: date | None = Query(default=None, description="考试日期"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """查询监考安排，按日期+时间排序。"""
     return await InvigilatorService.list(
-        db=db, school_id=current_user.school_id,
-        exam_id=exam_id, subject_id=subject_id,
-        room_id=room_id, user_id=user_id, exam_date=exam_date,
+        db=db,
+        school_id=current_user.school_id,
+        exam_id=exam_id,
+        subject_id=subject_id,
+        room_id=room_id,
+        user_id=user_id,
+        exam_date=exam_date,
     )
 
 
@@ -534,7 +600,8 @@ async def delete_invigilator(
 ):
     try:
         await InvigilatorService.delete(
-            db=db, school_id=current_user.school_id,
+            db=db,
+            school_id=current_user.school_id,
             invigilator_id=invigilator_id,
         )
         return {"detail": "已取消"}
@@ -555,7 +622,9 @@ async def check_invigilator_conflicts(
 ):
     """查询教师监考时间冲突列表。"""
     return await InvigilatorService.check_conflicts(
-        db=db, school_id=current_user.school_id, user_id=user_id,
+        db=db,
+        school_id=current_user.school_id,
+        user_id=user_id,
     )
 
 
@@ -563,12 +632,13 @@ async def check_invigilator_conflicts(
 # 成绩录入窗口 (7)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post(
     "/entry-windows",
     response_model=EntryWindowOut,
     summary="创建录入窗口",
     description="为某科目创建成绩录入窗口，需 MS_ADMIN。\n\n"
-                "⚠️ 补丁1: class_id=NULL 表示全校通开，非NULL精确到班级。",
+    "⚠️ 补丁1: class_id=NULL 表示全校通开，非NULL精确到班级。",
 )
 async def create_entry_window(
     body: EntryWindowCreate,
@@ -585,7 +655,9 @@ async def create_entry_window(
     """
     try:
         return await EntryWindowService.create(
-            db=db, school_id=current_user.school_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            data=body,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -606,7 +678,9 @@ async def bulk_create_entry_windows(
     """批量创建录入窗口，已存在的自动跳过。"""
     try:
         return await EntryWindowService.bulk_create(
-            db=db, school_id=current_user.school_id, data=body,
+            db=db,
+            school_id=current_user.school_id,
+            data=body,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -621,17 +695,20 @@ async def bulk_create_entry_windows(
     description="按考试/科目/班级/状态过滤",
 )
 async def list_entry_windows(
-    exam_id: Optional[int] = Query(default=None, description="考试ID"),
-    subject_id: Optional[int] = Query(default=None, description="科目ID"),
-    class_id: Optional[int] = Query(default=None, description="班级ID"),
-    status: Optional[str] = Query(default=None, description="状态: pending/open/closed"),
+    exam_id: int | None = Query(default=None, description="考试ID"),
+    subject_id: int | None = Query(default=None, description="科目ID"),
+    class_id: int | None = Query(default=None, description="班级ID"),
+    status: str | None = Query(default=None, description="状态: pending/open/closed"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     return await EntryWindowService.list(
-        db=db, school_id=current_user.school_id,
-        exam_id=exam_id, subject_id=subject_id,
-        class_id=class_id, status=status,
+        db=db,
+        school_id=current_user.school_id,
+        exam_id=exam_id,
+        subject_id=subject_id,
+        class_id=class_id,
+        status=status,
     )
 
 
@@ -650,8 +727,10 @@ async def open_entry_window(
     """开放录入窗口 (pending → open)。班主任在 open 状态下才能录入成绩。"""
     try:
         return await EntryWindowService.open_window(
-            db=db, school_id=current_user.school_id,
-            window_id=window_id, user_id=current_user.id,
+            db=db,
+            school_id=current_user.school_id,
+            window_id=window_id,
+            user_id=current_user.id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -672,8 +751,10 @@ async def close_entry_window(
     """关闭录入窗口 (open → closed)。关闭后班主任无法再录入成绩。"""
     try:
         return await EntryWindowService.close_window(
-            db=db, school_id=current_user.school_id,
-            window_id=window_id, user_id=current_user.id,
+            db=db,
+            school_id=current_user.school_id,
+            window_id=window_id,
+            user_id=current_user.id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -686,14 +767,16 @@ async def close_entry_window(
 )
 async def get_entry_progress(
     exam_id: int = Query(..., description="考试ID"),
-    subject_id: Optional[int] = Query(default=None, description="科目ID"),
+    subject_id: int | None = Query(default=None, description="科目ID"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """查询成绩录入进度，返回各状态窗口数和完成率。"""
     return await EntryWindowService.get_progress(
-        db=db, school_id=current_user.school_id,
-        exam_id=exam_id, subject_id=subject_id,
+        db=db,
+        school_id=current_user.school_id,
+        exam_id=exam_id,
+        subject_id=subject_id,
     )
 
 
@@ -718,7 +801,15 @@ async def check_entry_permission(
     3. 任一 open 即可录入
     """
     can_enter = await EntryWindowService.check_entry_permission(
-        db=db, school_id=current_user.school_id,
-        exam_id=exam_id, subject_id=subject_id, class_id=class_id,
+        db=db,
+        school_id=current_user.school_id,
+        exam_id=exam_id,
+        subject_id=subject_id,
+        class_id=class_id,
     )
-    return {"can_enter": can_enter, "exam_id": exam_id, "subject_id": subject_id, "class_id": class_id}
+    return {
+        "can_enter": can_enter,
+        "exam_id": exam_id,
+        "subject_id": subject_id,
+        "class_id": class_id,
+    }

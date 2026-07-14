@@ -2,18 +2,19 @@
 PolicyEngine Config — YAML 配置宪法加载器
 policy.yaml 的完整 Pydantic 映射。启动时加载，类型错误立即暴露。
 """
+
 from __future__ import annotations
 
-import yaml
 from enum import Enum
-from typing import Literal, Optional
+from typing import Literal
 
+import yaml
 from pydantic import BaseModel, Field
-
 
 # ─────────────────────────────────────────────────────────────
 # 枚举
 # ─────────────────────────────────────────────────────────────
+
 
 class Severity(str, Enum):
     MINOR = "minor"
@@ -41,6 +42,7 @@ class EscalationStrategy(str, Enum):
 # ─────────────────────────────────────────────────────────────
 # 1. 归一化配置
 # ─────────────────────────────────────────────────────────────
+
 
 class ShortWindowConfig(BaseModel):
     days: int = 30
@@ -100,6 +102,7 @@ class NormalizationConfig(BaseModel):
 # 2. 审批路由配置
 # ─────────────────────────────────────────────────────────────
 
+
 class ApproverConfig(BaseModel):
     role: str
     label: str
@@ -115,11 +118,11 @@ class ApprovalRule(BaseModel):
     event_types: list[str]
     severity: Severity
     mode: ApprovalMode
-    approvers: Optional[list[ApproverConfig]] = None
-    chain: Optional[list[ChainNodeConfig]] = None
+    approvers: list[ApproverConfig] | None = None
+    chain: list[ChainNodeConfig] | None = None
     auto_approve_if_creator: bool = False
     timeout_hours: int = 48
-    escalation_on_timeout: Optional[EscalationStrategy] = None
+    escalation_on_timeout: EscalationStrategy | None = None
 
 
 class DefaultRuleConfig(BaseModel):
@@ -136,21 +139,22 @@ class ApprovalRoutingConfig(BaseModel):
 # 3. 回血模型配置
 # ─────────────────────────────────────────────────────────────
 
+
 class PerSeverityConfig(BaseModel):
     recovery_enabled: bool
     tag_on_apply: PolicyTag
-    tag_on_full_recovery: Optional[PolicyTag] = None
-    k_override: Optional[float] = None
-    min_observation_days_override: Optional[int] = None
+    tag_on_full_recovery: PolicyTag | None = None
+    k_override: float | None = None
+    min_observation_days_override: int | None = None
 
 
 class RecoveryChannelConfig(BaseModel):
     code: str
     label: str
     trigger: str
-    recovery_ratio: Optional[float] = None
-    streak_days: Optional[int] = None
-    min_streak: Optional[int] = None
+    recovery_ratio: float | None = None
+    streak_days: int | None = None
+    min_streak: int | None = None
 
 
 class RecoveryParameters(BaseModel):
@@ -171,6 +175,7 @@ class RecoveryModelConfig(BaseModel):
 # 4. 事件分类配置
 # ─────────────────────────────────────────────────────────────
 
+
 class BehaviorTypeConfig(BaseModel):
     severity: Severity
     dimension: str
@@ -188,6 +193,7 @@ class EventClassificationConfig(BaseModel):
 # 根配置
 # ─────────────────────────────────────────────────────────────
 
+
 class PolicyConfig(BaseModel):
     version: str
     description: str
@@ -197,13 +203,14 @@ class PolicyConfig(BaseModel):
     event_classification: EventClassificationConfig
 
     @classmethod
-    def from_yaml(cls, path: str) -> "PolicyConfig":
-        with open(path, "r", encoding="utf-8") as f:
+    def from_yaml(cls, path: str) -> PolicyConfig:
+        with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return cls(**data["policy_engine"])
 
     def to_yaml(self, path: str) -> None:
         import yaml
+
         out = {"policy_engine": self.model_dump(mode="json")}
         with open(path, "w", encoding="utf-8") as f:
             yaml.safe_dump(out, f, allow_unicode=True, sort_keys=False)

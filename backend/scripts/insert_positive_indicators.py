@@ -15,11 +15,11 @@
 日期: 2026-07-05
 """
 
+import logging
 import os
 import sys
-import logging
+
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
 
 # 确保能引入项目根目录模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,10 +28,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("migrate_indicators")
 
 # ── 配置 ──────────────────────────────────────────────
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "mysql+pymysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3?charset=utf8mb4",
-)
+from core.db_utils import get_db_url_for_script
+
+DATABASE_URL = get_db_url_for_script("运行前请先 export DATABASE_URL=...")
 
 # 正向加分指标定义（从 services.py 中提取，sort_order >= 23）
 POSITIVE_INDICATORS = [
@@ -71,11 +70,14 @@ def insert_positive_indicators(school_id: int = 1):
                 SELECT id FROM evaluation_indicators
                 WHERE school_id = :school_id AND name = :name AND dimension = :dimension
             """)
-            result = conn.execute(check_sql, {
-                "school_id": school_id,
-                "name": name,
-                "dimension": dimension,
-            }).fetchone()
+            result = conn.execute(
+                check_sql,
+                {
+                    "school_id": school_id,
+                    "name": name,
+                    "dimension": dimension,
+                },
+            ).fetchone()
 
             if result:
                 logger.info(f"跳过已存在指标: {name} ({dimension}) [id={result[0]}]")
@@ -89,15 +91,18 @@ def insert_positive_indicators(school_id: int = 1):
                 VALUES
                 (:school_id, :name, :parent_id, :dimension, :weight, :max_score, :sort_order, 1, NOW())
             """)
-            conn.execute(insert_sql, {
-                "school_id": school_id,
-                "name": name,
-                "parent_id": parent_id,
-                "dimension": dimension,
-                "weight": weight,
-                "max_score": max_score,
-                "sort_order": sort_order,
-            })
+            conn.execute(
+                insert_sql,
+                {
+                    "school_id": school_id,
+                    "name": name,
+                    "parent_id": parent_id,
+                    "dimension": dimension,
+                    "weight": weight,
+                    "max_score": max_score,
+                    "sort_order": sort_order,
+                },
+            )
             logger.info(f"已插入指标: {name} ({dimension}) [sort_order={sort_order}]")
             inserted += 1
 
@@ -126,7 +131,9 @@ def list_indicators(school_id: int = 1):
         for row in results:
             id, name, dimension, weight, sort_order, is_active = row
             status = "✅" if is_active else "❌"
-            print(f"  [{sort_order:2d}] {status} {id:3d} | {dimension:10s} | {name:12s} | weight={weight:.2f}")
+            print(
+                f"  [{sort_order:2d}] {status} {id:3d} | {dimension:10s} | {name:12s} | weight={weight:.2f}"
+            )
         print("-" * 80)
         print(f"总计: {len(results)} 条\n")
 

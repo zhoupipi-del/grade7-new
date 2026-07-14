@@ -9,17 +9,17 @@ FastAPI 异步主入口，负责:
 5. 提供全局中间件与异常处理
 """
 
+import logging
 import os
 import sys
-import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # ── 确保 backend 目录在 sys.path 中 ──
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -30,6 +30,7 @@ if str(BACKEND_DIR) not in sys.path:
 # ═══════════════════════════════════════════════════════════════
 # 环境变量加载
 # ═══════════════════════════════════════════════════════════════
+
 
 def _load_dotenv():
     """加载 .env 文件到 os.environ（仅设置尚未定义的环境变量）"""
@@ -56,6 +57,7 @@ _load_dotenv()
 # 日志配置
 # ═══════════════════════════════════════════════════════════════
 
+
 def _setup_logging():
     logging.basicConfig(
         level=logging.INFO,
@@ -74,10 +76,9 @@ logger = logging.getLogger("wings3")
 # 数据库引擎
 # ═══════════════════════════════════════════════════════════════
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "mysql+aiomysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/grade7_new",
-)
+from core.db_utils import require_db_url
+
+DATABASE_URL = require_db_url()
 
 # 异步引擎
 engine = create_async_engine(
@@ -112,6 +113,7 @@ module_loader = ModuleLoader(modules_dir)
 # 应用生命周期
 # ═══════════════════════════════════════════════════════════════
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用启动/关闭时的初始化与清理"""
@@ -121,41 +123,47 @@ async def lifespan(app: FastAPI):
     logger.info(f"数据库: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else DATABASE_URL}")
 
     # 1. 创建所有表（core + 所有已导入模块共用同一个 declarative Base）
-    from core.models import Base
+    import modules.ai_prescription.models  # noqa: F401
+    import modules.approval.models  # noqa: F401
+
     # 触发模块模型导入，确保所有表注册到 Base.metadata
     import modules.attendance.models  # noqa: F401
-    import modules.behavior.models    # noqa: F401
-    import modules.red_flag.models      # noqa: F401
-    import modules.evaluation.models     # noqa: F401
-    import modules.discipline.models    # noqa: F401
-    import modules.reports.models      # noqa: F401
-    import modules.ai_prescription.models  # noqa: F401
-    import modules.notifications.models   # noqa: F401
-    import modules.dashboard.models        # noqa: F401  (纯聚合，不建表)
-    import modules.growth.models          # noqa: F401  (P0双表: timeline_events + periodical_snapshots)
-    import modules.growth.analytics       # noqa: F401  (德育量化工单表: moral_education_ledger)
-    import modules.approval.models        # noqa: F401
-    import modules.teach_math.models     # noqa: F401
-    import modules.risk_models.models    # noqa: F401
-    import modules.parent_portal.models  # noqa: F401
-    import modules.grades.models         # noqa: F401
-    import modules.lineage.models       # noqa: F401
+    import modules.behavior.models  # noqa: F401
+    import modules.class_mgmt.models  # noqa: F401
+    import modules.dashboard.models  # noqa: F401  (纯聚合，不建表)
     import modules.data_adapter.models  # noqa: F401
-    # ── P0 新模块：学籍 + 班级管理（数据铁三角）──
-    import modules.student_registry.models  # noqa: F401
-    import modules.class_mgmt.models       # noqa: F401
-    import modules.teacher_mgmt.models    # noqa: F401
-    import modules.timetable.models      # noqa: F401
+    import modules.discipline.models  # noqa: F401
+    import modules.error_funnel.models  # noqa: F401
+    import modules.evaluation.models  # noqa: F401
+    import modules.grades.models  # noqa: F401
+    import modules.growth.analytics  # noqa: F401  (德育量化工单表: moral_education_ledger)
+    import modules.growth.models  # noqa: F401  (P0双表: timeline_events + periodical_snapshots)
+
+    # ── Phase 3 教务板块：作业管理 + 错题断层漏斗 ──
+    import modules.homework_mgmt.models  # noqa: F401
+    import modules.lineage.models  # noqa: F401
+    import modules.notifications.models  # noqa: F401
+    import modules.parent_portal.models  # noqa: F401
+
     # ── Phase 2 心理关怀：咨询预约 + 工作台 + 心理档案 + 双轨预警 ──
     import modules.psych_counseling.models  # noqa: F401
-    import modules.psych_profiles.models   # noqa: F401
+    import modules.psych_profiles.models  # noqa: F401
+    import modules.red_flag.models  # noqa: F401
+    import modules.reports.models  # noqa: F401
+    import modules.research_activities.models  # noqa: F401
+
     # ── Phase 2 教研铁三角：集体备课 + 听课评课 + 教研活动 (100%合围) ──
     import modules.research_lesson_prep.models  # noqa: F401
     import modules.research_observation.models  # noqa: F401
-    import modules.research_activities.models   # noqa: F401
-    # ── Phase 3 教务板块：作业管理 + 错题断层漏斗 ──
-    import modules.homework_mgmt.models   # noqa: F401
-    import modules.error_funnel.models    # noqa: F401
+    import modules.risk_models.models  # noqa: F401
+
+    # ── P0 新模块：学籍 + 班级管理（数据铁三角）──
+    import modules.student_registry.models  # noqa: F401
+    import modules.teach_math.models  # noqa: F401
+    import modules.teacher_mgmt.models  # noqa: F401
+    import modules.timetable.models  # noqa: F401
+    from core.models import Base
+
     # ── 三级组织架构模型（Organization/Branch/CascadingConfig/ScopeType）──
     # 已通过 `from core.models import Base` 的模块级加载注册到 Base.metadata
     # create_all 将自动建表: organizations / branches / cascading_configs
@@ -185,9 +193,7 @@ async def lifespan(app: FastAPI):
             from sqlalchemy import select
 
             # 查询所有活跃学校
-            schools_result = await session.execute(
-                select(School).where(School.is_active == True)
-            )
+            schools_result = await session.execute(select(School).where(School.is_active == True))
             schools = schools_result.scalars().all()
 
             # 收集所有学校的启用模块并集（全局路由注册）
@@ -233,6 +239,7 @@ async def lifespan(app: FastAPI):
     # 6. PolicyEngine 启动注入 — 数字宪法加载
     try:
         from modules.policy_engine import PolicyEngine, set_engine
+
         policy_yaml_path = str(BACKEND_DIR / "policy.yaml")
         pe = PolicyEngine.from_yaml(policy_yaml_path)
         set_engine(pe)
@@ -243,7 +250,7 @@ async def lifespan(app: FastAPI):
 
     # 7. Redis 分布式事件总线 — 跨进程 pub/sub (4 Workers 下必须用 Redis)
     try:
-        from core.redis_client import init_redis, close_redis
+        from core.redis_client import close_redis, init_redis
         from modules.growth.listeners import (
             initialize_growth_events,
             shutdown_growth_events,
@@ -267,8 +274,9 @@ async def lifespan(app: FastAPI):
 
     # 关闭事件总线监听
     try:
-        from modules.growth.listeners import shutdown_growth_events
         from core.redis_client import close_redis
+        from modules.growth.listeners import shutdown_growth_events
+
         await shutdown_growth_events()
         await close_redis()
         logger.info("Redis 事件总线已关闭")
@@ -283,14 +291,19 @@ async def lifespan(app: FastAPI):
 # 种子数据
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _seed_default_data():
     """创建默认组织/片区/学校和管理员账号（幂等，支持三级架构初始化）"""
-    from sqlalchemy import select
     from core.models import (
-        School, User, UserRole, SchoolModule,
-        Organization, Branch, ScopeType,
+        Branch,
+        Organization,
+        School,
+        SchoolModule,
+        User,
+        UserRole,
     )
     from core.services import AuthService
+    from sqlalchemy import select
 
     async with AsyncSessionLocal() as session:
         # ── Step 1: 默认集团/教育集团 ──
@@ -321,9 +334,7 @@ async def _seed_default_data():
 
         if not branch:
             # 迁移脚本可能已插入 id=1 但 code 不同，兜底查找
-            result2 = await session.execute(
-                select(Branch).where(Branch.id == 1)
-            )
+            result2 = await session.execute(select(Branch).where(Branch.id == 1))
             branch = result2.scalar_one_or_none()
 
         if not branch:
@@ -359,7 +370,9 @@ async def _seed_default_data():
             )
             session.add(school)
             await session.commit()
-            logger.info(f"默认学校已创建: 梨江中学 (id=1, phase=junior, org_id={org.id}, branch_id={branch.id})")
+            logger.info(
+                f"默认学校已创建: 梨江中学 (id=1, phase=junior, org_id={org.id}, branch_id={branch.id})"
+            )
         else:
             # 向下兼容: 补齐已有学校的 org_id/branch_id/phase（旧数据可能为 None）
             needs_commit = False
@@ -370,19 +383,20 @@ async def _seed_default_data():
             if not school.school_phase:
                 school.school_phase = "junior"
                 needs_commit = True
-                logger.info(f"学校梨江中学 school_phase 已补齐: junior (默认值)")
+                logger.info("学校梨江中学 school_phase 已补齐: junior (默认值)")
             if needs_commit:
                 await session.commit()
-                logger.info(f"学校梨江中学 org_id/branch_id 已补齐: org={org.id}, branch={branch.id}")
+                logger.info(
+                    f"学校梨江中学 org_id/branch_id 已补齐: org={org.id}, branch={branch.id}"
+                )
 
         # ── Step 4: 默认管理员 ──
-        result = await session.execute(
-            select(User).where(User.username == "admin")
-        )
+        result = await session.execute(select(User).where(User.username == "admin"))
         admin = result.scalar_one_or_none()
 
         if not admin:
             import secrets as _secrets
+
             admin_pw = _secrets.token_urlsafe(12)
             admin = User(
                 username="admin",
@@ -407,7 +421,9 @@ async def _seed_default_data():
                 admin.org_id = org.id
                 admin.branch_id = branch.id
                 await session.commit()
-                logger.info(f"管理员 admin org_id/branch_id 已补齐: org={org.id}, branch={branch.id}")
+                logger.info(
+                    f"管理员 admin org_id/branch_id 已补齐: org={org.id}, branch={branch.id}"
+                )
 
         # 确保 attendance 模块配置存在
         result = await session.execute(
@@ -622,7 +638,7 @@ app = FastAPI(
 # CORS 中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应限制
+    allow_origins=["https://lijiangschool.online"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -655,6 +671,7 @@ app.dependency_overrides[_core_get_db] = get_db_override
 # ═══════════════════════════════════════════════════════════════
 
 from core.routers import router as core_router
+
 app.include_router(core_router)
 
 
@@ -700,6 +717,7 @@ async def not_found_handler(request: Request, exc: Exception):
 # 健康检查（直接挂载，不走模块）
 # ═══════════════════════════════════════════════════════════════
 
+
 @app.get("/")
 async def root():
     return {
@@ -729,6 +747,7 @@ async def ping():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app:app",
         host="0.0.0.0",

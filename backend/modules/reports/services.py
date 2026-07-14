@@ -12,11 +12,10 @@ modules/reports/services.py — 全校 RDI 聚合引擎 + 高危花名册 + 班�
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Any
 
-from sqlalchemy import select, func, case, and_, text
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger("reports.services")
 
@@ -45,11 +44,12 @@ RISK_LEVEL_CN = {
 # 1. 全校 RDI 态势白皮书
 # ═══════════════════════════════════════════════════════════════
 
+
 async def get_school_wide_rdi_summary(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
-) -> Dict[str, Any]:
+    grade_id: int | None = None,
+) -> dict[str, Any]:
     """
     全校德育/风险态势白皮书聚合
 
@@ -63,34 +63,28 @@ async def get_school_wide_rdi_summary(
         school_id: 学校ID（多租户隔离）
         grade_id: 可选年级ID过滤
     """
+    from core.models import Class, Grade, Student
     from modules.risk_models.models import RiskWarning
-    from core.models import Student, Class, Grade
 
     # ── Step 1: 获取全校最新 active risk_warnings ──
     # 每个 student_id 只取最新一条 (子查询去重)
-    subq = (
-        select(
-            RiskWarning.student_id,
-            func.max(RiskWarning.id).label("max_id"),
-        )
-        .where(
-            RiskWarning.school_id == school_id,
-            RiskWarning.status == "active",
-        )
+    subq = select(
+        RiskWarning.student_id,
+        func.max(RiskWarning.id).label("max_id"),
+    ).where(
+        RiskWarning.school_id == school_id,
+        RiskWarning.status == "active",
     )
     if grade_id:
         subq = subq.where(RiskWarning.grade_id == grade_id)
     subq = subq.group_by(RiskWarning.student_id).subquery()
 
-    warnings_q = (
-        select(RiskWarning)
-        .where(RiskWarning.id.in_(select(subq.c.max_id)))
-    )
+    warnings_q = select(RiskWarning).where(RiskWarning.id.in_(select(subq.c.max_id)))
     result = await db.execute(warnings_q)
     warnings = result.scalars().all()
 
     # ── Step 2: 统计 risk_distribution ──
-    risk_dist: Dict[str, int] = {
+    risk_dist: dict[str, int] = {
         "red_intervention": 0,
         "yellow_attention": 0,
         "green_normal": 0,
@@ -113,7 +107,9 @@ async def get_school_wide_rdi_summary(
 
     # 补齐绿灯数：没有 warning 的学生全是 normal
     warned_students = len(warnings)
-    risk_dist["green_normal"] = total_students - risk_dist["red_intervention"] - risk_dist["yellow_attention"]
+    risk_dist["green_normal"] = (
+        total_students - risk_dist["red_intervention"] - risk_dist["yellow_attention"]
+    )
     if risk_dist["green_normal"] < 0:
         risk_dist["green_normal"] = total_students - warned_students
 
@@ -128,10 +124,13 @@ async def get_school_wide_rdi_summary(
             func.count(RiskWarning.id).label("warned_count"),
         )
         .join(Student, Student.class_id == Class.id)
-        .join(RiskWarning, and_(
-            RiskWarning.student_id == Student.id,
-            RiskWarning.id.in_(select(subq.c.max_id)),
-        ))
+        .join(
+            RiskWarning,
+            and_(
+                RiskWarning.student_id == Student.id,
+                RiskWarning.id.in_(select(subq.c.max_id)),
+            ),
+        )
         .where(
             Class.school_id == school_id,
             Student.is_active == True,
@@ -151,18 +150,21 @@ async def get_school_wide_rdi_summary(
 
     # 组装 heat_ranking（按 avg_rdi 降序 — RDI越高风险越重）
     heat_ranking = []
-    for row in sorted(class_rows, key=lambda r: (r[3] or 0), reverse=True):
-        heat_ranking.append({
-            "class_id": row[0],
-            "class_name": row[1],
-            "grade_name": grade_name_map.get(row[2], "未知年级"),
-            "avg_rdi": round(float(row[3] or 0), 2),
-            "warned_count": int(row[4] or 0),
-        })
+    for row in sorted(class_rows, key=lambda r: r[3] or 0, reverse=True):
+        heat_ranking.append(
+            {
+                "class_id": row[0],
+                "class_name": row[1],
+                "grade_name": grade_name_map.get(row[2], "未知年级"),
+                "avg_rdi": round(float(row[3] or 0), 2),
+                "warned_count": int(row[4] or 0),
+            }
+        )
 
     # ── Step 4: 高危花名册 top_critical_list ──
     critical_list = await _build_risk_student_summaries(
-        db, school_id,
+        db,
+        school_id,
         filter_risk_levels=["intervention"],
         grade_id=grade_id,
         limit=50,
@@ -181,13 +183,14 @@ async def get_school_wide_rdi_summary(
 # 2. 高危学生花名册
 # ═══════════════════════════════════════════════════════════════
 
+
 async def get_high_risk_students(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
-    risk_levels: Optional[List[str]] = None,
+    grade_id: int | None = None,
+    risk_levels: list[str] | None = None,
     export_format: str = "json",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     高危学生花名册导出（暑期靶向家访指南）
 
@@ -200,7 +203,8 @@ async def get_high_risk_students(
     """
     levels = risk_levels or ["intervention"]
     summaries = await _build_risk_student_summaries(
-        db, school_id,
+        db,
+        school_id,
         filter_risk_levels=levels,
         grade_id=grade_id,
         limit=None,
@@ -219,11 +223,12 @@ async def get_high_risk_students(
 # 3. 班主任一键班级报告
 # ═══════════════════════════════════════════════════════════════
 
+
 async def get_class_teacher_report(
     db: AsyncSession,
     school_id: int,
     class_id: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     班主任一键生成本班德育工作图表数据
 
@@ -234,8 +239,8 @@ async def get_class_teacher_report(
       - 本班违纪概览（违纪人次/处分统计）
       - 本班学业概览（平均分/科目偏离）
     """
+    from core.models import Class, Student
     from modules.risk_models.models import RiskWarning
-    from core.models import Student, Class
 
     # ── 班级信息 ──
     cls_q = select(Class).where(
@@ -266,7 +271,8 @@ async def get_class_teacher_report(
             RiskWarning.school_id == school_id,
             RiskWarning.status == "active",
         )
-        .group_by(RiskWarning.student_id).subquery()
+        .group_by(RiskWarning.student_id)
+        .subquery()
     )
 
     class_warnings_q = (
@@ -283,7 +289,7 @@ async def get_class_teacher_report(
     class_warnings = warn_result.scalars().all()
 
     # 统计分布
-    class_risk_dist: Dict[str, int] = {
+    class_risk_dist: dict[str, int] = {
         "red_intervention": 0,
         "yellow_attention": 0,
         "green_normal": student_count,
@@ -293,13 +299,16 @@ async def get_class_teacher_report(
         if mapped in class_risk_dist:
             class_risk_dist[mapped] += 1
     # 减去有warning的normal人数
-    class_risk_dist["green_normal"] -= class_risk_dist["red_intervention"] + class_risk_dist["yellow_attention"]
+    class_risk_dist["green_normal"] -= (
+        class_risk_dist["red_intervention"] + class_risk_dist["yellow_attention"]
+    )
     if class_risk_dist["green_normal"] < 0:
         class_risk_dist["green_normal"] = 0
 
     # ── 本班高危学生清单 ──
     high_risk = await _build_risk_student_summaries(
-        db, school_id,
+        db,
+        school_id,
         filter_risk_levels=["intervention", "attention"],
         class_id=class_id,
         limit=20,
@@ -331,14 +340,15 @@ async def get_class_teacher_report(
 # 内部工具函数
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _build_risk_student_summaries(
     db: AsyncSession,
     school_id: int,
-    filter_risk_levels: List[str],
-    class_id: Optional[int] = None,
-    grade_id: Optional[int] = None,
-    limit: Optional[int] = None,
-) -> List[Dict[str, Any]]:
+    filter_risk_levels: list[str],
+    class_id: int | None = None,
+    grade_id: int | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
     """
     构建 RiskStudentSummary 列表
 
@@ -347,21 +357,18 @@ async def _build_risk_student_summaries(
       2. JOIN students + classes 获取姓名和班级名
       3. 从 ai_prescriptions 取最新处方摘要
     """
-    from modules.risk_models.models import RiskWarning
+    from core.models import Class, Student
     from modules.ai_prescription.models import AIPrescription
-    from core.models import Student, Class, Grade
+    from modules.risk_models.models import RiskWarning
 
     # 每个 student 的最新 warning
-    subq = (
-        select(
-            RiskWarning.student_id,
-            func.max(RiskWarning.id).label("max_id"),
-        )
-        .where(
-            RiskWarning.school_id == school_id,
-            RiskWarning.status == "active",
-            RiskWarning.risk_level.in_(filter_risk_levels),
-        )
+    subq = select(
+        RiskWarning.student_id,
+        func.max(RiskWarning.id).label("max_id"),
+    ).where(
+        RiskWarning.school_id == school_id,
+        RiskWarning.status == "active",
+        RiskWarning.risk_level.in_(filter_risk_levels),
     )
     if grade_id:
         subq = subq.where(RiskWarning.grade_id == grade_id)
@@ -410,7 +417,9 @@ async def _build_risk_student_summaries(
         handling_note = w.handling_note or ""
         warning_reason = f"{trigger_type}" if trigger_type else ""
         if handling_note:
-            warning_reason = f"{trigger_type}: {handling_note[:80]}" if trigger_type else handling_note[:80]
+            warning_reason = (
+                f"{trigger_type}: {handling_note[:80]}" if trigger_type else handling_note[:80]
+            )
 
         # ── AI 处方摘要 ──
         prescription_snippet = ""
@@ -434,16 +443,18 @@ async def _build_risk_student_summaries(
 
         mapped_level = RISK_LEVEL_MAP.get(w.risk_level, w.risk_level or "unknown")
 
-        summaries.append({
-            "student_id": s.id,
-            "student_name": s.name,
-            "class_name": c.name,
-            "current_rdi": round(float(w.rdi_score or 0), 2),
-            "risk_level": mapped_level,
-            "breakdown": breakdown,
-            "latest_warning_reason": warning_reason,
-            "ai_prescription_snippet": prescription_snippet,
-        })
+        summaries.append(
+            {
+                "student_id": s.id,
+                "student_name": s.name,
+                "class_name": c.name,
+                "current_rdi": round(float(w.rdi_score or 0), 2),
+                "risk_level": mapped_level,
+                "breakdown": breakdown,
+                "latest_warning_reason": warning_reason,
+                "ai_prescription_snippet": prescription_snippet,
+            }
+        )
 
     return summaries
 
@@ -452,7 +463,7 @@ async def _get_class_attendance_summary(
     db: AsyncSession,
     school_id: int,
     class_id: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """本班考勤概览"""
     try:
         q = text("""
@@ -494,7 +505,7 @@ async def _get_class_discipline_summary(
     db: AsyncSession,
     school_id: int,
     class_id: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """本班违纪概览"""
     try:
         q = text("""
@@ -529,7 +540,7 @@ async def _get_class_academic_summary(
     db: AsyncSession,
     school_id: int,
     class_id: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """本班学业概览"""
     try:
         q = text("""

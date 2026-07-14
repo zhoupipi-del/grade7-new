@@ -28,15 +28,14 @@ modules/growth/routers.py — 成长时间轴 API 路由
 
 所有端点统一经过 `_verify_student_access()` 守卫工厂。
 """
-from typing import Optional
 
+from core.models import Student, User, UserRole
+from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.models import User, UserRole, Student
-from core.routers import get_db, get_current_user
-from .services import get_growth_timeline as build_growth_timeline
 from .schemas import GrowthTimelineResponse
+from .services import get_growth_timeline as build_growth_timeline
 
 router = APIRouter(tags=["growth"])
 
@@ -44,6 +43,7 @@ router = APIRouter(tags=["growth"])
 # ═══════════════════════════════════════════════════════════════
 #   RBAC 守卫工厂：防 ID 遍历越权
 # ═══════════════════════════════════════════════════════════════
+
 
 async def _verify_student_access(
     student_id: int,
@@ -63,8 +63,8 @@ async def _verify_student_access(
     异常: 404（学生不存在）/ 403（越权）/ 400（家长未绑定学生）
     """
     # ── 1. 查询学生基本信息（含 class_ 关系）────────────────────
-    from sqlalchemy.orm import selectinload
     from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
 
     result = await db.execute(
         select(Student)
@@ -86,22 +86,19 @@ async def _verify_student_access(
     if role == UserRole.PARENT:
         if not current_user.bound_student_id:
             raise HTTPException(
-                status_code=400,
-                detail="当前账号未绑定学生，请联系班主任绑定后查看成长记录"
+                status_code=400, detail="当前账号未绑定学生，请联系班主任绑定后查看成长记录"
             )
         if current_user.bound_student_id != student_id:
             # 记录越权尝试日志（可接 ELK/Sentry）
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(
                 f"[越权尝试] Parent user_id={current_user.id} "
                 f"尝试访问非绑定学生 student_id={student_id} "
                 f"(绑定: {current_user.bound_student_id})"
             )
-            raise HTTPException(
-                status_code=403,
-                detail="无权查看该学生的成长记录"
-            )
+            raise HTTPException(status_code=403, detail="无权查看该学生的成长记录")
 
     # ── 3. Class Teacher 守卫 ─────────────────────────────────
     elif role == UserRole.CLASS_TEACHER:
@@ -127,6 +124,7 @@ async def _verify_student_access(
 #   核心端点：成长时间轴
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get(
     "/timeline/{student_id}",
     response_model=GrowthTimelineResponse,
@@ -139,7 +137,9 @@ async def _verify_student_access(
 )
 async def read_growth_timeline(
     student_id: int,
-    semester: Optional[str] = Query(None, description="学期过滤，格式: 2025-2026-1（上学期）/ 2025-2026-2（下学期）"),
+    semester: str | None = Query(
+        None, description="学期过滤，格式: 2025-2026-1（上学期）/ 2025-2026-2（下学期）"
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -177,17 +177,17 @@ async def read_growth_timeline(
 #   便捷端点：当前家长绑定学生的成长时间轴（无需传 student_id）
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get(
     "/my-timeline",
     response_model=GrowthTimelineResponse,
     summary="查询当前家长绑定学生的成长时间轴（便捷端点）",
     description=(
-        "家长登录后直接访问，无需指定 student_id。\n"
-        "自动使用 Token 中绑定的 bound_student_id。"
+        "家长登录后直接访问，无需指定 student_id。\n自动使用 Token 中绑定的 bound_student_id。"
     ),
 )
 async def get_my_timeline(
-    semester: Optional[str] = Query(None, description="学期过滤"),
+    semester: str | None = Query(None, description="学期过滤"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -206,10 +206,7 @@ async def get_my_timeline(
         raise HTTPException(status_code=403, detail="此端点仅限家长使用")
 
     if not current_user.bound_student_id:
-        raise HTTPException(
-            status_code=400,
-            detail="当前账号未绑定学生，请联系班主任完成绑定"
-        )
+        raise HTTPException(status_code=400, detail="当前账号未绑定学生，请联系班主任完成绑定")
 
     timeline = await build_growth_timeline(
         db=db,
@@ -225,14 +222,15 @@ async def get_my_timeline(
 #  P0 新增：成长事件管理 + 快照引擎 + 全息画像
 # ═══════════════════════════════════════════════════════════════
 
-from typing import List as ListType
-from .schemas import (
-    TimelineEventCreate, TimelineEventResponse,
-    GrowthSnapshotResponse, TeacherCommentUpdate, SnapshotGenerateRequest,
-    StudentHolisticProfile, GrowthDashboard,
-    CompositeAlertDetail, AlertResolveRequest, AlertResolveResponse,
-)
 from . import services as growth_svc
+from .schemas import (
+    AlertResolveRequest,
+    AlertResolveResponse,
+    CompositeAlertDetail,
+    SnapshotGenerateRequest,
+    TeacherCommentUpdate,
+    TimelineEventCreate,
+)
 
 MGMT_ROLES = [UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER]
 
@@ -256,16 +254,19 @@ async def create_event(
     """手动注入成长事件（教师/管理员）"""
     await _verify_student_access(data.student_id, user, db)
     event = await growth_svc.add_timeline_event(
-        db, user.school_id, data, reporter_id=user.id,
+        db,
+        user.school_id,
+        data,
+        reporter_id=user.id,
     )
     return {"id": event.id, "title": event.title, "dimension": event.dimension}
 
 
 @router.get("/events", summary="列出成长事件")
 async def list_events(
-    student_id: Optional[int] = Query(None),
-    dimension: Optional[str] = Query(None),
-    severity: Optional[str] = Query(None),
+    student_id: int | None = Query(None),
+    dimension: str | None = Query(None),
+    severity: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -279,9 +280,13 @@ async def list_events(
             raise HTTPException(403, "未绑定学生")
 
     items, total = await growth_svc.list_timeline_events(
-        db, user.school_id,
-        student_id=filter_student_id, dimension=dimension, severity=severity,
-        page=page, page_size=page_size,
+        db,
+        user.school_id,
+        student_id=filter_student_id,
+        dimension=dimension,
+        severity=severity,
+        page=page,
+        page_size=page_size,
     )
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
@@ -289,7 +294,9 @@ async def list_events(
 @router.get("/profile/{student_id}", summary="学生全息成长画像")
 async def holistic_profile(
     student_id: int,
-    semester_label: Optional[str] = Query(None, description="学期标签，如 2025-2026-2（不传则自动计算当前学期）"),
+    semester_label: str | None = Query(
+        None, description="学期标签，如 2025-2026-2（不传则自动计算当前学期）"
+    ),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -301,7 +308,10 @@ async def holistic_profile(
     """
     await _verify_student_access(student_id, user, db)
     profile = await growth_svc.get_holistic_profile(
-        db, user.school_id, student_id, semester_label=semester_label,
+        db,
+        user.school_id,
+        student_id,
+        semester_label=semester_label,
     )
     if not profile:
         raise HTTPException(404, "学生不存在")
@@ -317,16 +327,19 @@ async def generate_snapshot(
     """生成月度/学期成长快照（五维归一化引擎）"""
     await _verify_student_access(data.student_id, user, db)
     snap = await growth_svc.generate_snapshot(
-        db, user.school_id, data.student_id,
-        data.snapshot_type, data.period_label,
+        db,
+        user.school_id,
+        data.student_id,
+        data.snapshot_type,
+        data.period_label,
     )
     return growth_svc._snapshot_to_response(snap)
 
 
 @router.get("/snapshots", summary="列出成长快照")
 async def list_snapshots(
-    student_id: Optional[int] = Query(None),
-    snapshot_type: Optional[str] = Query(None),
+    student_id: int | None = Query(None),
+    snapshot_type: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -339,9 +352,12 @@ async def list_snapshots(
         if not filter_student_id:
             raise HTTPException(403, "未绑定学生")
 
-    from sqlalchemy import select as sa_select, desc as sa_desc, func as sa_func
-    from .models import GrowthPeriodicalSnapshot
     from sqlalchemy import and_ as sa_and
+    from sqlalchemy import desc as sa_desc
+    from sqlalchemy import func as sa_func
+    from sqlalchemy import select as sa_select
+
+    from .models import GrowthPeriodicalSnapshot
 
     conditions = [GrowthPeriodicalSnapshot.school_id == user.school_id]
     if filter_student_id:
@@ -376,7 +392,10 @@ async def update_comment(
 ):
     """班主任录入期末评语"""
     snap = await growth_svc.update_teacher_comment(
-        db, user.school_id, snapshot_id, data.teacher_comment,
+        db,
+        user.school_id,
+        snapshot_id,
+        data.teacher_comment,
     )
     if not snap:
         raise HTTPException(404, "快照不存在")
@@ -429,7 +448,7 @@ async def five_dimension_radar(
     description="查询德育闭环自动挂牌的工单记录，支持按学生/未解除筛选。",
 )
 async def list_moral_ledger(
-    student_id: Optional[int] = Query(None, description="按学生筛选"),
+    student_id: int | None = Query(None, description="按学生筛选"),
     unresolved_only: bool = Query(False, description="仅显示未解除工单"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -469,7 +488,7 @@ async def list_moral_ledger(
 )
 async def resolve_moral_ledger(
     ledger_id: int,
-    note: Optional[str] = Query(None, description="干预说明"),
+    note: str | None = Query(None, description="干预说明"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -503,9 +522,10 @@ async def resolve_moral_ledger(
 #   CEP 复合预警 Alert API — 前端沙箱消费
 # ═══════════════════════════════════════════════════════════════
 
-from sqlalchemy import select as sa_select
-from .models import ActiveCompositeAlert
 from core.models import get_local_now
+from sqlalchemy import select as sa_select
+
+from .models import ActiveCompositeAlert
 
 
 @router.get(
@@ -549,9 +569,7 @@ async def get_composite_alert(
         role = UserRole(role)
     if role == UserRole.CLASS_TEACHER:
         # 查询学生所在班级
-        student_result = await db.execute(
-            sa_select(Student).where(Student.id == alert.student_id)
-        )
+        student_result = await db.execute(sa_select(Student).where(Student.id == alert.student_id))
         student = student_result.scalar_one_or_none()
         if not student or student.class_id != user.class_id:
             raise HTTPException(403, "无权查看其他班级学生的预警")
@@ -609,9 +627,7 @@ async def resolve_composite_alert(
 
     # ── 班主任铁闸 ──
     if role == UserRole.CLASS_TEACHER:
-        student_result = await db.execute(
-            sa_select(Student).where(Student.id == alert.student_id)
-        )
+        student_result = await db.execute(sa_select(Student).where(Student.id == alert.student_id))
         student = student_result.scalar_one_or_none()
         if not student or student.class_id != user.class_id:
             raise HTTPException(403, "无权操作其他班级学生的预警")

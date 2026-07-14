@@ -17,25 +17,27 @@ modules/growth/services.py — 成长时间轴数据融合服务
 所有文案经脱敏柔化处理，家长端展示用"成长记录"语言。
 Phase 2 采用 return_exceptions=True 抗压设计：单个数据源查询失败不阻塞整体时间轴。
 """
-from datetime import datetime, date, timedelta
-from typing import List, Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
-from sqlalchemy.orm import selectinload
+from datetime import datetime, timedelta
 
 # ── 核心模型导入 ───────────────────────────────────────────────────────────────────
-from core.models import Student, Class, User, UserRole
+from core.models import Student, User
+from modules.attendance.models import AttendanceRecord
 from modules.behavior.models import DisciplineRecord
 from modules.discipline.models import (
-    DisciplineSanction, DisciplineLevel, DisciplineStatus,
     LEVEL_LABELS as SANCTION_LEVEL_LABELS,
 )
-from modules.attendance.models import AttendanceRecord
-from modules.evaluation.models import ScoreLog, RecoveryState, EvaluationScore, EvaluationIndicator
+from modules.discipline.models import (
+    DisciplineSanction,
+    DisciplineStatus,
+)
+from modules.evaluation.models import EvaluationIndicator, EvaluationScore, RecoveryState, ScoreLog
 from modules.risk_models.models import RiskWarning
-from .schemas import TimelineItem, GrowthTimelineResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from .schemas import GrowthTimelineResponse, TimelineItem
 
 # ═══════════════════════════════════════════════════════════════
 #  违纪类型 → 家长端柔化文案映射
@@ -43,8 +45,8 @@ from .schemas import TimelineItem, GrowthTimelineResponse
 
 BEHAVIOR_TYPE_LABELS = {
     "warning": "行为提醒",
-    "minor":   "行为记录",
-    "major":   "严重行为提醒",
+    "minor": "行为记录",
+    "major": "严重行为提醒",
     "serious": "严重违纪提醒",
 }
 
@@ -59,10 +61,10 @@ CATEGORY_LABELS = {
 }
 
 ATTENDANCE_LABELS = {
-    "late":   "到校时间提醒（迟到）",
+    "late": "到校时间提醒（迟到）",
     "absent": "出勤提醒（缺勤）",
-    "early":  "早退提醒",
-    "leave":  "请假记录",
+    "early": "早退提醒",
+    "leave": "请假记录",
 }
 
 
@@ -70,11 +72,12 @@ ATTENDANCE_LABELS = {
 #  核心融合服务
 # ═══════════════════════════════════════════════════════════════
 
+
 async def get_growth_timeline(
     db: AsyncSession,
     school_id: int,
     student_id: int,
-    semester: Optional[str] = None,
+    semester: str | None = None,
 ) -> GrowthTimelineResponse:
     """
     构建学生成长时间轴 — 7 路数据源并发融合聚合 (Phase 2)。
@@ -107,6 +110,7 @@ async def get_growth_timeline(
     student = stu_result.scalar_one_or_none()
     if not student:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="学生不存在")
 
     class_name = student.class_.name if student.class_ else f"班级#{student.class_id}"
@@ -141,7 +145,9 @@ async def get_growth_timeline(
     p2_items = []
     for label, result in zip(p2_labels, phase2_results):
         if isinstance(result, Exception):
-            logging.warning(f"[growth] Phase 2 子查询 {label} 异常(已跳过): student_id={student_id}, error={type(result).__name__}")
+            logging.warning(
+                f"[growth] Phase 2 子查询 {label} 异常(已跳过): student_id={student_id}, error={type(result).__name__}"
+            )
             p2_items.append([])  # 空列表替代，不阻塞
         else:
             p2_items.append(result)
@@ -150,7 +156,7 @@ async def get_growth_timeline(
     behavior_items, sanction_items, attendance_items = p1_items
     score_log_items, recovery_items, risk_items, eval_items = p2_items
 
-    all_items: List[TimelineItem] = []
+    all_items: list[TimelineItem] = []
     all_items.extend(behavior_items)
     all_items.extend(sanction_items)
     all_items.extend(attendance_items)
@@ -174,12 +180,13 @@ async def get_growth_timeline(
 #  子查询：违纪行为记录
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _query_behavior_records(
     db: AsyncSession,
     school_id: int,
     student_id: int,
-    semester: Optional[str] = None,
-) -> List[TimelineItem]:
+    semester: str | None = None,
+) -> list[TimelineItem]:
     """
     查询 discipline_records，转换为 TimelineItem。
 
@@ -207,7 +214,7 @@ async def _query_behavior_records(
     result = await db.execute(stmt)
     records = result.scalars().all()
 
-    items: List[TimelineItem] = []
+    items: list[TimelineItem] = []
     for r in records:
         # 柔化文案
         category = r.category or "其他"
@@ -221,24 +228,30 @@ async def _query_behavior_records(
         # severity 映射
         severity_map = {
             "warning": "info",
-            "minor":   "info",
-            "major":   "warning",
+            "minor": "info",
+            "major": "warning",
             "serious": "danger",
         }
         severity = severity_map.get(r.type, "info")
 
-        occurred = r.incident_date or r.created_at.date() if r.incident_date else (r.created_at or datetime.utcnow()).date()
-        items.append(TimelineItem(
-            event_id=f"behavior_{r.id}",
-            event_type="behavior",
-            occurred_at=r.created_at or datetime.utcnow(),  # fallback if created_at is NULL
-            event_date=occurred,
-            title=title,
-            description=desc,
-            severity=severity,
-            related_id=r.id,
-            source_table="discipline_records",
-        ))
+        occurred = (
+            r.incident_date or r.created_at.date()
+            if r.incident_date
+            else (r.created_at or datetime.utcnow()).date()
+        )
+        items.append(
+            TimelineItem(
+                event_id=f"behavior_{r.id}",
+                event_type="behavior",
+                occurred_at=r.created_at or datetime.utcnow(),  # fallback if created_at is NULL
+                event_date=occurred,
+                title=title,
+                description=desc,
+                severity=severity,
+                related_id=r.id,
+                source_table="discipline_records",
+            )
+        )
 
     return items
 
@@ -247,12 +260,13 @@ async def _query_behavior_records(
 #  子查询：行政处分记录（生效 + 撤销）
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _query_sanctions(
     db: AsyncSession,
     school_id: int,
     student_id: int,
-    semester: Optional[str] = None,
-) -> List[TimelineItem]:
+    semester: str | None = None,
+) -> list[TimelineItem]:
     """
     查询 discipline_sanctions，转换为 TimelineItem。
 
@@ -265,10 +279,12 @@ async def _query_sanctions(
         .where(
             DisciplineSanction.school_id == school_id,
             DisciplineSanction.student_id == student_id,
-            DisciplineSanction.status.in_([
-                DisciplineStatus.ACTIVE,
-                DisciplineStatus.REVOKED,
-            ]),
+            DisciplineSanction.status.in_(
+                [
+                    DisciplineStatus.ACTIVE,
+                    DisciplineStatus.REVOKED,
+                ]
+            ),
         )
         .order_by(DisciplineSanction.created_at.desc())
         .limit(50)
@@ -280,7 +296,7 @@ async def _query_sanctions(
     result = await db.execute(stmt)
     sanctions = result.scalars().all()
 
-    items: List[TimelineItem] = []
+    items: list[TimelineItem] = []
     for s in sanctions:
         level_label = SANCTION_LEVEL_LABELS.get(s.level, s.level.value)
 
@@ -298,17 +314,19 @@ async def _query_sanctions(
             continue  # 不应该到这里
 
         occurred = s.created_at or datetime.utcnow()  # fallback if created_at is NULL
-        items.append(TimelineItem(
-            event_id=f"sanction_{s.id}",
-            event_type=event_type,
-            occurred_at=occurred,
-            event_date=s.punish_date or occurred.date(),
-            title=title,
-            description=description,
-            severity=severity,
-            related_id=s.id,
-            source_table="discipline_sanctions",
-        ))
+        items.append(
+            TimelineItem(
+                event_id=f"sanction_{s.id}",
+                event_type=event_type,
+                occurred_at=occurred,
+                event_date=s.punish_date or occurred.date(),
+                title=title,
+                description=description,
+                severity=severity,
+                related_id=s.id,
+                source_table="discipline_sanctions",
+            )
+        )
 
     return items
 
@@ -317,12 +335,13 @@ async def _query_sanctions(
 #  子查询：考勤异常记录
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _query_attendance(
     db: AsyncSession,
     school_id: int,
     student_id: int,
-    semester: Optional[str] = None,
-) -> List[TimelineItem]:
+    semester: str | None = None,
+) -> list[TimelineItem]:
     """
     查询 attendance_records，仅返回异常记录（late/absent/early，不含 present）。
 
@@ -342,6 +361,7 @@ async def _query_attendance(
     if semester:
         # AttendanceRecord 用 record_date 而非 created_at
         from datetime import date as date_type
+
         if semester:
             parts = semester.split("-")
             if len(parts) >= 2:
@@ -361,24 +381,26 @@ async def _query_attendance(
     result = await db.execute(stmt)
     records = result.scalars().all()
 
-    items: List[TimelineItem] = []
+    items: list[TimelineItem] = []
     for r in records:
         label = ATTENDANCE_LABELS.get(r.status, r.status)
         title = label
         description = r.note or f"{r.record_date.strftime('%Y年%m月%d日')} 考勤记录"
         severity = "warning" if r.status == "late" else "danger"
 
-        items.append(TimelineItem(
-            event_id=f"attendance_{r.id}",
-            event_type="attendance",
-            occurred_at=datetime.combine(r.record_date, datetime.min.time().replace(hour=7)),
-            event_date=r.record_date,
-            title=title,
-            description=description,
-            severity=severity,
-            related_id=r.id,
-            source_table="attendance_records",
-        ))
+        items.append(
+            TimelineItem(
+                event_id=f"attendance_{r.id}",
+                event_type="attendance",
+                occurred_at=datetime.combine(r.record_date, datetime.min.time().replace(hour=7)),
+                event_date=r.record_date,
+                title=title,
+                description=description,
+                severity=severity,
+                related_id=r.id,
+                source_table="attendance_records",
+            )
+        )
 
     return items
 
@@ -387,12 +409,13 @@ async def _query_attendance(
 #  Phase 2 子查询：评分流水变动
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _query_score_logs(
     db: AsyncSession,
     school_id: int,
     student_id: int,
-    semester: Optional[str] = None,
-) -> List[TimelineItem]:
+    semester: str | None = None,
+) -> list[TimelineItem]:
     """
     查询 score_logs，转换为 TimelineItem。
 
@@ -442,7 +465,7 @@ async def _query_score_logs(
         "permanent": "永久",
     }
 
-    items: List[TimelineItem] = []
+    items: list[TimelineItem] = []
     for row in rows:
         change = row.change_amount
         # 扣分显示负数，加分显示正数
@@ -456,17 +479,19 @@ async def _query_score_logs(
         severity = "danger" if change < 0 else "info"
 
         occurred = row.created_at or datetime.utcnow()
-        items.append(TimelineItem(
-            event_id=f"score_log_{row.id}",
-            event_type="score_log",
-            occurred_at=occurred,
-            event_date=occurred.date() if isinstance(occurred, datetime) else occurred,
-            title=title,
-            description=description,
-            severity=severity,
-            related_id=row.id,
-            source_table="score_logs",
-        ))
+        items.append(
+            TimelineItem(
+                event_id=f"score_log_{row.id}",
+                event_type="score_log",
+                occurred_at=occurred,
+                event_date=occurred.date() if isinstance(occurred, datetime) else occurred,
+                title=title,
+                description=description,
+                severity=severity,
+                related_id=row.id,
+                source_table="score_logs",
+            )
+        )
 
     return items
 
@@ -475,12 +500,13 @@ async def _query_score_logs(
 #  Phase 2 子查询：回血进展（正向里程碑）
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _query_recovery_states(
     db: AsyncSession,
     school_id: int,
     student_id: int,
-    semester: Optional[str] = None,
-) -> List[TimelineItem]:
+    semester: str | None = None,
+) -> list[TimelineItem]:
     """
     查询 recovery_state，展示回血进展为正向里程碑。
 
@@ -514,7 +540,7 @@ async def _query_recovery_states(
         "discipline": "行政处分",
     }
 
-    items: List[TimelineItem] = []
+    items: list[TimelineItem] = []
     for r in records:
         source_label = SOURCE_LABELS.get(r.source_type, r.source_type)
         pct = r.recovery_ratio * 100 if r.recovery_ratio else 0
@@ -527,17 +553,19 @@ async def _query_recovery_states(
             description = f"原始扣分 {r.original_penalty:.0f} 分 → 已回血 {r.recovered_amount:.0f} 分（{pct:.0f}%）· 剩余 {r.remaining_penalty:.0f} 分 · 观察期至 {r.observation_end}"
 
         occurred = r.last_computed_at or r.updated_at or r.created_at or datetime.utcnow()
-        items.append(TimelineItem(
-            event_id=f"recovery_{r.id}",
-            event_type="recovery",
-            occurred_at=occurred,
-            event_date=occurred.date() if isinstance(occurred, datetime) else occurred,
-            title=title,
-            description=description,
-            severity="success",
-            related_id=r.id,
-            source_table="recovery_state",
-        ))
+        items.append(
+            TimelineItem(
+                event_id=f"recovery_{r.id}",
+                event_type="recovery",
+                occurred_at=occurred,
+                event_date=occurred.date() if isinstance(occurred, datetime) else occurred,
+                title=title,
+                description=description,
+                severity="success",
+                related_id=r.id,
+                source_table="recovery_state",
+            )
+        )
 
     return items
 
@@ -546,12 +574,13 @@ async def _query_recovery_states(
 #  Phase 2 子查询：RDI 风险预警里程碑（系统智能）
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _query_risk_warnings(
     db: AsyncSession,
     school_id: int,
     student_id: int,
-    semester: Optional[str] = None,
-) -> List[TimelineItem]:
+    semester: str | None = None,
+) -> list[TimelineItem]:
     """
     查询 risk_warnings，展示 RDI 风险预警为里程碑事件。
 
@@ -588,7 +617,7 @@ async def _query_risk_warnings(
         "intervention": "需要干预",
     }
 
-    items: List[TimelineItem] = []
+    items: list[TimelineItem] = []
     for r in records:
         risk_label = RISK_LABELS.get(r.risk_level, r.risk_level)
         trend_note = "· 趋势持续上升" if r.is_escalating else ""
@@ -600,17 +629,19 @@ async def _query_risk_warnings(
         severity = "danger" if r.risk_level == "intervention" else "warning"
 
         occurred = r.warned_at or r.created_at or datetime.utcnow()
-        items.append(TimelineItem(
-            event_id=f"risk_{r.id}",
-            event_type="risk_milestone",
-            occurred_at=occurred,
-            event_date=occurred.date() if isinstance(occurred, datetime) else occurred,
-            title=title,
-            description=description,
-            severity=severity,
-            related_id=r.id,
-            source_table="risk_warnings",
-        ))
+        items.append(
+            TimelineItem(
+                event_id=f"risk_{r.id}",
+                event_type="risk_milestone",
+                occurred_at=occurred,
+                event_date=occurred.date() if isinstance(occurred, datetime) else occurred,
+                title=title,
+                description=description,
+                severity=severity,
+                related_id=r.id,
+                source_table="risk_warnings",
+            )
+        )
 
     return items
 
@@ -619,12 +650,13 @@ async def _query_risk_warnings(
 #  Phase 2 子查询：素质评价得分变动
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _query_evaluation_scores(
     db: AsyncSession,
     school_id: int,
     student_id: int,
-    semester: Optional[str] = None,
-) -> List[TimelineItem]:
+    semester: str | None = None,
+) -> list[TimelineItem]:
     """
     查询 evaluation_scores + evaluation_indicators，展示素质评价得分变动。
 
@@ -652,27 +684,31 @@ async def _query_evaluation_scores(
     result = await db.execute(stmt)
     rows = result.all()
 
-    items: List[TimelineItem] = []
+    items: list[TimelineItem] = []
     for row in rows:
         score_record = row[0]  # EvaluationScore
         indicator_name = row[1]  # EvaluationIndicator.name
 
         title = f"素质评价：{indicator_name}"
-        description = f"得分 {score_record.score:.1f} · 评分来源：{score_record.scorer_type or '未知'}"
+        description = (
+            f"得分 {score_record.score:.1f} · 评分来源：{score_record.scorer_type or '未知'}"
+        )
         severity = "info"
 
         occurred = score_record.created_at or datetime.utcnow()
-        items.append(TimelineItem(
-            event_id=f"evaluation_{score_record.id}",
-            event_type="evaluation",
-            occurred_at=occurred,
-            event_date=occurred.date() if isinstance(occurred, datetime) else occurred,
-            title=title,
-            description=description,
-            severity=severity,
-            related_id=score_record.id,
-            source_table="evaluation_scores",
-        ))
+        items.append(
+            TimelineItem(
+                event_id=f"evaluation_{score_record.id}",
+                event_type="evaluation",
+                occurred_at=occurred,
+                event_date=occurred.date() if isinstance(occurred, datetime) else occurred,
+                title=title,
+                description=description,
+                severity=severity,
+                related_id=score_record.id,
+                source_table="evaluation_scores",
+            )
+        )
 
     return items
 
@@ -680,6 +716,7 @@ async def _query_evaluation_scores(
 # ═══════════════════════════════════════════════════════════════
 #  学期过滤辅助函数
 # ═══════════════════════════════════════════════════════════════
+
 
 def _apply_semester_filter(stmt, semester: str, date_column):
     """
@@ -690,6 +727,7 @@ def _apply_semester_filter(stmt, semester: str, date_column):
       - 下学期（2）: 当年 3月1日 ~ 当年 8月31日
     """
     from datetime import date as date_type
+
     parts = semester.split("-")
     if len(parts) < 2:
         return stmt
@@ -714,16 +752,18 @@ def _apply_semester_filter(stmt, semester: str, date_column):
 #  P0 新增：成长事件管理 + 快照引擎 + 全息画像
 # ═══════════════════════════════════════════════════════════════
 
-from .models import GrowthTimelineEvent, GrowthPeriodicalSnapshot
-from .schemas import (
-    TimelineEventCreate, TimelineEventResponse,
-    GrowthSnapshotResponse, RadarDimensions, SnapshotMetricsSummary,
-    StudentHolisticProfile, GrowthDashboard,
-    GrowthTimelineResponse as LegacyTimelineResponse,
-)
-from .pipeline import GrowthAggregationPipeline
-from sqlalchemy import func, and_, desc
 from core.models import get_local_now
+from sqlalchemy import and_, desc, func
+
+from .models import GrowthPeriodicalSnapshot, GrowthTimelineEvent
+from .pipeline import GrowthAggregationPipeline
+from .schemas import (
+    GrowthSnapshotResponse,
+    RadarDimensions,
+    SnapshotMetricsSummary,
+    TimelineEventCreate,
+    TimelineEventResponse,
+)
 
 
 def _current_semester_label() -> str:
@@ -731,15 +771,18 @@ def _current_semester_label() -> str:
     now = get_local_now()
     year, month = now.year, now.month
     if month >= 9:
-        return f"{year}-{year+1}-1"
+        return f"{year}-{year + 1}-1"
     elif month <= 2:
-        return f"{year-1}-{year}-1"
+        return f"{year - 1}-{year}-1"
     else:
-        return f"{year-1}-{year}-2"
+        return f"{year - 1}-{year}-2"
 
 
 async def add_timeline_event(
-    db: AsyncSession, school_id: int, data: TimelineEventCreate, reporter_id: int = None,
+    db: AsyncSession,
+    school_id: int,
+    data: TimelineEventCreate,
+    reporter_id: int = None,
 ) -> GrowthTimelineEvent:
     """
     手动/系统注入成长事件 — 委托给 pipeline.inject_timeline_event()
@@ -764,9 +807,13 @@ async def add_timeline_event(
 
 
 async def list_timeline_events(
-    db: AsyncSession, school_id: int,
-    student_id: int = None, dimension: str = None, severity: str = None,
-    page: int = 1, page_size: int = 20,
+    db: AsyncSession,
+    school_id: int,
+    student_id: int = None,
+    dimension: str = None,
+    severity: str = None,
+    page: int = 1,
+    page_size: int = 20,
 ) -> tuple:
     """列出成长事件，支持维度/级别筛选"""
     conditions = [GrowthTimelineEvent.school_id == school_id]
@@ -778,9 +825,7 @@ async def list_timeline_events(
         conditions.append(GrowthTimelineEvent.severity == severity)
 
     where_clause = and_(*conditions)
-    count_result = await db.execute(
-        select(func.count(GrowthTimelineEvent.id)).where(where_clause)
-    )
+    count_result = await db.execute(select(func.count(GrowthTimelineEvent.id)).where(where_clause))
     total = count_result.scalar() or 0
 
     result = await db.execute(
@@ -802,19 +847,29 @@ async def list_timeline_events(
 
     items = []
     for e in events:
-        items.append(TimelineEventResponse(
-            id=e.id, student_id=e.student_id, dimension=e.dimension,
-            severity=e.severity, event_type=e.event_type, title=e.title,
-            occurred_at=e.occurred_at, payload=e.payload,
-            reporter_name=reporter_names.get(e.reporter_id),
-            created_at=e.created_at,
-        ))
+        items.append(
+            TimelineEventResponse(
+                id=e.id,
+                student_id=e.student_id,
+                dimension=e.dimension,
+                severity=e.severity,
+                event_type=e.event_type,
+                title=e.title,
+                occurred_at=e.occurred_at,
+                payload=e.payload,
+                reporter_name=reporter_names.get(e.reporter_id),
+                created_at=e.created_at,
+            )
+        )
     return items, total
 
 
 async def generate_snapshot(
-    db: AsyncSession, school_id: int, student_id: int,
-    snapshot_type: str, period_label: str,
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
+    snapshot_type: str,
+    period_label: str,
 ) -> GrowthPeriodicalSnapshot:
     """
     生成周期性成长快照 — 委托给 GrowthAggregationPipeline.run_semester_snapshot()
@@ -841,7 +896,9 @@ async def generate_snapshot(
 
 
 async def get_holistic_profile(
-    db: AsyncSession, school_id: int, student_id: int,
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
     semester_label: str = None,
 ) -> dict:
     """
@@ -852,6 +909,7 @@ async def get_holistic_profile(
     如果未传入，默认计算当前学期标签。
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     # ── 0. 自动生成/刷新当期快照 ──
@@ -910,12 +968,14 @@ async def get_holistic_profile(
 
 
 async def update_teacher_comment(
-    db: AsyncSession, school_id: int, snapshot_id: int, comment: str,
+    db: AsyncSession,
+    school_id: int,
+    snapshot_id: int,
+    comment: str,
 ) -> GrowthPeriodicalSnapshot:
     """更新班主任评语"""
     result = await db.execute(
-        select(GrowthPeriodicalSnapshot)
-        .where(
+        select(GrowthPeriodicalSnapshot).where(
             GrowthPeriodicalSnapshot.id == snapshot_id,
             GrowthPeriodicalSnapshot.school_id == school_id,
         )
@@ -932,14 +992,12 @@ async def update_teacher_comment(
 async def get_growth_dashboard(db: AsyncSession, school_id: int) -> dict:
     """成长档案看板统计"""
     total_events_result = await db.execute(
-        select(func.count(GrowthTimelineEvent.id))
-        .where(GrowthTimelineEvent.school_id == school_id)
+        select(func.count(GrowthTimelineEvent.id)).where(GrowthTimelineEvent.school_id == school_id)
     )
     total_events = total_events_result.scalar() or 0
 
     critical_result = await db.execute(
-        select(func.count(GrowthTimelineEvent.id))
-        .where(
+        select(func.count(GrowthTimelineEvent.id)).where(
             GrowthTimelineEvent.school_id == school_id,
             GrowthTimelineEvent.severity == "critical",
         )
@@ -947,8 +1005,7 @@ async def get_growth_dashboard(db: AsyncSession, school_id: int) -> dict:
     critical_events = critical_result.scalar() or 0
 
     warning_result = await db.execute(
-        select(func.count(GrowthTimelineEvent.id))
-        .where(
+        select(func.count(GrowthTimelineEvent.id)).where(
             GrowthTimelineEvent.school_id == school_id,
             GrowthTimelineEvent.severity == "warning",
         )
@@ -956,8 +1013,7 @@ async def get_growth_dashboard(db: AsyncSession, school_id: int) -> dict:
     warning_events = warning_result.scalar() or 0
 
     bonus_result = await db.execute(
-        select(func.count(GrowthTimelineEvent.id))
-        .where(
+        select(func.count(GrowthTimelineEvent.id)).where(
             GrowthTimelineEvent.school_id == school_id,
             GrowthTimelineEvent.severity == "bonus",
         )
@@ -965,14 +1021,14 @@ async def get_growth_dashboard(db: AsyncSession, school_id: int) -> dict:
     bonus_events = bonus_result.scalar() or 0
 
     total_snaps_result = await db.execute(
-        select(func.count(GrowthPeriodicalSnapshot.id))
-        .where(GrowthPeriodicalSnapshot.school_id == school_id)
+        select(func.count(GrowthPeriodicalSnapshot.id)).where(
+            GrowthPeriodicalSnapshot.school_id == school_id
+        )
     )
     total_snapshots = total_snaps_result.scalar() or 0
 
     total_students_result = await db.execute(
-        select(func.count(Student.id))
-        .where(Student.school_id == school_id)
+        select(func.count(Student.id)).where(Student.school_id == school_id)
     )
     total_students = total_students_result.scalar() or 0
 
@@ -984,9 +1040,7 @@ async def get_growth_dashboard(db: AsyncSession, school_id: int) -> dict:
         .where(GrowthTimelineEvent.school_id == school_id)
         .group_by(GrowthTimelineEvent.dimension)
     )
-    dimension_distribution = [
-        {"dimension": row[0], "count": row[1]} for row in dim_result
-    ]
+    dimension_distribution = [{"dimension": row[0], "count": row[1]} for row in dim_result]
 
     recent_crit_result = await db.execute(
         select(GrowthTimelineEvent)
@@ -1000,9 +1054,14 @@ async def get_growth_dashboard(db: AsyncSession, school_id: int) -> dict:
     recent_critical = recent_crit_result.scalars().all()
     recent_critical_list = [
         TimelineEventResponse(
-            id=e.id, student_id=e.student_id, dimension=e.dimension,
-            severity=e.severity, event_type=e.event_type, title=e.title,
-            occurred_at=e.occurred_at, payload=e.payload,
+            id=e.id,
+            student_id=e.student_id,
+            dimension=e.dimension,
+            severity=e.severity,
+            event_type=e.event_type,
+            title=e.title,
+            occurred_at=e.occurred_at,
+            payload=e.payload,
             created_at=e.created_at,
         )
         for e in recent_critical
@@ -1023,8 +1082,10 @@ async def get_growth_dashboard(db: AsyncSession, school_id: int) -> dict:
 def _snapshot_to_response(s: GrowthPeriodicalSnapshot) -> GrowthSnapshotResponse:
     """ORM → Response 转换"""
     scores = RadarDimensions(
-        academic=s.academic_score, attendance=s.attendance_score,
-        behavior=s.behavior_score, psychology=s.psych_score,
+        academic=s.academic_score,
+        attendance=s.attendance_score,
+        behavior=s.behavior_score,
+        psychology=s.psych_score,
         activity=s.activity_score,
     )
     metrics = SnapshotMetricsSummary(
@@ -1035,9 +1096,12 @@ def _snapshot_to_response(s: GrowthPeriodicalSnapshot) -> GrowthSnapshotResponse
         additional_info=(s.summary_metrics or {}).get("additional_info", {}),
     )
     return GrowthSnapshotResponse(
-        id=s.id, student_id=s.student_id,
-        snapshot_type=s.snapshot_type, period_label=s.period_label,
-        scores=scores, metrics_summary=metrics,
+        id=s.id,
+        student_id=s.student_id,
+        snapshot_type=s.snapshot_type,
+        period_label=s.period_label,
+        scores=scores,
+        metrics_summary=metrics,
         teacher_comment=s.teacher_comment,
         ai_growth_prescription=s.ai_growth_prescription,
         created_at=s.created_at,

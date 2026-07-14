@@ -19,24 +19,26 @@ modules/evaluation/services.py — 事件驱动素质评价引擎 (v2 — 处分
 
 import json
 import logging
-from typing import Optional, Dict, List, Tuple
-from datetime import datetime, date
-from sqlalchemy import select, func, and_, or_
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
-from .models import (
-    EvaluationRule, EvaluationIndicator, EvaluationScore,
-    StudentScore, ScoreLog,
-)
+from datetime import date, datetime
 
 # ── 处分模块依赖（跨模块桥接）──
 from modules.discipline.models import (
-    DisciplineSanction, DisciplineStatus, DisciplineLevel,
-    LEVEL_PENALTY_MAP, VETO_LEVELS, LEVEL_LABELS,
+    LEVEL_LABELS,
+    LEVEL_PENALTY_MAP,
+    DisciplineSanction,
+    DisciplineStatus,
 )
-
 from modules.lineage.decorators import audit_lineage, get_audit_context
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .models import (
+    EvaluationIndicator,
+    EvaluationRule,
+    EvaluationScore,
+    ScoreLog,
+    StudentScore,
+)
 
 logger = logging.getLogger("evaluation")
 
@@ -47,12 +49,19 @@ logger = logging.getLogger("evaluation")
 DIMENSION_KEYS = ["moral", "academic", "health", "art", "social"]
 
 DIMENSION_NAMES = {
-    "moral": "思想品德", "academic": "学业水平",
-    "health": "身心健康", "art": "艺术素养", "social": "社会实践",
+    "moral": "思想品德",
+    "academic": "学业水平",
+    "health": "身心健康",
+    "art": "艺术素养",
+    "social": "社会实践",
 }
 
 DEFAULT_DIMENSION_WEIGHTS = {
-    "moral": 0.25, "academic": 0.25, "health": 0.20, "art": 0.15, "social": 0.15,
+    "moral": 0.25,
+    "academic": 0.25,
+    "health": 0.20,
+    "art": 0.15,
+    "social": 0.15,
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -152,14 +161,16 @@ class EvaluationService:
 
         indicators = []
         for name, dim, parent_id, weight, sort_order in SEED_INDICATORS:
-            indicators.append(EvaluationIndicator(
-                school_id=school_id,
-                name=name,
-                parent_id=parent_id,
-                dimension=dim,
-                weight=weight,
-                sort_order=sort_order,
-            ))
+            indicators.append(
+                EvaluationIndicator(
+                    school_id=school_id,
+                    name=name,
+                    parent_id=parent_id,
+                    dimension=dim,
+                    weight=weight,
+                    sort_order=sort_order,
+                )
+            )
         db.add_all(indicators)
         await db.flush()
         logger.info(f"[evaluation] 学校 {school_id} 已初始化 {len(indicators)} 条评价指标")
@@ -172,7 +183,7 @@ class EvaluationService:
     @staticmethod
     async def _get_indicators_by_dim(
         db: AsyncSession, school_id: int, dim: str
-    ) -> List[EvaluationIndicator]:
+    ) -> list[EvaluationIndicator]:
         """获取某维度下所有活跃二级指标"""
         result = await db.execute(
             select(EvaluationIndicator).where(
@@ -187,14 +198,16 @@ class EvaluationService:
     @staticmethod
     async def _get_all_indicators_grouped(
         db: AsyncSession, school_id: int
-    ) -> Dict[str, List[EvaluationIndicator]]:
+    ) -> dict[str, list[EvaluationIndicator]]:
         """按维度分组获取所有活跃二级指标"""
         result = await db.execute(
-            select(EvaluationIndicator).where(
+            select(EvaluationIndicator)
+            .where(
                 EvaluationIndicator.school_id == school_id,
                 EvaluationIndicator.parent_id > 0,
                 EvaluationIndicator.is_active == True,
-            ).order_by(EvaluationIndicator.sort_order)
+            )
+            .order_by(EvaluationIndicator.sort_order)
         )
         all_inds = list(result.scalars().all())
         grouped = {d: [] for d in DIMENSION_KEYS}
@@ -222,11 +235,11 @@ class EvaluationService:
         discipline_type: str,
         discipline_id: int,
         created_by: int,
-        semester: Optional[str] = None,
+        semester: str | None = None,
         source_type: str = "behavior",
-        penalty_override: Optional[float] = None,
+        penalty_override: float | None = None,
         policy_tag: str = "repairable",
-    ) -> Optional[ScoreLog]:
+    ) -> ScoreLog | None:
         """
         违纪/考勤事件 → 自动扣思想品德分 → 重算总分快照 → 写审计流水
 
@@ -278,7 +291,8 @@ class EvaluationService:
                 + snapshot.academic_score * weights.get("academic", 0.25)
                 + snapshot.health_score * weights.get("health", 0.20)
                 + snapshot.art_score * weights.get("art", 0.15)
-                + snapshot.social_score * weights.get("social", 0.15), 1
+                + snapshot.social_score * weights.get("social", 0.15),
+                1,
             )
             db.add(snapshot)
             await db.flush()
@@ -293,7 +307,8 @@ class EvaluationService:
             + snapshot.academic_score * weights.get("academic", 0.25)
             + snapshot.health_score * weights.get("health", 0.20)
             + snapshot.art_score * weights.get("art", 0.15)
-            + snapshot.social_score * weights.get("social", 0.15), 1
+            + snapshot.social_score * weights.get("social", 0.15),
+            1,
         )
 
         # 4. 写审计流水
@@ -324,12 +339,15 @@ class EvaluationService:
             actor_id=ctx["actor_id"] or created_by,
             source_ip=ctx["source_ip"],
             trace_context_id=ctx["trace_context_id"],
-            diff_snapshot=json.dumps({
-                "before": before_total,
-                "after": snapshot.total_score,
-                "change": -points,
-                "dimension": "moral",
-            }, ensure_ascii=False),
+            diff_snapshot=json.dumps(
+                {
+                    "before": before_total,
+                    "after": snapshot.total_score,
+                    "change": -points,
+                    "dimension": "moral",
+                },
+                ensure_ascii=False,
+            ),
         )
         db.add(log)
 
@@ -349,8 +367,8 @@ class EvaluationService:
     async def _get_active_sanctions(
         db: AsyncSession,
         student_id: int,
-        semester: Optional[str] = None,
-    ) -> List[DisciplineSanction]:
+        semester: str | None = None,
+    ) -> list[DisciplineSanction]:
         """
         获取学生当前学期所有 ACTIVE 状态的处分记录。
 
@@ -365,15 +383,12 @@ class EvaluationService:
             # 解析学期: "2025-2026-2" → 起止日期: 2026-02-01 ~ 2026-07-15
             semester_start, semester_end = EvaluationService._semester_date_range(semester)
             if semester_start and semester_end:
-                conditions.append(
-                    DisciplineSanction.punish_date >= semester_start
-                )
-                conditions.append(
-                    DisciplineSanction.punish_date <= semester_end
-                )
+                conditions.append(DisciplineSanction.punish_date >= semester_start)
+                conditions.append(DisciplineSanction.punish_date <= semester_end)
 
         result = await db.execute(
-            select(DisciplineSanction).where(*conditions)
+            select(DisciplineSanction)
+            .where(*conditions)
             .order_by(DisciplineSanction.punish_date.desc())
         )
         return list(result.scalars().all())
@@ -402,8 +417,8 @@ class EvaluationService:
 
     @staticmethod
     def compute_discipline_penalty(
-        sanctions: List[DisciplineSanction],
-    ) -> Tuple[float, bool, List[dict]]:
+        sanctions: list[DisciplineSanction],
+    ) -> tuple[float, bool, list[dict]]:
         """
         根据 ACTIVE 处分列表计算扣分总额、一票否决标志、处分摘要。
 
@@ -424,13 +439,15 @@ class EvaluationService:
                 # PROBATION / EXPULSION → 一票否决（不扣分，直接标记）
                 is_veto = True
 
-            sanction_summary.append({
-                "level": s.level.value if hasattr(s.level, "value") else str(s.level),
-                "label": LEVEL_LABELS.get(s.level, str(s.level)),
-                "punish_date": s.punish_date.isoformat() if s.punish_date else None,
-                "document_no": s.document_no,
-                "reason": s.reason[:100] if s.reason else "",
-            })
+            sanction_summary.append(
+                {
+                    "level": s.level.value if hasattr(s.level, "value") else str(s.level),
+                    "label": LEVEL_LABELS.get(s.level, str(s.level)),
+                    "punish_date": s.punish_date.isoformat() if s.punish_date else None,
+                    "document_no": s.document_no,
+                    "reason": s.reason[:100] if s.reason else "",
+                }
+            )
 
         return (penalty_total, is_veto, sanction_summary)
 
@@ -445,8 +462,8 @@ class EvaluationService:
     async def get_revoked_sanctions(
         db: AsyncSession,
         student_id: int,
-        semester: Optional[str] = None,
-    ) -> List[dict]:
+        semester: str | None = None,
+    ) -> list[dict]:
         """
         获取已撤销处分 — 用于前端报告单追回"处分已撤销"正向标签。
         """
@@ -461,25 +478,29 @@ class EvaluationService:
                 conditions.append(DisciplineSanction.revoke_date <= sem_end)
 
         result = await db.execute(
-            select(DisciplineSanction).where(*conditions)
+            select(DisciplineSanction)
+            .where(*conditions)
             .order_by(DisciplineSanction.revoke_date.desc())
         )
         sanctions = result.scalars().all()
 
-        return [{
-            "level": s.level.value if hasattr(s.level, "value") else str(s.level),
-            "label": LEVEL_LABELS.get(s.level, str(s.level)),
-            "punish_date": s.punish_date.isoformat() if s.punish_date else None,
-            "revoke_date": s.revoke_date.isoformat() if s.revoke_date else None,
-            "revoke_reason": s.revoke_reason,
-            "document_no": s.document_no,
-        } for s in sanctions]
+        return [
+            {
+                "level": s.level.value if hasattr(s.level, "value") else str(s.level),
+                "label": LEVEL_LABELS.get(s.level, str(s.level)),
+                "punish_date": s.punish_date.isoformat() if s.punish_date else None,
+                "revoke_date": s.revoke_date.isoformat() if s.revoke_date else None,
+                "revoke_reason": s.revoke_reason,
+                "document_no": s.document_no,
+            }
+            for s in sanctions
+        ]
 
     @staticmethod
     async def check_discipline_veto(
         db: AsyncSession,
         student_id: int,
-        semester: Optional[str] = None,
+        semester: str | None = None,
     ) -> dict:
         """
         一票否决熔断器 — 期末总评调用。
@@ -514,7 +535,7 @@ class EvaluationService:
         db: AsyncSession,
         student_id: int,
         school_id: int,
-        semester: Optional[str] = None,
+        semester: str | None = None,
     ) -> dict:
         """
         学生期末综合评价 — 含处分影响的最终裁定。
@@ -550,11 +571,10 @@ class EvaluationService:
         }
 
         # 2. 获取 ACTIVE 处分 → 计算扣分 + 一票否决
-        active_sanctions = await EvaluationService._get_active_sanctions(
-            db, student_id, semester
+        active_sanctions = await EvaluationService._get_active_sanctions(db, student_id, semester)
+        penalty_total, is_veto, sanction_summary = EvaluationService.compute_discipline_penalty(
+            active_sanctions
         )
-        penalty_total, is_veto, sanction_summary = \
-            EvaluationService.compute_discipline_penalty(active_sanctions)
 
         # 3. 计算处分调整后的分数（仅扣 moral 维度，保底 0）
         adjusted_moral = max(0.0, base_scores["moral"] + penalty_total)
@@ -568,7 +588,8 @@ class EvaluationService:
             + base_scores["academic"] * weights.get("academic", 0.25)
             + base_scores["health"] * weights.get("health", 0.20)
             + base_scores["art"] * weights.get("art", 0.15)
-            + base_scores["social"] * weights.get("social", 0.15), 1
+            + base_scores["social"] * weights.get("social", 0.15),
+            1,
         )
 
         # 4. 一票否决裁定
@@ -576,8 +597,9 @@ class EvaluationService:
             "is_veto": is_veto,
             "forced_grade": "D" if is_veto else None,
             "reason": (
-                f"处于处分期内（{'/'.join(s['label'] for s in sanction_summary if s['level'] in ('PROBATION','EXPULSION'))})"
-                if is_veto else None
+                f"处于处分期内（{'/'.join(s['label'] for s in sanction_summary if s['level'] in ('PROBATION', 'EXPULSION'))})"
+                if is_veto
+                else None
             ),
         }
 
@@ -647,7 +669,7 @@ class EvaluationService:
         score: float,
         scorer_type: str,
         scorer_id: int,
-        semester: Optional[str] = None,
+        semester: str | None = None,
         comment: str = "",
     ) -> EvaluationScore:
         """录入手动评分 → 重算该学生总分快照"""
@@ -686,7 +708,7 @@ class EvaluationService:
         student_id: int,
         school_id: int,
         semester: str,
-    ) -> Optional[StudentScore]:
+    ) -> StudentScore | None:
         """
         重算学生总分快照
 
@@ -777,9 +799,7 @@ class EvaluationService:
         snapshot.total_score = round(total, 1)
 
         # ⚡ 处分强电桥接: 叠加 ACTIVE 处分扣分
-        active_sanctions = await EvaluationService._get_active_sanctions(
-            db, student_id, semester
-        )
+        active_sanctions = await EvaluationService._get_active_sanctions(db, student_id, semester)
         if active_sanctions:
             penalty_total, _, _ = EvaluationService.compute_discipline_penalty(active_sanctions)
             if penalty_total < 0:
@@ -791,7 +811,8 @@ class EvaluationService:
                     + snapshot.academic_score * weights.get("academic", 0.25)
                     + snapshot.health_score * weights.get("health", 0.20)
                     + snapshot.art_score * weights.get("art", 0.15)
-                    + snapshot.social_score * weights.get("social", 0.15), 1
+                    + snapshot.social_score * weights.get("social", 0.15),
+                    1,
                 )
                 logger.info(
                     f"[evaluation] 学生 {student_id} 处分扣分 {penalty_total}, "
@@ -810,44 +831,49 @@ class EvaluationService:
     async def get_class_ranking(
         db: AsyncSession,
         class_id: int,
-        semester: Optional[str] = None,
+        semester: str | None = None,
         limit: int = 50,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """班级排名 — 按总分降序"""
         if not semester:
             semester = EvaluationService._current_semester()
 
         result = await db.execute(
-            select(StudentScore).where(
+            select(StudentScore)
+            .where(
                 StudentScore.class_id == class_id,
                 StudentScore.semester == semester,
-            ).order_by(StudentScore.total_score.desc()).limit(limit)
+            )
+            .order_by(StudentScore.total_score.desc())
+            .limit(limit)
         )
         snapshots = result.scalars().all()
 
         ranking = []
         for rank, ss in enumerate(snapshots, 1):
             student = ss.student
-            ranking.append({
-                "rank": rank,
-                "student_id": ss.student_id,
-                "student_name": student.name if student else "",
-                "student_no": student.student_no if student else "",
-                "total_score": ss.total_score,
-                "moral_score": ss.moral_score,
-                "academic_score": ss.academic_score,
-                "health_score": ss.health_score,
-                "art_score": ss.art_score,
-                "social_score": ss.social_score,
-            })
+            ranking.append(
+                {
+                    "rank": rank,
+                    "student_id": ss.student_id,
+                    "student_name": student.name if student else "",
+                    "student_no": student.student_no if student else "",
+                    "total_score": ss.total_score,
+                    "moral_score": ss.moral_score,
+                    "academic_score": ss.academic_score,
+                    "health_score": ss.health_score,
+                    "art_score": ss.art_score,
+                    "social_score": ss.social_score,
+                }
+            )
         return ranking
 
     @staticmethod
     async def get_dimension_scores(
         db: AsyncSession,
         student_id: int,
-        semester: Optional[str] = None,
-    ) -> Optional[dict]:
+        semester: str | None = None,
+    ) -> dict | None:
         """获取单学生的五维分 + 总分"""
         if not semester:
             semester = EvaluationService._current_semester()
@@ -884,7 +910,7 @@ class EvaluationService:
         student_id: int,
         limit: int = 50,
         offset: int = 0,
-    ) -> Tuple[List[ScoreLog], int]:
+    ) -> tuple[list[ScoreLog], int]:
         """获取评分流水（分页）"""
         count_result = await db.execute(
             select(func.count(ScoreLog.id)).where(
@@ -894,9 +920,13 @@ class EvaluationService:
         total = count_result.scalar()
 
         result = await db.execute(
-            select(ScoreLog).where(
+            select(ScoreLog)
+            .where(
                 ScoreLog.student_id == student_id,
-            ).order_by(ScoreLog.created_at.desc()).limit(limit).offset(offset)
+            )
+            .order_by(ScoreLog.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
         logs = list(result.scalars().all())
         return logs, total
@@ -906,7 +936,7 @@ class EvaluationService:
     # ═══════════════════════════════════════════════════════════
 
     @staticmethod
-    async def get_rules(db: AsyncSession, school_id: int) -> Optional[EvaluationRule]:
+    async def get_rules(db: AsyncSession, school_id: int) -> EvaluationRule | None:
         """获取学校当前生效的评分规则"""
         result = await db.execute(
             select(EvaluationRule).where(
@@ -931,7 +961,11 @@ class EvaluationService:
         for key, value in kwargs.items():
             if value is not None and hasattr(rule, key):
                 if key in ("dimension_weights", "deduction_map"):
-                    setattr(rule, key, value.model_dump() if hasattr(value, "model_dump") else dict(value))
+                    setattr(
+                        rule,
+                        key,
+                        value.model_dump() if hasattr(value, "model_dump") else dict(value),
+                    )
                 else:
                     setattr(rule, key, value)
 
@@ -947,8 +981,8 @@ class EvaluationService:
     async def list_indicators(
         db: AsyncSession,
         school_id: int,
-        dimension: Optional[str] = None,
-    ) -> List[dict]:
+        dimension: str | None = None,
+    ) -> list[dict]:
         """列出指标 — 按维度分组返回"""
         conditions = [
             EvaluationIndicator.school_id == school_id,
@@ -959,7 +993,8 @@ class EvaluationService:
             conditions.append(EvaluationIndicator.dimension.in_(DIMENSION_KEYS))
 
         result = await db.execute(
-            select(EvaluationIndicator).where(*conditions)
+            select(EvaluationIndicator)
+            .where(*conditions)
             .order_by(EvaluationIndicator.dimension, EvaluationIndicator.sort_order)
         )
         indicators = list(result.scalars().all())
@@ -984,7 +1019,7 @@ class EvaluationService:
         school_id: int,
         name: str,
         parent_id: int = 0,
-        dimension: Optional[str] = None,
+        dimension: str | None = None,
         weight: float = 0.0,
         max_score: float = 100.0,
         sort_order: int = 0,
@@ -1010,7 +1045,7 @@ class EvaluationService:
         indicator_id: int,
         school_id: int,
         **kwargs,
-    ) -> Optional[EvaluationIndicator]:
+    ) -> EvaluationIndicator | None:
         """更新评价指标"""
         result = await db.execute(
             select(EvaluationIndicator).where(
@@ -1034,7 +1069,7 @@ class EvaluationService:
         db: AsyncSession,
         indicator_id: int,
         school_id: int,
-    ) -> Optional[EvaluationIndicator]:
+    ) -> EvaluationIndicator | None:
         """切换指标启用/禁用"""
         result = await db.execute(
             select(EvaluationIndicator).where(
@@ -1049,8 +1084,7 @@ class EvaluationService:
         indicator.is_active = not indicator.is_active
         await db.flush()
         logger.info(
-            f"[evaluation] 指标 {indicator.name} "
-            f"{'启用' if indicator.is_active else '禁用'}"
+            f"[evaluation] 指标 {indicator.name} {'启用' if indicator.is_active else '禁用'}"
         )
         return indicator
 
@@ -1092,13 +1126,13 @@ class EvaluationService:
     @staticmethod
     async def get_positive_score_ranking(
         db: AsyncSession,
-        class_id: Optional[int] = None,
-        grade_id: Optional[int] = None,
+        class_id: int | None = None,
+        grade_id: int | None = None,
         school_id: int = 1,
-        dimension: Optional[str] = None,
+        dimension: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         正向加分排行榜 — 按正向加分总分降序
 
@@ -1115,7 +1149,7 @@ class EvaluationService:
         """
         # 构建基础查询：从 score_logs 表统计正向加分
         # 只统计 change_amount > 0 的记录（正向加分）
-        from core.models import Student, Class
+        from core.models import Class, Student
 
         query = (
             select(
@@ -1157,14 +1191,16 @@ class EvaluationService:
         # 格式化结果
         ranking = []
         for rank, row in enumerate(rows, offset + 1):
-            ranking.append({
-                "rank": rank,
-                "student_id": row.student_id,
-                "student_name": row.student_name,
-                "class_name": row.class_name,
-                "positive_score": int(row.positive_score or 0),
-                "record_count": int(row.record_count or 0),
-            })
+            ranking.append(
+                {
+                    "rank": rank,
+                    "student_id": row.student_id,
+                    "student_name": row.student_name,
+                    "class_name": row.class_name,
+                    "positive_score": int(row.positive_score or 0),
+                    "record_count": int(row.record_count or 0),
+                }
+            )
 
         return ranking
 
@@ -1175,13 +1211,14 @@ class EvaluationService:
     @staticmethod
     def _current_semester() -> str:
         """计算当前学期: '2025-2026-2' / '2026-2027-1'"""
-        from datetime import timezone, timedelta
+        from datetime import timedelta, timezone
+
         now = datetime.now(timezone(timedelta(hours=8)))
         y = now.year
         m = now.month
         if m >= 9:
-            return f"{y}-{y+1}-1"
+            return f"{y}-{y + 1}-1"
         elif m >= 2:
-            return f"{y-1}-{y}-2"
+            return f"{y - 1}-{y}-2"
         else:
-            return f"{y-1}-{y}-2"
+            return f"{y - 1}-{y}-2"

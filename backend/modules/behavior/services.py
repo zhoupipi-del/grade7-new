@@ -9,21 +9,21 @@ modules/behavior/services.py — 违纪行为业务逻辑层
 """
 
 import logging
-from datetime import datetime, date, timedelta, timezone
-from typing import Optional, List, Tuple
-
-from sqlalchemy import select, func, and_, case
-from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from .models import DisciplineRecord, DisciplineAppeal
-from core.models import Student, Class, Grade, User, UserRole
+from datetime import date, datetime, timedelta, timezone
 
 # 🔌 跨模块 Hook: behavior → discipline 处分熔焊
 # 放在函数内部延迟导入避免循环依赖，此处仅声明类型引用
 from typing import TYPE_CHECKING
+
+from core.models import Class, Student
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from .models import DisciplineAppeal, DisciplineRecord
+
 if TYPE_CHECKING:
-    from modules.discipline.services import DisciplineService
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +100,12 @@ class BehaviorService:
                 # 延迟导入避免循环依赖（behavior ↔ discipline 双向 import）
                 from modules.discipline.services import DisciplineService
 
-                trigger = await DisciplineService.detect_escalation_trigger(
-                    db, student.id
-                )
+                trigger = await DisciplineService.detect_escalation_trigger(db, student.id)
                 if trigger["triggered"]:
                     await DisciplineService.create_escalation_draft(
-                        db, student.id, trigger["evidence"],
+                        db,
+                        student.id,
+                        trigger["evidence"],
                         db_session_for_commit=False,  # 不独立 commit，由外层统一提交
                     )
                     logger.warning(
@@ -115,8 +115,7 @@ class BehaviorService:
             except Exception as e:
                 # 异常隔离：Hook 失败不影响违纪记录正常入库
                 logger.error(
-                    f"处分滑窗Hook异常(已隔离): student_id={student.id} "
-                    f"error={e}", exc_info=True
+                    f"处分滑窗Hook异常(已隔离): student_id={student.id} error={e}", exc_info=True
                 )
 
         # 检查累计升级
@@ -127,14 +126,18 @@ class BehaviorService:
         # 🔌 事件总线盲发: 违纪处分 → growth 时光轴 (fire-and-forget)
         try:
             from core.event_bus import EventBus
-            EventBus().publish("behavior.disciplined", {
-                "school_id": school_id,
-                "student_id": student.id,
-                "category": data.get("category"),
-                "level": data.get("type"),
-                "deduction": points,
-                "title": f"{TYPE_MAP.get(data.get('type'), '行为记录')}: {data.get('description', '')[:50]}",
-            })
+
+            EventBus().publish(
+                "behavior.disciplined",
+                {
+                    "school_id": school_id,
+                    "student_id": student.id,
+                    "category": data.get("category"),
+                    "level": data.get("type"),
+                    "deduction": points,
+                    "title": f"{TYPE_MAP.get(data.get('type'), '行为记录')}: {data.get('description', '')[:50]}",
+                },
+            )
         except Exception:
             pass  # 事件总线不可用时静默降级
 
@@ -145,15 +148,22 @@ class BehaviorService:
         # 铁律4: 多租户审批链优先 → PolicyEngine 降级
         try:
             from modules.policy_engine import get_engine
+
             engine = get_engine()
             if engine:
                 # 1. 事件分类 → severity / dimension / penalty
                 #    优先使用 data["type"] (与 policy.yaml 事件类型一致), 兜底使用 category 映射
                 _CATEGORY_MAP = {
-                    "打架": "fighting", "吸烟": "smoking", "作弊": "cheating",
-                    "迟到": "lateness", "缺勤": "absence", "表扬": "good_job",
+                    "打架": "fighting",
+                    "吸烟": "smoking",
+                    "作弊": "cheating",
+                    "迟到": "lateness",
+                    "缺勤": "absence",
+                    "表扬": "good_job",
                 }
-                behavior_type = data.get("type") or _CATEGORY_MAP.get(data.get("category", ""), "other")
+                behavior_type = data.get("type") or _CATEGORY_MAP.get(
+                    data.get("category", ""), "other"
+                )
                 classification = engine.classify(behavior_type)
 
                 # 2. 审批链解析: L1 多租户 → L2 PolicyEngine
@@ -169,16 +179,20 @@ class BehaviorService:
                 biz_type = biz_type_map.get(classification.severity, "behavior_minor")
                 try:
                     from modules.approval.services import resolve_chain_async
+
                     chain_config = await resolve_chain_async(db, school_id, biz_type)
                     if chain_config:
                         approval_mode = chain_config.get("approval_mode", "serial_and")
                         logger.info(
-                            "[PolicyEngine Hook-2] 使用多租户审批链 | "
-                            "school=%s biz=%s chain_id=%s", school_id, biz_type, chain_config.get("chain_id")
+                            "[PolicyEngine Hook-2] 使用多租户审批链 | school=%s biz=%s chain_id=%s",
+                            school_id,
+                            biz_type,
+                            chain_config.get("chain_id"),
                         )
                 except Exception as chain_err:
                     logger.warning(
-                        "[PolicyEngine Hook-2] 多租户审批链查询失败(降级PolicyEngine): %s", chain_err
+                        "[PolicyEngine Hook-2] 多租户审批链查询失败(降级PolicyEngine): %s",
+                        chain_err,
                     )
 
                 # L2: Fallback — PolicyEngine
@@ -189,6 +203,7 @@ class BehaviorService:
 
                 # 3. 写审批工单 (approval_requests)
                 from modules.evaluation.models import ApprovalRequest
+
                 approval_req = ApprovalRequest(
                     school_id=school_id,
                     student_id=student.id,
@@ -207,6 +222,7 @@ class BehaviorService:
                 #    discipline_type 传 severity 以匹配 deduction_map keys (warning/minor/major/serious)
                 #    penalty_override 传 PolicyEngine 精确扣分 (base_penalty)
                 from modules.evaluation.services import EvaluationService
+
                 log = await EvaluationService.apply_deduction(
                     db=db,
                     student_id=student.id,
@@ -234,7 +250,8 @@ class BehaviorService:
             await db.rollback()
             logger.error(
                 f"[PolicyEngine Hook-2] 异常(已隔离，违纪记录已保存): "
-                f"student_id={student.id} error={e}", exc_info=True
+                f"student_id={student.id} error={e}",
+                exc_info=True,
             )
 
         # 重新查询以加载关系（async 不能用 refresh + lazy load）
@@ -249,7 +266,7 @@ class BehaviorService:
         return record
 
     @staticmethod
-    async def get_record(db: AsyncSession, record_id: int) -> Optional[DisciplineRecord]:
+    async def get_record(db: AsyncSession, record_id: int) -> DisciplineRecord | None:
         return await db.scalar(
             select(DisciplineRecord)
             .options(
@@ -263,16 +280,16 @@ class BehaviorService:
     async def list_records(
         db: AsyncSession,
         school_id: int,
-        class_id: Optional[int] = None,
-        grade_id: Optional[int] = None,
-        student_id: Optional[int] = None,
-        type: Optional[str] = None,
-        status: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        class_id: int | None = None,
+        grade_id: int | None = None,
+        student_id: int | None = None,
+        type: str | None = None,
+        status: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> Tuple[List[DisciplineRecord], int]:
+    ) -> tuple[list[DisciplineRecord], int]:
         """分页查询违纪记录，返回 (records, total)"""
         conditions = [DisciplineRecord.school_id == school_id]
         if class_id:
@@ -290,9 +307,7 @@ class BehaviorService:
         if end_date:
             conditions.append(DisciplineRecord.incident_date <= end_date)
 
-        cnt = await db.scalar(
-            select(func.count()).select_from(DisciplineRecord).where(*conditions)
-        )
+        cnt = await db.scalar(select(func.count()).select_from(DisciplineRecord).where(*conditions))
         total = int(cnt or 0)
 
         stmt = (
@@ -310,7 +325,7 @@ class BehaviorService:
     @staticmethod
     async def update_record(
         db: AsyncSession, record_id: int, data: dict
-    ) -> Optional[DisciplineRecord]:
+    ) -> DisciplineRecord | None:
         record = await BehaviorService.get_record(db, record_id)
         if not record:
             return None
@@ -331,7 +346,7 @@ class BehaviorService:
         return True
 
     @staticmethod
-    async def resolve_record(db: AsyncSession, record_id: int) -> Optional[DisciplineRecord]:
+    async def resolve_record(db: AsyncSession, record_id: int) -> DisciplineRecord | None:
         record = await BehaviorService.get_record(db, record_id)
         if not record or record.status != "active":
             return None
@@ -358,7 +373,9 @@ class BehaviorService:
             if total_points >= threshold:
                 # 检查是否已经生成了此级别的升级记录（幂等）
                 existing = await db.scalar(
-                    select(func.count()).select_from(DisciplineRecord).where(
+                    select(func.count())
+                    .select_from(DisciplineRecord)
+                    .where(
                         DisciplineRecord.student_id == student.id,
                         DisciplineRecord.type == level,
                         DisciplineRecord.category == "系统自动",
@@ -424,9 +441,9 @@ class BehaviorService:
     async def get_stats(
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        grade_id: int | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> dict:
         """违纪统计概览"""
         conditions = [DisciplineRecord.school_id == school_id]
@@ -448,7 +465,9 @@ class BehaviorService:
             select(
                 DisciplineRecord.type,
                 func.count(DisciplineRecord.id),
-            ).where(*conditions).group_by(DisciplineRecord.type)
+            )
+            .where(*conditions)
+            .group_by(DisciplineRecord.type)
         )
         by_type = {row[0]: row[1] for row in type_rows.all()}
 
@@ -457,7 +476,9 @@ class BehaviorService:
             select(
                 DisciplineRecord.category,
                 func.count(DisciplineRecord.id),
-            ).where(*conditions).group_by(DisciplineRecord.category)
+            )
+            .where(*conditions)
+            .group_by(DisciplineRecord.category)
         )
         by_category = {row[0]: row[1] for row in cat_rows.all()}
 
@@ -467,7 +488,8 @@ class BehaviorService:
                 DisciplineRecord.class_id,
                 Class.name,
                 func.count(DisciplineRecord.id),
-            ).join(Class, DisciplineRecord.class_id == Class.id)
+            )
+            .join(Class, DisciplineRecord.class_id == Class.id)
             .where(*conditions)
             .group_by(DisciplineRecord.class_id, Class.name)
         )
@@ -476,9 +498,7 @@ class BehaviorService:
             by_class[row[1]] = row[2]
 
         # 总扣分
-        total_points = await db.scalar(
-            select(func.sum(DisciplineRecord.points)).where(*conditions)
-        )
+        total_points = await db.scalar(select(func.sum(DisciplineRecord.points)).where(*conditions))
         total_points = int(total_points or 0)
 
         # 月度趋势（最近 6 个月）
@@ -488,14 +508,16 @@ class BehaviorService:
                 func.year(DisciplineRecord.incident_date).label("year"),
                 func.month(DisciplineRecord.incident_date).label("month"),
                 func.count(DisciplineRecord.id),
-            ).where(
+            )
+            .where(
                 DisciplineRecord.school_id == school_id,
                 DisciplineRecord.incident_date >= six_months_ago,
-            ).group_by("year", "month").order_by("year", "month")
+            )
+            .group_by("year", "month")
+            .order_by("year", "month")
         )
         monthly_trend = [
-            {"year": r.year, "month": f"{r.month:02d}", "count": r[2]}
-            for r in trend_rows.all()
+            {"year": r.year, "month": f"{r.month:02d}", "count": r[2]} for r in trend_rows.all()
         ]
 
         return {
@@ -543,11 +565,9 @@ class BehaviorService:
     @staticmethod
     async def review_appeal(
         db: AsyncSession, appeal_id: int, status: str, comment: str, reviewer_id: int
-    ) -> Optional[DisciplineAppeal]:
+    ) -> DisciplineAppeal | None:
         """班主任/年级组长/德育处审核申诉"""
-        appeal = await db.scalar(
-            select(DisciplineAppeal).where(DisciplineAppeal.id == appeal_id)
-        )
+        appeal = await db.scalar(select(DisciplineAppeal).where(DisciplineAppeal.id == appeal_id))
         if not appeal or appeal.status != "pending":
             return None
 
@@ -569,17 +589,15 @@ class BehaviorService:
     async def list_appeals(
         db: AsyncSession,
         school_id: int,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> Tuple[List[DisciplineAppeal], int]:
+    ) -> tuple[list[DisciplineAppeal], int]:
         conditions = [DisciplineAppeal.school_id == school_id]
         if status:
             conditions.append(DisciplineAppeal.status == status)
 
-        cnt = await db.scalar(
-            select(func.count()).select_from(DisciplineAppeal).where(*conditions)
-        )
+        cnt = await db.scalar(select(func.count()).select_from(DisciplineAppeal).where(*conditions))
         total = int(cnt or 0)
 
         stmt = (

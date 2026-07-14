@@ -11,13 +11,11 @@ Celery 异步任务，将 RDI 扫描从 HTTP 请求生命周期迁移至 mainten
 
 import asyncio
 import logging
-import os
 import time
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-
 from modules.reports.celery_app import celery_engine
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 logger = logging.getLogger("risk_models.tasks")
 
@@ -25,10 +23,9 @@ logger = logging.getLogger("risk_models.tasks")
 # 独立数据库引擎 (避免与 app.py 循环导入)
 # ═══════════════════════════════════════════════════════════════
 
-_DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "mysql+aiomysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/grade7_new",
-)
+from core.db_utils import require_db_url
+
+_DATABASE_URL = require_db_url()
 
 _task_engine = create_async_engine(
     _DATABASE_URL,
@@ -51,11 +48,11 @@ TaskSessionLocal = async_sessionmaker(
 # 异步核心逻辑 (供 asyncio.run() 桥接)
 # ═══════════════════════════════════════════════════════════════
 
-async def _rdi_scan_class_async(
-    school_id: int, class_id: int, semester: str = None
-) -> dict:
+
+async def _rdi_scan_class_async(school_id: int, class_id: int, semester: str = None) -> dict:
     """单班异步扫描 — 遍历学生 → 计算 RDI → 生成预警"""
     from core.models import Student
+
     from .services import RiskDeviationIndexCalculator, RiskWarningService
 
     # Celery prefork: 清理上一轮 asyncio.run() 的 stale 连接
@@ -73,10 +70,7 @@ async def _rdi_scan_class_async(
         )
         students = result.scalars().all()
         student_count = len(students)
-        logger.info(
-            f"[RDI] 班级扫描: school={school_id} class={class_id} "
-            f"students={student_count}"
-        )
+        logger.info(f"[RDI] 班级扫描: school={school_id} class={class_id} students={student_count}")
 
         if student_count == 0:
             await db.close()
@@ -105,10 +99,7 @@ async def _rdi_scan_class_async(
                 )
                 scanned += 1
 
-                if (
-                    not rdi["warning_suppressed"]
-                    and rdi["rdi_score"] >= calculator.min_rdi_to_warn
-                ):
+                if not rdi["warning_suppressed"] and rdi["rdi_score"] >= calculator.min_rdi_to_warn:
                     warning = await warning_service.create_warning(
                         db, school_id, rdi, trigger_event_type="batch_scan"
                     )
@@ -118,6 +109,7 @@ async def _rdi_scan_class_async(
                     if rdi.get("risk_level") == "intervention":
                         try:
                             from modules.ai_prescription.tasks import bridge_rdi_to_approval
+
                             bridge_rdi_to_approval.delay(
                                 student_id=student.id,
                                 school_id=school_id,
@@ -138,9 +130,7 @@ async def _rdi_scan_class_async(
                 # 学生数据不足 (无违纪/考勤/评价记录)，跳过
                 scanned += 1
             except Exception as exc:
-                logger.error(
-                    f"[RDI] 学生 {student.id} 扫描异常: {exc}", exc_info=True
-                )
+                logger.error(f"[RDI] 学生 {student.id} 扫描异常: {exc}", exc_info=True)
                 errors += 1
                 continue
 
@@ -183,9 +173,7 @@ async def _rdi_scan_school_async(school_id: int, semester: str = None) -> dict:
         )
         classes = result.scalars().all()
 
-        logger.info(
-            f"[RDI] 全校扫描: school={school_id} classes={len(classes)}"
-        )
+        logger.info(f"[RDI] 全校扫描: school={school_id} classes={len(classes)}")
 
         dispatched = 0
         for cls in classes:
@@ -207,9 +195,7 @@ async def _rdi_scan_school_async(school_id: int, semester: str = None) -> dict:
         "semester": semester,
         "classes_dispatched": dispatched,
     }
-    logger.info(
-        f"[RDI] 全校扫描 dispatch 完成: {dispatched} 个班级已入队"
-    )
+    logger.info(f"[RDI] 全校扫描 dispatch 完成: {dispatched} 个班级已入队")
     return result
 
 
@@ -221,9 +207,7 @@ async def _rdi_daily_scan_async() -> dict:
     await _task_engine.dispose()
 
     async with TaskSessionLocal() as db:
-        result = await db.execute(
-            select(School).where(School.is_active == True)
-        )
+        result = await db.execute(select(School).where(School.is_active == True))
         schools = result.scalars().all()
 
         logger.info(f"[RDI] 每日定时扫描: {len(schools)} 所学校")
@@ -242,15 +226,14 @@ async def _rdi_daily_scan_async() -> dict:
         "status": "ok",
         "schools_dispatched": dispatched,
     }
-    logger.info(
-        f"[RDI] 每日定时扫描 dispatch 完成: {dispatched} 所学校已入队"
-    )
+    logger.info(f"[RDI] 每日定时扫描 dispatch 完成: {dispatched} 所学校已入队")
     return result
 
 
 # ═══════════════════════════════════════════════════════════════
 # Celery 任务包装 (同步入口 → asyncio.run 桥接)
 # ═══════════════════════════════════════════════════════════════
+
 
 @celery_engine.task(
     bind=True,
@@ -266,18 +249,11 @@ def rdi_scan_class(self, school_id: int, class_id: int, semester: str = None):
     对指定班级全部学生执行 Z-Score + EWMA 计算，生成 RiskWarning 记录。
     使用 asyncio.run() 桥接同步 Celery → 异步 Calculator。
     """
-    logger.info(
-        f"[RDI] 班级风险扫描启动 | school={school_id} "
-        f"class={class_id} semester={semester}"
-    )
+    logger.info(f"[RDI] 班级风险扫描启动 | school={school_id} class={class_id} semester={semester}")
     try:
-        return asyncio.run(
-            _rdi_scan_class_async(school_id, class_id, semester)
-        )
+        return asyncio.run(_rdi_scan_class_async(school_id, class_id, semester))
     except Exception as exc:
-        logger.error(
-            f"[RDI] 班级扫描失败 | class={class_id}: {exc}", exc_info=True
-        )
+        logger.error(f"[RDI] 班级扫描失败 | class={class_id}: {exc}", exc_info=True)
         raise self.retry(exc=exc)
 
 
@@ -294,15 +270,11 @@ def rdi_scan_school(self, school_id: int, semester: str = None):
 
     遍历学校下全部班级，逐班调用 rdi_scan_class.delay()。
     """
-    logger.info(
-        f"[RDI] 全校风险扫描启动 | school={school_id} semester={semester}"
-    )
+    logger.info(f"[RDI] 全校风险扫描启动 | school={school_id} semester={semester}")
     try:
         return asyncio.run(_rdi_scan_school_async(school_id, semester))
     except Exception as exc:
-        logger.error(
-            f"[RDI] 全校扫描失败 | school={school_id}: {exc}", exc_info=True
-        )
+        logger.error(f"[RDI] 全校扫描失败 | school={school_id}: {exc}", exc_info=True)
         raise self.retry(exc=exc)
 
 

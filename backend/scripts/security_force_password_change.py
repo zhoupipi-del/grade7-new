@@ -14,13 +14,11 @@ P0 安全债务清除 — 默认密码强制改密迁移
    用户仍可用现有密码登录，但将被强制要求修改密码。
 """
 
-import os
-import sys
 import hashlib
-import secrets
 import hmac
 import logging
-from datetime import datetime
+import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -44,10 +42,9 @@ def wings3_verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-DB_URL = os.getenv(
-    "DATABASE_URL",
-    "mysql+pymysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3?charset=utf8mb4",
-)
+from core.db_utils import get_db_url_for_script
+
+DB_URL = get_db_url_for_script("运行前请先 export DATABASE_URL=...")
 DEFAULT_PASSWORDS = ["admin123", "123456", "password", "888888"]
 
 
@@ -63,13 +60,15 @@ def main():
             # ── Step 1: 确保列存在 ──
             logger.info("Step 1: 检查/添加 password_change_required 列...")
             try:
-                conn.execute(text(
-                    "ALTER TABLE users ADD COLUMN password_change_required TINYINT(1) DEFAULT 0 "
-                    "COMMENT '是否需要强制修改密码'"
-                ))
-                conn.execute(text(
-                    "ALTER TABLE users ADD INDEX idx_pwd_change (password_change_required)"
-                ))
+                conn.execute(
+                    text(
+                        "ALTER TABLE users ADD COLUMN password_change_required TINYINT(1) DEFAULT 0 "
+                        "COMMENT '是否需要强制修改密码'"
+                    )
+                )
+                conn.execute(
+                    text("ALTER TABLE users ADD INDEX idx_pwd_change (password_change_required)")
+                )
                 logger.info("  ✅ 列 password_change_required 已添加")
             except Exception as e:
                 if "Duplicate column" in str(e) or "already exists" in str(e):
@@ -79,7 +78,9 @@ def main():
 
             # ── Step 2: 扫描默认密码用户 ──
             logger.info("Step 2: 扫描使用默认密码的用户...")
-            result = conn.execute(text("SELECT id, username, password_hash FROM users WHERE is_active = 1"))
+            result = conn.execute(
+                text("SELECT id, username, password_hash FROM users WHERE is_active = 1")
+            )
             all_users = result.fetchall()
 
             flagged = 0
@@ -97,7 +98,9 @@ def main():
                         text("UPDATE users SET password_change_required = TRUE WHERE id = :uid"),
                         {"uid": user.id},
                     )
-                    logger.info(f"  🔴 [{user.username}] 使用默认密码 '{matched_pw}' → 已标记强制改密")
+                    logger.info(
+                        f"  🔴 [{user.username}] 使用默认密码 '{matched_pw}' → 已标记强制改密"
+                    )
                     flagged += 1
 
             # ── Step 3: 报告 ──
@@ -114,6 +117,7 @@ def main():
     except Exception as e:
         logger.error(f"❌ 未预期错误: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 

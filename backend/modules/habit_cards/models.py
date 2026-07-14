@@ -2,25 +2,35 @@
 Habit Cards 数据模型
 """
 
-from sqlalchemy import (
-    Column, BigInteger, String, Integer, DateTime, JSON, Boolean, Text,
-)
 from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    String,
+    Text,
+)
 
 
 class HabitCard(Base, SchoolMixin):
     """习惯充能卡模板表"""
+
     __tablename__ = "habit_cards"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     card_code = Column(String(40), nullable=False, comment="模板编码, 如 self_discipline_fox")
     card_name = Column(String(60), nullable=False, comment="卡牌显示名称, 如 自律狐")
     card_category = Column(
-        String(20), nullable=False,
+        String(20),
+        nullable=False,
         comment="habit/academic/social/sports/art",
     )
     card_rarity = Column(
-        String(20), default="common",
+        String(20),
+        default="common",
         comment="common/rare/epic/legendary",
     )
     card_icon = Column(String(200), comment="SVG 或 PNG 路径")
@@ -33,6 +43,7 @@ class HabitCard(Base, SchoolMixin):
 
 class StudentCardWallet(Base, SchoolMixin):
     """学生卡牌钱包表 (高频读写, 支持叠加)"""
+
     __tablename__ = "student_card_wallets"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -46,6 +57,7 @@ class StudentCardWallet(Base, SchoolMixin):
 
 class CardTransaction(Base, SchoolMixin):
     """卡牌发放/消耗流水表"""
+
     __tablename__ = "card_transactions"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -53,7 +65,8 @@ class CardTransaction(Base, SchoolMixin):
     card_id = Column(BigInteger, nullable=False)
     issued_by = Column(BigInteger, nullable=False, comment="教师 user_id")
     transaction_type = Column(
-        String(20), nullable=False,
+        String(20),
+        nullable=False,
         comment="issue/consume/upgrade",
     )
     quantity = Column(Integer, default=1)
@@ -65,6 +78,7 @@ class CardTransaction(Base, SchoolMixin):
 
 class ParentBlindboxLog(Base, SchoolMixin):
     """家长金色盲盒开启记录表 (运营裂变轴心)"""
+
     __tablename__ = "parent_blindbox_log"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)

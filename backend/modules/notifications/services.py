@@ -10,13 +10,12 @@ modules/notifications/services.py — 通知引擎服务层
 """
 
 import logging
-from typing import Optional, List, Tuple
 
-from sqlalchemy import select, func, delete, update
+from core.models import User, UserRole
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Notification, NotificationType
-from core.models import User, UserRole
+from .models import Notification
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +33,10 @@ class NotificationService:
         recipient_id: int,
         type: str,
         title: str,
-        body: Optional[str] = None,
-        sender_id: Optional[int] = None,
-        entity_type: Optional[str] = None,
-        entity_id: Optional[int] = None,
+        body: str | None = None,
+        sender_id: int | None = None,
+        entity_type: str | None = None,
+        entity_id: int | None = None,
         school_id: int = 1,
     ) -> Notification:
         """
@@ -76,11 +75,11 @@ class NotificationService:
         role: UserRole,
         type: str,
         title: str,
-        body: Optional[str] = None,
-        sender_id: Optional[int] = None,
-        entity_type: Optional[str] = None,
-        entity_id: Optional[int] = None,
-    ) -> List[Notification]:
+        body: str | None = None,
+        sender_id: int | None = None,
+        entity_type: str | None = None,
+        entity_id: int | None = None,
+    ) -> list[Notification]:
         """
         向指定角色的所有活跃用户发送通知
 
@@ -117,15 +116,15 @@ class NotificationService:
     @staticmethod
     async def notify_users(
         db: AsyncSession,
-        user_ids: List[int],
+        user_ids: list[int],
         type: str,
         title: str,
-        body: Optional[str] = None,
-        sender_id: Optional[int] = None,
-        entity_type: Optional[str] = None,
-        entity_id: Optional[int] = None,
+        body: str | None = None,
+        sender_id: int | None = None,
+        entity_type: str | None = None,
+        entity_id: int | None = None,
         school_id: int = 1,
-    ) -> List[Notification]:
+    ) -> list[Notification]:
         """
         向指定用户列表发送通知
 
@@ -153,9 +152,7 @@ class NotificationService:
     # ═══════════════════════════════════════════════════════════
 
     @staticmethod
-    async def get_users_by_role(
-        db: AsyncSession, school_id: int, role: UserRole
-    ) -> List[User]:
+    async def get_users_by_role(db: AsyncSession, school_id: int, role: UserRole) -> list[User]:
         """查询指定学校下指定角色的所有活跃用户"""
         result = await db.execute(
             select(User).where(
@@ -176,9 +173,9 @@ class NotificationService:
         recipient_id: int,
         limit: int = 20,
         offset: int = 0,
-        type: Optional[str] = None,
-        is_read: Optional[bool] = None,
-    ) -> Tuple[List[Notification], int]:
+        type: str | None = None,
+        is_read: bool | None = None,
+    ) -> tuple[list[Notification], int]:
         """
         查询收件人通知列表（分页）
 
@@ -248,9 +245,7 @@ class NotificationService:
         return result.rowcount > 0
 
     @staticmethod
-    async def mark_all_as_read(
-        db: AsyncSession, recipient_id: int, type: Optional[str] = None
-    ) -> int:
+    async def mark_all_as_read(db: AsyncSession, recipient_id: int, type: str | None = None) -> int:
         """
         标记收件人的全部(或指定类型)未读通知为已读
 
@@ -267,9 +262,7 @@ class NotificationService:
             conditions.append(Notification.type == type)
 
         result = await db.execute(
-            update(Notification)
-            .where(*conditions)
-            .values(is_read=True, read_at=get_local_now())
+            update(Notification).where(*conditions).values(is_read=True, read_at=get_local_now())
         )
         return result.rowcount
 
@@ -278,9 +271,7 @@ class NotificationService:
     # ═══════════════════════════════════════════════════════════
 
     @staticmethod
-    async def get_unread_count(
-        db: AsyncSession, recipient_id: int
-    ) -> Tuple[int, dict]:
+    async def get_unread_count(db: AsyncSession, recipient_id: int) -> tuple[int, dict]:
         """
         获取未读计数
 

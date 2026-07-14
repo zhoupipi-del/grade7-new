@@ -9,43 +9,48 @@ research_observation/services.py — 听课评课核心业务引擎
   5. 听课统计看板 (按类型/等级/学科/教师聚合)
 """
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, update, delete, and_
-from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
-import json
 
-from core.models import get_local_now
-from core.models import User
+from core.models import User, get_local_now
+from modules.timetable.enricher import TimetableEnricher
+from modules.timetable.models import TimetableScheduleInstance
+from sqlalchemy import and_, delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .models import (
-    ResearchClassObservation, ResearchObservationRubric, ResearchObservationAppeal,
-    FEEDBACK_PENDING, FEEDBACK_CONFIRMED, FEEDBACK_APPEALED, FEEDBACK_RESOLVED,
+    FEEDBACK_APPEALED,
+    FEEDBACK_CONFIRMED,
+    FEEDBACK_PENDING,
+    FEEDBACK_RESOLVED,
     VALID_FEEDBACK_TRANSITIONS,
+    ResearchClassObservation,
+    ResearchObservationAppeal,
+    ResearchObservationRubric,
 )
 from .schemas import (
-    RubricDimension, TextFeedback, ObservationCreate, ObservationUpdate,
-    RubricSubmit, TeacherAppeal, AppealResolve,
+    AppealResolve,
+    ObservationCreate,
+    ObservationUpdate,
+    RubricSubmit,
+    TeacherAppeal,
+    TimelineCommentCreate,
 )
-
 
 # ═══════════════════════════════════════════════
 # 辅助函数
 # ═══════════════════════════════════════════════
 
+
 async def _get_user_name(db: AsyncSession, user_id: int) -> str:
-    result = await db.execute(
-        select(User.display_name).where(User.id == user_id)
-    )
+    result = await db.execute(select(User.display_name).where(User.id == user_id))
     row = result.scalar_one_or_none()
     return row or f"用户{user_id}"
 
 
-async def _get_user_names_batch(db: AsyncSession, user_ids: List[int]) -> Dict[int, str]:
+async def _get_user_names_batch(db: AsyncSession, user_ids: list[int]) -> dict[int, str]:
     if not user_ids:
         return {}
-    result = await db.execute(
-        select(User.id, User.display_name).where(User.id.in_(user_ids))
-    )
+    result = await db.execute(select(User.id, User.display_name).where(User.id.in_(user_ids)))
     return {row[0]: row[1] for row in result.fetchall()}
 
 
@@ -70,8 +75,12 @@ def _validate_feedback_transition(current: str, target: str) -> bool:
 # 听课记录 CRUD
 # ═══════════════════════════════════════════════
 
+
 async def create_observation(
-    db: AsyncSession, school_id: int, observer_id: int, data: ObservationCreate,
+    db: AsyncSession,
+    school_id: int,
+    observer_id: int,
+    data: ObservationCreate,
 ) -> ResearchClassObservation:
     """创建听课记录"""
     obs = ResearchClassObservation(
@@ -87,6 +96,7 @@ async def create_observation(
         text_feedback=data.text_feedback.model_dump() if data.text_feedback else None,
         plan_adherence=data.plan_adherence,
         plan_deviation_note=data.plan_deviation_note,
+        schedule_instance_id=data.schedule_instance_id,
         feedback_status=FEEDBACK_PENDING,
         observed_at=data.observed_at,
         duration_minutes=data.duration_minutes,
@@ -99,8 +109,10 @@ async def create_observation(
 
 
 async def get_observation(
-    db: AsyncSession, school_id: int, obs_id: int,
-) -> Optional[ResearchClassObservation]:
+    db: AsyncSession,
+    school_id: int,
+    obs_id: int,
+) -> ResearchClassObservation | None:
     result = await db.execute(
         select(ResearchClassObservation).where(
             and_(
@@ -113,15 +125,17 @@ async def get_observation(
 
 
 async def list_observations(
-    db: AsyncSession, school_id: int,
-    observer_id: Optional[int] = None,
-    teacher_id: Optional[int] = None,
-    class_id: Optional[int] = None,
-    subject_code: Optional[str] = None,
-    feedback_status: Optional[str] = None,
-    observation_type: Optional[str] = None,
-    page: int = 1, page_size: int = 20,
-) -> Tuple[List[dict], int]:
+    db: AsyncSession,
+    school_id: int,
+    observer_id: int | None = None,
+    teacher_id: int | None = None,
+    class_id: int | None = None,
+    subject_code: str | None = None,
+    feedback_status: str | None = None,
+    observation_type: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict], int]:
     """听课列表 (分页+多维度筛选)"""
     conditions = [ResearchClassObservation.school_id == school_id]
     if observer_id:
@@ -137,9 +151,11 @@ async def list_observations(
     if observation_type:
         conditions.append(ResearchClassObservation.observation_type == observation_type)
 
-    total = (await db.execute(
-        select(func.count()).select_from(ResearchClassObservation).where(*conditions)
-    )).scalar() or 0
+    total = (
+        await db.execute(
+            select(func.count()).select_from(ResearchClassObservation).where(*conditions)
+        )
+    ).scalar() or 0
 
     offset = (page - 1) * page_size
     result = await db.execute(
@@ -166,8 +182,11 @@ async def list_observations(
 
 
 async def update_observation(
-    db: AsyncSession, school_id: int, obs_id: int, data: ObservationUpdate,
-) -> Optional[ResearchClassObservation]:
+    db: AsyncSession,
+    school_id: int,
+    obs_id: int,
+    data: ObservationUpdate,
+) -> ResearchClassObservation | None:
     """更新听课记录 (仅pending状态可改)"""
     obs = await get_observation(db, school_id, obs_id)
     if not obs:
@@ -215,10 +234,14 @@ async def delete_observation(db: AsyncSession, school_id: int, obs_id: int) -> b
 # 多维量化评分
 # ═══════════════════════════════════════════════
 
+
 async def submit_rubric(
-    db: AsyncSession, school_id: int, obs_id: int,
-    scorer_id: int, data: RubricSubmit,
-) -> Optional[Tuple[ResearchObservationRubric, ResearchClassObservation]]:
+    db: AsyncSession,
+    school_id: int,
+    obs_id: int,
+    scorer_id: int,
+    data: RubricSubmit,
+) -> tuple[ResearchObservationRubric, ResearchClassObservation] | None:
     """提交多维评分 — 自动计算总分/等级"""
     obs = await get_observation(db, school_id, obs_id)
     if not obs:
@@ -268,8 +291,10 @@ async def submit_rubric(
 
 
 async def get_rubric(
-    db: AsyncSession, school_id: int, obs_id: int,
-) -> Optional[ResearchObservationRubric]:
+    db: AsyncSession,
+    school_id: int,
+    obs_id: int,
+) -> ResearchObservationRubric | None:
     result = await db.execute(
         select(ResearchObservationRubric).where(
             and_(
@@ -285,9 +310,13 @@ async def get_rubric(
 # 教师确认/申诉状态机
 # ═══════════════════════════════════════════════
 
+
 async def teacher_confirm(
-    db: AsyncSession, school_id: int, obs_id: int, teacher_id: int,
-) -> Optional[ResearchClassObservation]:
+    db: AsyncSession,
+    school_id: int,
+    obs_id: int,
+    teacher_id: int,
+) -> ResearchClassObservation | None:
     """教师确认评课结果 (PENDING → CONFIRMED)"""
     obs = await get_observation(db, school_id, obs_id)
     if not obs:
@@ -317,9 +346,12 @@ async def teacher_confirm(
 
 
 async def teacher_appeal(
-    db: AsyncSession, school_id: int, obs_id: int, teacher_id: int,
+    db: AsyncSession,
+    school_id: int,
+    obs_id: int,
+    teacher_id: int,
     data: TeacherAppeal,
-) -> Optional[ResearchClassObservation]:
+) -> ResearchClassObservation | None:
     """教师申诉 (PENDING → APPEALED)"""
     obs = await get_observation(db, school_id, obs_id)
     if not obs:
@@ -350,9 +382,12 @@ async def teacher_appeal(
 
 
 async def resolve_appeal(
-    db: AsyncSession, school_id: int, obs_id: int,
-    resolver_id: int, data: AppealResolve,
-) -> Optional[ResearchClassObservation]:
+    db: AsyncSession,
+    school_id: int,
+    obs_id: int,
+    resolver_id: int,
+    data: AppealResolve,
+) -> ResearchClassObservation | None:
     """处理申诉 (APPEALED → RESOLVED)"""
     obs = await get_observation(db, school_id, obs_id)
     if not obs:
@@ -389,8 +424,10 @@ async def resolve_appeal(
 
 
 async def list_appeals(
-    db: AsyncSession, school_id: int, obs_id: int,
-) -> Tuple[List[dict], int]:
+    db: AsyncSession,
+    school_id: int,
+    obs_id: int,
+) -> tuple[list[dict], int]:
     """获取听课记录的反馈/申诉历史"""
     result = await db.execute(
         select(ResearchObservationAppeal)
@@ -409,20 +446,23 @@ async def list_appeals(
 
     items = []
     for r in rows:
-        items.append({
-            "id": r.id, "observation_id": r.observation_id,
-            "teacher_id": r.teacher_id,
-            "teacher_name": name_map.get(r.teacher_id, f"用户{r.teacher_id}"),
-            "action_type": r.action_type,
-            "appeal_reason": r.appeal_reason,
-            "appealed_dimensions": r.appealed_dimensions or [],
-            "resolution": r.resolution,
-            "resolved_by": r.resolved_by,
-            "score_adjusted": r.score_adjusted,
-            "adjusted_total_score": r.adjusted_total_score,
-            "created_at": r.created_at,
-            "resolved_at": r.resolved_at,
-        })
+        items.append(
+            {
+                "id": r.id,
+                "observation_id": r.observation_id,
+                "teacher_id": r.teacher_id,
+                "teacher_name": name_map.get(r.teacher_id, f"用户{r.teacher_id}"),
+                "action_type": r.action_type,
+                "appeal_reason": r.appeal_reason,
+                "appealed_dimensions": r.appealed_dimensions or [],
+                "resolution": r.resolution,
+                "resolved_by": r.resolved_by,
+                "score_adjusted": r.score_adjusted,
+                "adjusted_total_score": r.adjusted_total_score,
+                "created_at": r.created_at,
+                "resolved_at": r.resolved_at,
+            }
+        )
 
     return items, len(items)
 
@@ -431,13 +471,21 @@ async def list_appeals(
 # 教师听课历史
 # ═══════════════════════════════════════════════
 
+
 async def get_teacher_history(
-    db: AsyncSession, school_id: int, teacher_id: int,
-    page: int = 1, page_size: int = 20,
-) -> Tuple[List[dict], int]:
+    db: AsyncSession,
+    school_id: int,
+    teacher_id: int,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict], int]:
     """教师被听课历史"""
     return await list_observations(
-        db, school_id, teacher_id=teacher_id, page=page, page_size=page_size,
+        db,
+        school_id,
+        teacher_id=teacher_id,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -445,12 +493,16 @@ async def get_teacher_history(
 # 听课统计看板
 # ═══════════════════════════════════════════════
 
+
 async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
     """听课统计看板"""
-    total = (await db.execute(
-        select(func.count()).select_from(ResearchClassObservation)
-        .where(ResearchClassObservation.school_id == school_id)
-    )).scalar() or 0
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(ResearchClassObservation)
+            .where(ResearchClassObservation.school_id == school_id)
+        )
+    ).scalar() or 0
 
     # 按反馈状态
     status_q = (
@@ -462,13 +514,10 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
     status_map = {row[0]: row[1] for row in status_rows}
 
     # 平均分
-    avg_q = (
-        select(func.avg(ResearchClassObservation.score_percentage))
-        .where(
-            and_(
-                ResearchClassObservation.school_id == school_id,
-                ResearchClassObservation.score_percentage.isnot(None),
-            )
+    avg_q = select(func.avg(ResearchClassObservation.score_percentage)).where(
+        and_(
+            ResearchClassObservation.school_id == school_id,
+            ResearchClassObservation.score_percentage.isnot(None),
         )
     )
     avg_score = (await db.execute(avg_q)).scalar()
@@ -541,7 +590,8 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
     t_name_map = await _get_user_names_batch(db, teacher_ids)
     top_teachers = [
         {
-            "user_id": r[0], "name": t_name_map.get(r[0], f"用户{r[0]}"),
+            "user_id": r[0],
+            "name": t_name_map.get(r[0], f"用户{r[0]}"),
             "observation_count": r[1],
             "avg_score": round(float(r[2]), 1) if r[2] else None,
         }
@@ -567,10 +617,12 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
 # 辅助
 # ═══════════════════════════════════════════════
 
-def _obs_to_dict(obs: ResearchClassObservation, name_map: Dict[int, str]) -> dict:
+
+def _obs_to_dict(obs: ResearchClassObservation, name_map: dict[int, str]) -> dict:
     """ORM → dict"""
     return {
-        "id": obs.id, "school_id": obs.school_id,
+        "id": obs.id,
+        "school_id": obs.school_id,
         "observer_id": obs.observer_id,
         "observer_name": name_map.get(obs.observer_id, f"用户{obs.observer_id}"),
         "teacher_id": obs.teacher_id,
@@ -588,6 +640,8 @@ def _obs_to_dict(obs: ResearchClassObservation, name_map: Dict[int, str]) -> dic
         "text_feedback": obs.text_feedback,
         "plan_adherence": obs.plan_adherence,
         "plan_deviation_note": obs.plan_deviation_note,
+        "schedule_instance_id": obs.schedule_instance_id,
+        "timeline_comments": obs.timeline_comments or [],
         "feedback_status": obs.feedback_status,
         "feedback_status_updated_at": obs.feedback_status_updated_at,
         "teacher_viewed_at": obs.teacher_viewed_at,
@@ -596,3 +650,105 @@ def _obs_to_dict(obs: ResearchClassObservation, name_map: Dict[int, str]) -> dic
         "created_at": obs.created_at,
         "updated_at": obs.updated_at,
     }
+
+
+# ═══════════════════════════════════════════════
+# 时空弹道捕获器 (Wings 3.1)
+# ═══════════════════════════════════════════════
+
+
+async def auto_locate(
+    db: AsyncSession,
+    school_id: int,
+    class_id: int,
+    occurred_at: datetime,
+) -> dict:
+    """
+    自动卡位 — 调用TimetableEnricher零输入自动反查(节次/学科/教师)
+    输入: class_id + 时间戳
+    输出: {in_lesson, period_index, slot_id, subject_id, teacher_id, teacher_name, context_desc, schedule_instance_id}
+    """
+    # 调用时空连续体富集网关
+    ctx = await TimetableEnricher.enrich_telemetry_event(
+        school_id,
+        class_id,
+        occurred_at,
+        db,
+    )
+
+    result = {
+        "in_lesson": ctx.get("in_lesson", False),
+        "period_index": ctx.get("period_index"),
+        "slot_id": ctx.get("slot_id"),
+        "subject_id": ctx.get("subject_id"),
+        "teacher_id": ctx.get("teacher_id"),
+        "teacher_name": None,
+        "context_desc": ctx.get("context_desc", ""),
+        "schedule_instance_id": None,
+    }
+
+    # 如果在课中且有slot_id，反查schedule_instance_id
+    slot_id = ctx.get("slot_id")
+    if slot_id:
+        inst_result = await db.execute(
+            select(TimetableScheduleInstance.id).where(
+                and_(
+                    TimetableScheduleInstance.school_id == school_id,
+                    TimetableScheduleInstance.class_id == class_id,
+                    TimetableScheduleInstance.date == occurred_at.date(),
+                    TimetableScheduleInstance.slot_id == slot_id,
+                )
+            )
+        )
+        inst_id = inst_result.scalar_one_or_none()
+        if inst_id:
+            result["schedule_instance_id"] = inst_id
+
+    # 如果有teacher_id，反查教师姓名
+    teacher_id = ctx.get("teacher_id")
+    if teacher_id:
+        result["teacher_name"] = await _get_user_name(db, teacher_id)
+
+    return result
+
+
+async def add_timeline_comment(
+    db: AsyncSession,
+    school_id: int,
+    obs_id: int,
+    user_id: int,
+    data: TimelineCommentCreate,
+) -> dict | None:
+    """
+    打点弹幕 — 听课过程中实时打点, 追加到timeline_comments JSON数组
+    每条弹幕: {seconds_in_lesson, type, text, author_id, author_name, created_at}
+    """
+    obs = await get_observation(db, school_id, obs_id)
+    if not obs:
+        return None
+
+    author_name = await _get_user_name(db, user_id)
+    now = get_local_now()
+
+    comment_entry = {
+        "seconds_in_lesson": data.seconds_in_lesson,
+        "type": data.type,
+        "text": data.text,
+        "author_id": user_id,
+        "author_name": author_name,
+        "created_at": now.isoformat() if now else None,
+    }
+
+    # 追加到JSON数组 (MySQL JSON_ARRAY_APPEND 或 Python层操作)
+    existing = obs.timeline_comments or []
+    existing.append(comment_entry)
+    obs.timeline_comments = existing
+    # 强制标记脏数据 (SQLAlchemy JSON列变更检测)
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(obs, "timeline_comments")
+
+    await db.commit()
+    await db.refresh(obs)
+
+    return comment_entry

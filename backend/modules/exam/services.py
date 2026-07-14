@@ -19,25 +19,38 @@ from __future__ import annotations
 
 import logging
 import random
-from datetime import datetime, date, time
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
 
+from core.models import Class as ClassModel
+from core.models import Student, User
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, text, delete
 
-from core.models import Student, Class as ClassModel, User
 from .models import (
-    ExamSubject, ExamRoom, ExamArrangement,
-    ExamSeatAssignment, ExamInvigilator, ExamScoreEntryWindow,
+    ExamArrangement,
+    ExamInvigilator,
+    ExamRoom,
+    ExamScoreEntryWindow,
+    ExamSeatAssignment,
+    ExamSubject,
 )
 from .schemas import (
-    SubjectScheduleCreate, SubjectScheduleUpdate,
-    RoomCreate, RoomUpdate, RoomSeedRequest, RoomSeedResult,
-    ArrangementCreate, ArrangementUpdate,
-    SeatAssignRequest, SeatAssignResult, SeatOverrideUpdate,
+    ArrangementCreate,
+    ArrangementUpdate,
+    EntryWindowBulkCreateRequest,
+    EntryWindowBulkCreateResult,
+    EntryWindowCreate,
     InvigilatorCreate,
-    EntryWindowCreate, EntryWindowBulkCreateRequest, EntryWindowBulkCreateResult,
+    RoomCreate,
+    RoomSeedRequest,
+    RoomSeedResult,
+    RoomUpdate,
+    SeatAssignRequest,
+    SeatAssignResult,
+    SeatOverrideUpdate,
+    SubjectScheduleCreate,
+    SubjectScheduleUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +59,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════
 # SubjectScheduleService — 考试科目安排
 # ═══════════════════════════════════════════════════════════════
+
 
 class SubjectScheduleService:
     """考试科目安排 — 每场考试考哪些科目，每科的时间/满分"""
@@ -99,7 +113,7 @@ class SubjectScheduleService:
         db: AsyncSession,
         school_id: int,
         schedule_id: int,
-    ) -> Optional[ExamSubject]:
+    ) -> ExamSubject | None:
         """获取单个科目安排"""
         result = await db.execute(
             select(ExamSubject).where(
@@ -153,6 +167,7 @@ class SubjectScheduleService:
 # RoomService — 考场管理
 # ═══════════════════════════════════════════════════════════════
 
+
 class RoomService:
     """考场 CRUD + 从班级表批量生成"""
 
@@ -182,7 +197,7 @@ class RoomService:
     async def list(
         db: AsyncSession,
         school_id: int,
-        room_type: Optional[str] = None,
+        room_type: str | None = None,
         active_only: bool = False,
     ) -> list[ExamRoom]:
         """列出考场"""
@@ -204,7 +219,7 @@ class RoomService:
         db: AsyncSession,
         school_id: int,
         room_id: int,
-    ) -> Optional[ExamRoom]:
+    ) -> ExamRoom | None:
         """获取单个考场"""
         result = await db.execute(
             select(ExamRoom).where(
@@ -330,6 +345,7 @@ class RoomService:
 # ArrangementService — 考试安排（排考）
 # ═══════════════════════════════════════════════════════════════
 
+
 class ArrangementService:
     """排考 — 科目×考场×时间段"""
 
@@ -363,10 +379,10 @@ class ArrangementService:
     async def list(
         db: AsyncSession,
         school_id: int,
-        exam_id: Optional[int] = None,
-        subject_id: Optional[int] = None,
-        room_id: Optional[int] = None,
-        exam_date: Optional[date] = None,
+        exam_id: int | None = None,
+        subject_id: int | None = None,
+        room_id: int | None = None,
+        exam_date: date | None = None,
     ) -> list[ExamArrangement]:
         """列出考试安排（多维度过滤）"""
         stmt = (
@@ -395,7 +411,7 @@ class ArrangementService:
         db: AsyncSession,
         school_id: int,
         arrangement_id: int,
-    ) -> Optional[ExamArrangement]:
+    ) -> ExamArrangement | None:
         """获取单个考试安排"""
         result = await db.execute(
             select(ExamArrangement).where(
@@ -453,6 +469,7 @@ class ArrangementService:
 # SeatService — 座位编排（含补丁3: 人工覆盖保护）
 # ═══════════════════════════════════════════════════════════════
 
+
 class SeatService:
     """座位编排 — random / serpentine / manual
 
@@ -500,12 +517,9 @@ class SeatService:
         )
 
         # ── 3. 获取待分配学生 ──────────────────────
-        student_stmt = (
-            select(Student)
-            .where(
-                Student.school_id == school_id,
-                Student.is_active == True,
-            )
+        student_stmt = select(Student).where(
+            Student.school_id == school_id,
+            Student.is_active == True,
         )
         if data.class_ids:
             student_stmt = student_stmt.where(Student.class_id.in_(data.class_ids))
@@ -578,8 +592,13 @@ class SeatService:
 
         # 分配座位（蛇形/随机都是同一种填入逻辑，区别只是学生排序）
         assignments = SeatService._distribute_seats(
-            students, rooms, override_room_seats,
-            data.exam_id, data.subject_id, school_id, data.arrangement_method,
+            students,
+            rooms,
+            override_room_seats,
+            data.exam_id,
+            data.subject_id,
+            school_id,
+            data.arrangement_method,
         )
 
         for a in assignments:
@@ -602,7 +621,7 @@ class SeatService:
         school_id: int,
         exam_id: int,
         subject_id: int,
-        room_id: Optional[int] = None,
+        room_id: int | None = None,
     ) -> list[dict]:
         """查询座位分配（含学生姓名、考场名）"""
         stmt = (
@@ -679,7 +698,9 @@ class SeatService:
             )
         )
         if conflict_result.scalar_one_or_none():
-            raise ValueError(f"目标座位已被其他学生占用: room_id={data.room_id}, seat={data.seat_number}")
+            raise ValueError(
+                f"目标座位已被其他学生占用: room_id={data.room_id}, seat={data.seat_number}"
+            )
 
         # 更新座位信息并标记为人工覆盖
         assignment.room_id = data.room_id
@@ -772,16 +793,18 @@ class SeatService:
                     continue
 
                 student = students[student_idx]
-                assignments.append(ExamSeatAssignment(
-                    school_id=school_id,
-                    exam_id=exam_id,
-                    subject_id=subject_id,
-                    student_id=student.id,
-                    room_id=room.id,
-                    seat_number=seat,
-                    arrangement_method=method,
-                    is_manual_override=False,
-                ))
+                assignments.append(
+                    ExamSeatAssignment(
+                        school_id=school_id,
+                        exam_id=exam_id,
+                        subject_id=subject_id,
+                        student_id=student.id,
+                        room_id=room.id,
+                        seat_number=seat,
+                        arrangement_method=method,
+                        is_manual_override=False,
+                    )
+                )
                 student_idx += 1
                 seat += 1
 
@@ -791,6 +814,7 @@ class SeatService:
 # ═══════════════════════════════════════════════════════════════
 # InvigilatorService — 监考安排（含补丁2: 时间重叠冲突检测）
 # ═══════════════════════════════════════════════════════════════
+
 
 class InvigilatorService:
     """监考指派 — 主/副监考×冲突检测
@@ -861,11 +885,11 @@ class InvigilatorService:
     async def list(
         db: AsyncSession,
         school_id: int,
-        exam_id: Optional[int] = None,
-        subject_id: Optional[int] = None,
-        room_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-        exam_date: Optional[date] = None,
+        exam_id: int | None = None,
+        subject_id: int | None = None,
+        room_id: int | None = None,
+        user_id: int | None = None,
+        exam_date: date | None = None,
     ) -> list[dict]:
         """查询监考安排（含教师姓名、考场名）"""
         stmt = (
@@ -971,19 +995,21 @@ class InvigilatorService:
 
         conflicts = []
         for row in rows:
-            conflicts.append({
-                "existing_id": row[0],
-                "existing_exam_id": row[1],
-                "existing_room_id": row[2],
-                "existing_room_name": f"room_{row[2]}",
-                "existing_start_time": row[4],
-                "existing_end_time": row[5],
-                "conflict_with_id": row[6],
-                "conflict_exam_id": row[7],
-                "conflict_room_id": row[8],
-                "conflict_start_time": row[9],
-                "conflict_end_time": row[10],
-            })
+            conflicts.append(
+                {
+                    "existing_id": row[0],
+                    "existing_exam_id": row[1],
+                    "existing_room_id": row[2],
+                    "existing_room_name": f"room_{row[2]}",
+                    "existing_start_time": row[4],
+                    "existing_end_time": row[5],
+                    "conflict_with_id": row[6],
+                    "conflict_exam_id": row[7],
+                    "conflict_room_id": row[8],
+                    "conflict_start_time": row[9],
+                    "conflict_end_time": row[10],
+                }
+            )
 
         return conflicts
 
@@ -991,6 +1017,7 @@ class InvigilatorService:
 # ═══════════════════════════════════════════════════════════════
 # EntryWindowService — 成绩录入窗口（含补丁1: class_id=NULL全校通开）
 # ═══════════════════════════════════════════════════════════════
+
 
 class EntryWindowService:
     """成绩录入窗口 — pending → open → closed 状态机
@@ -1048,11 +1075,13 @@ class EntryWindowService:
         """批量创建录入窗口 — 为一场考试的所有科目×所有班级批量创建"""
         # 获取该考试的所有科目
         subject_result = await db.execute(
-            select(ExamSubject.subject_id).where(
+            select(ExamSubject.subject_id)
+            .where(
                 ExamSubject.school_id == school_id,
                 ExamSubject.exam_id == data.exam_id,
                 ExamSubject.is_active == True,
-            ).distinct()
+            )
+            .distinct()
         )
         subject_ids = [row[0] for row in subject_result.all()]
 
@@ -1105,7 +1134,7 @@ class EntryWindowService:
                 created += 1
             else:
                 # 按班级创建
-                for class_id in (class_ids or []):
+                for class_id in class_ids or []:
                     key = (subject_id, class_id)
                     if key in existing_set:
                         skipped += 1
@@ -1153,10 +1182,10 @@ class EntryWindowService:
     async def list(
         db: AsyncSession,
         school_id: int,
-        exam_id: Optional[int] = None,
-        subject_id: Optional[int] = None,
-        class_id: Optional[int] = None,
-        status: Optional[str] = None,
+        exam_id: int | None = None,
+        subject_id: int | None = None,
+        class_id: int | None = None,
+        status: str | None = None,
     ) -> list[ExamScoreEntryWindow]:
         """查询录入窗口列表"""
         stmt = (
@@ -1246,22 +1275,19 @@ class EntryWindowService:
         db: AsyncSession,
         school_id: int,
         exam_id: int,
-        subject_id: Optional[int] = None,
+        subject_id: int | None = None,
     ) -> dict:
         """查询录入进度"""
-        stmt = (
-            select(
-                func.count().label("total_windows"),
-                func.sum(ExamScoreEntryWindow.status == "open").label("open_count"),
-                func.sum(ExamScoreEntryWindow.status == "closed").label("closed_count"),
-                func.sum(ExamScoreEntryWindow.status == "pending").label("pending_count"),
-                func.sum(ExamScoreEntryWindow.entry_count).label("total_entry"),
-                func.sum(ExamScoreEntryWindow.expected_count).label("total_expected"),
-            )
-            .where(
-                ExamScoreEntryWindow.school_id == school_id,
-                ExamScoreEntryWindow.exam_id == exam_id,
-            )
+        stmt = select(
+            func.count().label("total_windows"),
+            func.sum(ExamScoreEntryWindow.status == "open").label("open_count"),
+            func.sum(ExamScoreEntryWindow.status == "closed").label("closed_count"),
+            func.sum(ExamScoreEntryWindow.status == "pending").label("pending_count"),
+            func.sum(ExamScoreEntryWindow.entry_count).label("total_entry"),
+            func.sum(ExamScoreEntryWindow.expected_count).label("total_expected"),
+        ).where(
+            ExamScoreEntryWindow.school_id == school_id,
+            ExamScoreEntryWindow.exam_id == exam_id,
         )
         if subject_id is not None:
             stmt = stmt.where(ExamScoreEntryWindow.subject_id == subject_id)

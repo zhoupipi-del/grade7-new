@@ -3,7 +3,6 @@ modules/red_flag/schemas.py — Pydantic 请求/响应模型
 """
 
 from datetime import date, datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -20,8 +19,8 @@ class RoutineScoreCreate(BaseModel):
     grade_id: int = Field(..., ge=1)
     category: str = Field(..., min_length=1, max_length=40)
     score: int = Field(..., ge=0, le=100)
-    note: Optional[str] = None
-    inspector: Optional[str] = Field(None, max_length=64)
+    note: str | None = None
+    inspector: str | None = Field(None, max_length=64)
     scorer_type: str = Field(..., min_length=1, max_length=20)
     record_date: date
 
@@ -50,8 +49,8 @@ class RoutineScoreOut(BaseModel):
     grade_id: int
     category: str
     score: int
-    note: Optional[str] = None
-    inspector: Optional[str] = None
+    note: str | None = None
+    inspector: str | None = None
     scorer_type: str
     record_date: date
     created_at: datetime
@@ -93,23 +92,23 @@ class FlagEvaluationOut(BaseModel):
     period_label: str
     grade_id: int
     class_id: int
-    class_name: Optional[str] = None
-    self_score: Optional[float] = None
-    grade_score: Optional[float] = None
-    ms_score: Optional[float] = None
+    class_name: str | None = None
+    self_score: float | None = None
+    grade_score: float | None = None
+    ms_score: float | None = None
     self_weight: float
     grade_weight: float
     ms_weight: float
-    base_score: Optional[float] = None
-    discipline_points: Optional[float] = None
-    discipline_deduction: Optional[float] = None
-    attendance_exceptions: Optional[int] = None
-    attendance_deduction: Optional[float] = None
+    base_score: float | None = None
+    discipline_points: float | None = None
+    discipline_deduction: float | None = None
+    attendance_exceptions: int | None = None
+    attendance_deduction: float | None = None
     final_score: float
-    rank: Optional[int] = None
+    rank: int | None = None
     status: str
     created_at: datetime
-    published_at: Optional[datetime] = None
+    published_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -117,8 +116,9 @@ class FlagEvaluationOut(BaseModel):
 
 class FlagLeaderboardOut(BaseModel):
     """排行榜返回 — 按年级分组的已发布排名"""
+
     grade_id: int
-    grade_name: Optional[str] = None
+    grade_name: str | None = None
     period_type: str
     period_label: str
     rankings: list[FlagEvaluationOut]
@@ -141,20 +141,21 @@ class PublishResult(BaseModel):
 # FlagArchiveReport 归档快照
 # ═══════════════════════════════════════════════════════════════
 
+
 class FlagArchiveOut(BaseModel):
     id: int
     period_type: str
     period_label: str
     grade_id: int
     class_id: int
-    class_name: Optional[str] = None
+    class_name: str | None = None
     final_score: float
     rank: int
     has_flag: bool
-    base_score: Optional[float] = None
+    base_score: float | None = None
     discipline_deduction: float
     attendance_deduction: float
-    snapshot_data: Optional[dict] = None
+    snapshot_data: dict | None = None
     archived_at: datetime
     archived_by: int
 
@@ -177,7 +178,7 @@ class ArchiveHistoryOut(BaseModel):
 
 class ClassTrendOut(BaseModel):
     class_id: int
-    class_name: Optional[str] = None
+    class_name: str | None = None
     periods: list[str] = []
     scores: list[float] = []
     ranks: list[int] = []
@@ -187,5 +188,5 @@ class ClassTrendOut(BaseModel):
 class TrendResult(BaseModel):
     status: str = "success"
     class_id: int
-    class_name: Optional[str] = None
+    class_name: str | None = None
     trends: ClassTrendOut

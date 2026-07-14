@@ -13,19 +13,17 @@ V2 扩展: 仪表盘 / 班级排行 / 日历热力图 / 全局视图 / 数据导
 """
 
 from datetime import date
-from typing import Optional
 
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.models import User, UserRole
-from core.routers import get_db, get_current_user
 from .schemas import (
-    AttendanceRecordItem,
     BatchRecordRequest,
-    LeaveSubmitRequest,
     LeaveApproveRequest,
     LeaveBatchApproveRequest,
+    LeaveSubmitRequest,
 )
 from .services import AttendanceService
 
@@ -36,6 +34,7 @@ router = APIRouter(tags=["attendance"])
 # 辅助函数
 # ═══════════════════════════════════════════════════════════════
 
+
 def _resolve_role(role) -> UserRole:
     """统一解析角色枚举"""
     if isinstance(role, UserRole):
@@ -45,7 +44,7 @@ def _resolve_role(role) -> UserRole:
     return role
 
 
-def _apply_scope(user: User, grade_id: Optional[int] = None, class_id: Optional[int] = None):
+def _apply_scope(user: User, grade_id: int | None = None, class_id: int | None = None):
     """
     应用 resolve_scope 的自动限定，配合可选的 query param 覆盖。
     返回 (grade_id, class_id, student_id)
@@ -61,6 +60,7 @@ def _apply_scope(user: User, grade_id: Optional[int] = None, class_id: Optional[
 # ═══════════════════════════════════════════════════════════════
 #  考勤录入
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/records/batch")
 async def batch_record_attendance(
@@ -97,12 +97,13 @@ async def batch_record_attendance(
 #  考勤查询
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/records/class/{class_id}")
 async def get_class_attendance(
     class_id: int,
-    record_date: Optional[date] = Query(None, description="单日查询日期 YYYY-MM-DD"),
-    start_date: Optional[date] = Query(None, description="日期范围起始 YYYY-MM-DD"),
-    end_date: Optional[date] = Query(None, description="日期范围结束 YYYY-MM-DD"),
+    record_date: date | None = Query(None, description="单日查询日期 YYYY-MM-DD"),
+    start_date: date | None = Query(None, description="日期范围起始 YYYY-MM-DD"),
+    end_date: date | None = Query(None, description="日期范围结束 YYYY-MM-DD"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -161,6 +162,7 @@ async def get_student_attendance(
 #  V2 新增: 学生日历热力图
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/calendar/{student_id}")
 async def get_student_calendar(
     student_id: int,
@@ -184,6 +186,7 @@ async def get_student_calendar(
 # ═══════════════════════════════════════════════════════════════
 #  考勤统计
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/stats")
 async def get_attendance_stats(
@@ -228,13 +231,18 @@ async def get_anomaly_alerts(
 #  V2 新增: 仪表盘聚合
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/dashboard")
 async def get_dashboard(
-    period: str = Query("week", description="today|week|month|semester（未传 start_date/end_date 时生效）"),
-    start_date: Optional[date] = Query(None, description="自定义起始日期（与 end_date 同时提供时覆盖 period）"),
-    end_date: Optional[date] = Query(None, description="自定义结束日期"),
-    grade_id: Optional[int] = Query(None, description="年级过滤"),
-    class_id: Optional[int] = Query(None, description="班级过滤"),
+    period: str = Query(
+        "week", description="today|week|month|semester（未传 start_date/end_date 时生效）"
+    ),
+    start_date: date | None = Query(
+        None, description="自定义起始日期（与 end_date 同时提供时覆盖 period）"
+    ),
+    end_date: date | None = Query(None, description="自定义结束日期"),
+    grade_id: int | None = Query(None, description="年级过滤"),
+    class_id: int | None = Query(None, description="班级过滤"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -254,7 +262,8 @@ async def get_dashboard(
     # 家长 → 仅看自己绑定学生
     if scope["is_parent"]:
         data = await AttendanceService.get_dashboard(
-            db=db, school_id=current_user.school_id,
+            db=db,
+            school_id=current_user.school_id,
             student_id=scope["student_id"],
             period=period,
             start_date=start_date,
@@ -264,8 +273,10 @@ async def get_dashboard(
 
     _gid, _cid, _ = _apply_scope(current_user, grade_id, class_id)
     data = await AttendanceService.get_dashboard(
-        db=db, school_id=current_user.school_id,
-        grade_id=_gid, class_id=_cid,
+        db=db,
+        school_id=current_user.school_id,
+        grade_id=_gid,
+        class_id=_cid,
         period=period,
         start_date=start_date,
         end_date=end_date,
@@ -277,10 +288,11 @@ async def get_dashboard(
 #  V2 新增: 班级横向对比排行
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/ranking")
 async def get_class_ranking(
-    record_date: Optional[date] = Query(None, description="对比日期，默认今天"),
-    grade_id: Optional[int] = Query(None, description="年级过滤"),
+    record_date: date | None = Query(None, description="对比日期，默认今天"),
+    grade_id: int | None = Query(None, description="年级过滤"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -299,12 +311,17 @@ async def get_class_ranking(
         grade_id=_gid,
         record_date=record_date,
     )
-    return {"ranking": ranking, "record_date": (record_date or date.today()).isoformat(), "count": len(ranking)}
+    return {
+        "ranking": ranking,
+        "record_date": (record_date or date.today()).isoformat(),
+        "count": len(ranking),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
 #  V2 新增: 德育处全局视图
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/overview")
 async def get_overview(
@@ -331,6 +348,7 @@ async def get_overview(
 # ═══════════════════════════════════════════════════════════════
 #  V2 新增: 数据导出
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/export")
 async def export_attendance(
@@ -365,6 +383,7 @@ async def export_attendance(
 # ═══════════════════════════════════════════════════════════════
 #  请假管理
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/leaves", status_code=201)
 async def submit_leave_request(
@@ -420,12 +439,13 @@ async def approve_leave_request(
 #  请假列表 (GAP-3 补齐 — 旧 Flask class_/grade/parent leaves 路由)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/leaves")
 async def list_leaves(
-    status: Optional[str] = Query(None, description="pending|class_approved|grade_approved|rejected"),
-    grade_id: Optional[int] = Query(None, description="年级过滤"),
-    class_id: Optional[int] = Query(None, description="班级过滤"),
-    student_id: Optional[int] = Query(None, description="学生过滤"),
+    status: str | None = Query(None, description="pending|class_approved|grade_approved|rejected"),
+    grade_id: int | None = Query(None, description="年级过滤"),
+    class_id: int | None = Query(None, description="班级过滤"),
+    student_id: int | None = Query(None, description="学生过滤"),
     limit: int = Query(50, ge=1, le=200, description="每页条数"),
     offset: int = Query(0, ge=0, description="偏移量"),
     db: AsyncSession = Depends(get_db),
@@ -463,6 +483,7 @@ async def list_leaves(
 # ═══════════════════════════════════════════════════════════════
 #  批量审批 (GAP-4 补齐 — 旧 Flask grade.py /leaves/batch-approve)
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/leaves/batch-approve")
 async def batch_approve_leaves(
@@ -509,6 +530,7 @@ async def batch_approve_leaves(
 #  班级考勤历史聚合矩阵 (GAP-1 & GAP-2 闭合)
 #  CASE WHEN 单次扫描按天归总, 供前端 ECharts 折线大盘消费
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/history/{class_id}")
 async def get_class_attendance_history(

@@ -18,17 +18,18 @@ core/event_bus.py - Redis pub/sub 分布式事件总线
   attendance.consecutive_absent - 连续缺勤预警
 """
 
-import json
 import asyncio
+import json
 import logging
-from typing import Any, Callable, Awaitable, Optional, Dict, List
+from collections.abc import Awaitable, Callable
+from typing import Any, Optional
 
 from core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
 # 处理器类型: async def handler(event: dict) -> None
-Handler = Callable[[Dict[str, Any]], Awaitable[None]]
+Handler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class EventBus:
@@ -43,8 +44,8 @@ class EventBus:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._tasks: List[asyncio.Task] = []
-            cls._instance._channels: Dict[str, Handler] = {}
+            cls._instance._tasks: list[asyncio.Task] = []
+            cls._instance._channels: dict[str, Handler] = {}
             cls._instance._started = False
         return cls._instance
 
@@ -52,7 +53,7 @@ class EventBus:
     #  发布 (上游模块调用)
     # ═══════════════════════════════════════════════════════════════
 
-    def publish(self, channel: str, event: Dict[str, Any]):
+    def publish(self, channel: str, event: dict[str, Any]):
         """
         fire-and-forget 发布事件 — 不阻塞调用方。
 
@@ -70,7 +71,7 @@ class EventBus:
         # 后台任务发布，不等待
         asyncio.create_task(self._do_publish(redis, channel, event))
 
-    async def _do_publish(self, redis, channel: str, event: Dict[str, Any]):
+    async def _do_publish(self, redis, channel: str, event: dict[str, Any]):
         """实际执行 Redis PUBLISH"""
         try:
             payload = json.dumps(event, default=str, ensure_ascii=False)
@@ -115,9 +116,7 @@ class EventBus:
         while True:
             redis = get_redis()
             if redis is None:
-                logger.warning(
-                    f"[EventBus] Redis 不可用, {backoff}s 后重试 channel={channel}"
-                )
+                logger.warning(f"[EventBus] Redis 不可用, {backoff}s 后重试 channel={channel}")
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30)
                 continue
@@ -135,9 +134,7 @@ class EventBus:
                     try:
                         event = json.loads(message["data"])
                     except (json.JSONDecodeError, TypeError) as e:
-                        logger.error(
-                            f"[EventBus] JSON 解析失败 channel={channel}: {e}"
-                        )
+                        logger.error(f"[EventBus] JSON 解析失败 channel={channel}: {e}")
                         continue
 
                     # 沙箱执行 — 处理器异常不外泄
@@ -148,8 +145,7 @@ class EventBus:
                 raise
             except Exception as e:
                 logger.error(
-                    f"[EventBus] 监听异常 channel={channel}: {e} — "
-                    f"{backoff}s 后重连",
+                    f"[EventBus] 监听异常 channel={channel}: {e} — {backoff}s 后重连",
                     exc_info=True,
                 )
                 await asyncio.sleep(backoff)
@@ -161,7 +157,7 @@ class EventBus:
                 except Exception:
                     pass
 
-    async def _safe_execute(self, handler: Handler, event: Dict[str, Any]):
+    async def _safe_execute(self, handler: Handler, event: dict[str, Any]):
         """沙箱执行 — 任何异常都被捕获，不影响监听循环"""
         try:
             await handler(event)
@@ -186,7 +182,7 @@ class EventBus:
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
         self._channels.clear()
-        logger.info(f"[EventBus] 所有监听任务已关闭")
+        logger.info("[EventBus] 所有监听任务已关闭")
 
     def is_active(self) -> bool:
         """事件总线是否处于活跃状态"""

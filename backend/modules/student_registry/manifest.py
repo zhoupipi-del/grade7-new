@@ -9,6 +9,8 @@ MODULE_DEPENDENCIES = []
 ENABLED_BY_DEFAULT = True
 MODULE_PHASES = []  # 全学段开放
 
+
 def register(router_prefix="/api/v1/student-registry"):
     from modules.student_registry.routers import router
+
     return router, router_prefix

@@ -6,25 +6,23 @@ modules/red_flag/routers.py — 流动红旗 API 端点
 """
 
 from datetime import date
-from typing import Optional
 
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.routers import get_current_user, require_role, get_db
-from core.models import User, UserRole
 from .schemas import (
-    RoutineScoreCreate,
-    RoutineScoreBatch,
-    RoutineScoreOut,
-    RoutineScoreListOut,
-    FlagGenerateRequest,
-    FlagEvaluationOut,
-    FlagLeaderboardOut,
-    FlagDraftListOut,
-    PublishResult,
-    ArchiveResult,
     ArchiveHistoryOut,
+    ArchiveResult,
+    FlagDraftListOut,
+    FlagEvaluationOut,
+    FlagGenerateRequest,
+    PublishResult,
+    RoutineScoreBatch,
+    RoutineScoreCreate,
+    RoutineScoreListOut,
+    RoutineScoreOut,
     TrendResult,
 )
 from .services import FlagService
@@ -35,6 +33,7 @@ router = APIRouter(tags=["流动红旗"])
 # ═══════════════════════════════════════════════════════════════
 #  数据录入 — RoutineScore CRUD
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/routines", status_code=201)
 async def add_routine(
@@ -83,12 +82,12 @@ async def add_routine_batch(
 
 @router.get("/routines")
 async def list_routines(
-    grade_id: Optional[int] = Query(None),
-    class_id: Optional[int] = Query(None),
-    scorer_type: Optional[str] = Query(None),
-    category: Optional[str] = Query(None),
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
+    grade_id: int | None = Query(None),
+    class_id: int | None = Query(None),
+    scorer_type: str | None = Query(None),
+    category: str | None = Query(None),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -130,6 +129,7 @@ async def delete_routine(
 #  评价生成 → 发布 → 归档
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post("/evaluations/generate", status_code=201)
 async def generate_evaluations(
     body: FlagGenerateRequest,
@@ -161,8 +161,8 @@ async def generate_evaluations(
 
 @router.get("/evaluations/drafts")
 async def view_drafts(
-    grade_id: Optional[int] = Query(None),
-    period_type: Optional[str] = Query(None),
+    grade_id: int | None = Query(None),
+    period_type: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -211,11 +211,12 @@ async def publish_evaluations(
 #  排行榜
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/evaluations/leaderboard")
 async def get_leaderboard(
-    grade_id: Optional[int] = Query(None),
-    period_type: Optional[str] = Query(None),
-    period_label: Optional[str] = Query(None),
+    grade_id: int | None = Query(None),
+    period_type: str | None = Query(None),
+    period_label: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -233,6 +234,7 @@ async def get_leaderboard(
 # ═══════════════════════════════════════════════════════════════
 #  归档
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/evaluations/archive", status_code=201)
 async def archive_evaluations(
@@ -266,9 +268,9 @@ async def archive_evaluations(
 
 @router.get("/evaluations/history")
 async def get_archive_history(
-    grade_id: Optional[int] = Query(None),
-    class_id: Optional[int] = Query(None),
-    period_type: Optional[str] = Query(None),
+    grade_id: int | None = Query(None),
+    class_id: int | None = Query(None),
+    period_type: str | None = Query(None),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -293,6 +295,7 @@ async def get_archive_history(
 # ═══════════════════════════════════════════════════════════════
 #  历史趋势
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/evaluations/trends/{class_id}")
 async def get_class_trends(

@@ -6,18 +6,24 @@ modules/lineage/services.py — 血缘查询服务
 
 import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-from sqlalchemy import select, func, desc, and_
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.models import Class, Student, User
+from modules.evaluation.models import ScoreLog
 from modules.lineage.models import LineageEvent, MigrationBatch
 from modules.lineage.schemas import (
-    CausalNode, CausalChain, LineageStatsOut, LineageEventListItem,
-    ScoreLogBrief, ScoreTraceOut,
-    MigrationBatchCreate, MigrationBatchUpdate, MigrationBatchOut, MigrationStatsOut,
+    CausalChain,
+    CausalNode,
+    LineageEventListItem,
+    LineageStatsOut,
+    MigrationBatchCreate,
+    MigrationBatchOut,
+    MigrationBatchUpdate,
+    MigrationStatsOut,
+    ScoreLogBrief,
+    ScoreTraceOut,
 )
-from modules.evaluation.models import ScoreLog
-from core.models import Student, Class, User
+from sqlalchemy import and_, desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("lineage.services")
 
@@ -29,7 +35,7 @@ class LineageService:
     async def get_trace_chain(
         db: AsyncSession,
         trace_id: str,
-    ) -> Optional[CausalChain]:
+    ) -> CausalChain | None:
         """
         查询一条完整的因果关系链
         按 lineage_depth 升序排列，展示从源头到终点的全链路
@@ -74,20 +80,15 @@ class LineageService:
         page_size: int = 20,
     ) -> dict:
         """查询某个学生的全部血缘事件（分页）"""
-        base_query = select(LineageEvent).where(
-            LineageEvent.student_id == student_id
-        )
+        base_query = select(LineageEvent).where(LineageEvent.student_id == student_id)
 
         # 总数
-        count_result = await db.execute(
-            select(func.count()).select_from(base_query.subquery())
-        )
+        count_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
         total = count_result.scalar() or 0
 
         # 分页数据
         result = await db.execute(
-            base_query
-            .order_by(desc(LineageEvent.created_at))
+            base_query.order_by(desc(LineageEvent.created_at))
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -97,9 +98,7 @@ class LineageService:
             "total": total,
             "page": page,
             "page_size": page_size,
-            "items": [
-                LineageEventListItem.model_validate(e) for e in events
-            ],
+            "items": [LineageEventListItem.model_validate(e) for e in events],
         }
 
     @staticmethod
@@ -107,7 +106,7 @@ class LineageService:
         db: AsyncSession,
         source_type: str,
         source_id: int,
-    ) -> List[CausalChain]:
+    ) -> list[CausalChain]:
         """
         查询某个源实体的所有下游影响
         例如: "违纪记录 #42 导致了哪些扣分和快照变更？"
@@ -146,9 +145,9 @@ class LineageService:
 
         # 总因果链数
         traces_result = await db.execute(
-            select(
-                func.count(func.distinct(LineageEvent.trace_id))
-            ).where(LineageEvent.school_id == school_id)
+            select(func.count(func.distinct(LineageEvent.trace_id))).where(
+                LineageEvent.school_id == school_id
+            )
         )
         total_traces = traces_result.scalar() or 0
 
@@ -192,9 +191,7 @@ class LineageService:
             .order_by(desc(LineageEvent.created_at))
             .limit(10)
         )
-        recent_events = [
-            LineageEventListItem.model_validate(e) for e in recent.scalars().all()
-        ]
+        recent_events = [LineageEventListItem.model_validate(e) for e in recent.scalars().all()]
 
         return LineageStatsOut(
             total_events=total_events,
@@ -209,13 +206,13 @@ class LineageService:
     async def search_lineage(
         db: AsyncSession,
         school_id: int = 1,
-        student_id: Optional[int] = None,
-        source_type: Optional[str] = None,
-        source_id: Optional[int] = None,
-        target_type: Optional[str] = None,
-        target_id: Optional[int] = None,
-        transformation: Optional[str] = None,
-        trace_id: Optional[str] = None,
+        student_id: int | None = None,
+        source_type: str | None = None,
+        source_id: int | None = None,
+        target_type: str | None = None,
+        target_id: int | None = None,
+        transformation: str | None = None,
+        trace_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> dict:
@@ -238,14 +235,11 @@ class LineageService:
 
         base_query = select(LineageEvent).where(and_(*conditions))
 
-        count_result = await db.execute(
-            select(func.count()).select_from(base_query.subquery())
-        )
+        count_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
         total = count_result.scalar() or 0
 
         result = await db.execute(
-            base_query
-            .order_by(desc(LineageEvent.created_at))
+            base_query.order_by(desc(LineageEvent.created_at))
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -255,9 +249,7 @@ class LineageService:
             "total": total,
             "page": page,
             "page_size": page_size,
-            "items": [
-                LineageEventListItem.model_validate(e) for e in events
-            ],
+            "items": [LineageEventListItem.model_validate(e) for e in events],
         }
 
     # ═══════════════════════════════════════════════════════════
@@ -268,7 +260,7 @@ class LineageService:
     async def get_score_trace(
         db: AsyncSession,
         score_log_id: int,
-    ) -> Optional[ScoreTraceOut]:
+    ) -> ScoreTraceOut | None:
         """
         从 ScoreLog 倒追完整血缘 — 成绩出生证明。
 
@@ -284,9 +276,7 @@ class LineageService:
           - 前端成绩出生证明面板
         """
         # 1. 查询 ScoreLog
-        result = await db.execute(
-            select(ScoreLog).where(ScoreLog.id == score_log_id)
-        )
+        result = await db.execute(select(ScoreLog).where(ScoreLog.id == score_log_id))
         score_log = result.scalar_one_or_none()
         if not score_log:
             return None
@@ -300,27 +290,21 @@ class LineageService:
             )
             student = student_result.scalar_one_or_none()
             if student:
-                class_result = await db.execute(
-                    select(Class).where(Class.id == student.class_id)
-                )
+                class_result = await db.execute(select(Class).where(Class.id == student.class_id))
                 class_ = class_result.scalar_one_or_none()
 
         # 3. 查询 Actor（优先 actor_id，回退 created_by）
         actor = None
         actor_id = score_log.actor_id or score_log.created_by
         if actor_id:
-            actor_result = await db.execute(
-                select(User).where(User.id == actor_id)
-            )
+            actor_result = await db.execute(select(User).where(User.id == actor_id))
             actor = actor_result.scalar_one_or_none()
 
         # 4. 查询血缘因果链
         causal_chain = None
         lineage_status = "untracked"
         if score_log.trace_context_id:
-            causal_chain = await LineageService.get_trace_chain(
-                db, score_log.trace_context_id
-            )
+            causal_chain = await LineageService.get_trace_chain(db, score_log.trace_context_id)
             lineage_status = "tracked" if causal_chain else "orphaned"
 
         # 5. 查询同学生的最近 10 条血缘事件
@@ -333,8 +317,7 @@ class LineageService:
                 .limit(10)
             )
             related_events = [
-                LineageEventListItem.model_validate(e)
-                for e in related_result.scalars().all()
+                LineageEventListItem.model_validate(e) for e in related_result.scalars().all()
             ]
 
         # 6. 组装 ScoreTraceOut
@@ -369,8 +352,10 @@ class LineageService:
 
     @staticmethod
     async def create_migration_batch(
-        db: AsyncSession, data: MigrationBatchCreate,
-        school_id: int, created_by: Optional[int] = None,
+        db: AsyncSession,
+        data: MigrationBatchCreate,
+        school_id: int,
+        created_by: int | None = None,
     ) -> MigrationBatchOut:
         """创建迁移批次记录"""
         batch = MigrationBatch(
@@ -392,12 +377,12 @@ class LineageService:
 
     @staticmethod
     async def update_migration_batch(
-        db: AsyncSession, batch_id: str, data: MigrationBatchUpdate,
-    ) -> Optional[MigrationBatchOut]:
+        db: AsyncSession,
+        batch_id: str,
+        data: MigrationBatchUpdate,
+    ) -> MigrationBatchOut | None:
         """更新迁移批次进度"""
-        result = await db.execute(
-            select(MigrationBatch).where(MigrationBatch.batch_id == batch_id)
-        )
+        result = await db.execute(select(MigrationBatch).where(MigrationBatch.batch_id == batch_id))
         batch = result.scalar_one_or_none()
         if not batch:
             return None
@@ -424,21 +409,22 @@ class LineageService:
 
     @staticmethod
     async def get_migration_batch(
-        db: AsyncSession, batch_id: str,
-    ) -> Optional[MigrationBatchOut]:
+        db: AsyncSession,
+        batch_id: str,
+    ) -> MigrationBatchOut | None:
         """查询单个迁移批次"""
-        result = await db.execute(
-            select(MigrationBatch).where(MigrationBatch.batch_id == batch_id)
-        )
+        result = await db.execute(select(MigrationBatch).where(MigrationBatch.batch_id == batch_id))
         batch = result.scalar_one_or_none()
         return MigrationBatchOut.model_validate(batch) if batch else None
 
     @staticmethod
     async def list_migration_batches(
-        db: AsyncSession, school_id: int,
-        page: int = 1, page_size: int = 20,
-        target_table: Optional[str] = None,
-        status: Optional[str] = None,
+        db: AsyncSession,
+        school_id: int,
+        page: int = 1,
+        page_size: int = 20,
+        target_table: str | None = None,
+        status: str | None = None,
     ) -> dict:
         """列出迁移批次（分页）"""
         conditions = [MigrationBatch.school_id == school_id]
@@ -471,14 +457,13 @@ class LineageService:
 
     @staticmethod
     async def get_migration_stats(
-        db: AsyncSession, school_id: int,
+        db: AsyncSession,
+        school_id: int,
     ) -> MigrationStatsOut:
         """迁移统计概览"""
         subquery = select(MigrationBatch).where(MigrationBatch.school_id == school_id).subquery()
 
-        total_result = await db.execute(
-            select(func.count()).select_from(subquery)
-        )
+        total_result = await db.execute(select(func.count()).select_from(subquery))
         total_batches = total_result.scalar() or 0
 
         active_result = await db.execute(
@@ -492,8 +477,9 @@ class LineageService:
         active_batches = active_result.scalar() or 0
 
         rows_result = await db.execute(
-            select(func.coalesce(func.sum(MigrationBatch.success_rows), 0))
-            .where(MigrationBatch.school_id == school_id)
+            select(func.coalesce(func.sum(MigrationBatch.success_rows), 0)).where(
+                MigrationBatch.school_id == school_id
+            )
         )
         total_migrated_rows = rows_result.scalar() or 0
 
@@ -518,8 +504,7 @@ class LineageService:
             .limit(10)
         )
         recent_batches = [
-            MigrationBatchOut.model_validate(b)
-            for b in recent_result.scalars().all()
+            MigrationBatchOut.model_validate(b) for b in recent_result.scalars().all()
         ]
 
         return MigrationStatsOut(

@@ -4,10 +4,12 @@ PolicyEngine — 德育"数字宪法"核心解释器
 Policy as Code: 改 YAML 即改政策，零代码变更。
 启动注入：app.state.policy_engine = PolicyEngine.from_yaml("policy.yaml")
 """
+
 from __future__ import annotations
 
-import structlog
 from typing import Optional
+
+import structlog
 
 from .config import PolicyConfig
 from .models import (
@@ -25,17 +27,17 @@ from .router import ApprovalRouter
 logger = structlog.get_logger("policy_engine")
 
 # ── 模块级单例 ──
-_engine_instance: Optional["PolicyEngine"] = None
+_engine_instance: PolicyEngine | None = None
 
 
-def set_engine(engine: "PolicyEngine") -> None:
+def set_engine(engine: PolicyEngine) -> None:
     """启动时注入 PolicyEngine 单例（app.py lifespan 调用）"""
     global _engine_instance
     _engine_instance = engine
     logger.info("policy_engine.singleton_set", version=engine.config.version)
 
 
-def get_engine() -> Optional["PolicyEngine"]:
+def get_engine() -> PolicyEngine | None:
     """获取 PolicyEngine 单例（Service 层 Hook 调用）"""
     return _engine_instance
 
@@ -127,7 +129,7 @@ class PolicyEngine:
         student_id: int,
         raw_vectors: list[RawScoreVector],
         cohort_stats: dict[str, dict[str, CohortStatistics]],
-        previous_snapshot: Optional[object] = None,
+        previous_snapshot: object | None = None,
     ) -> DESResult:
         """计算 DES（委托给 self.normalizer）"""
         return self.normalizer.compute_des(
@@ -141,7 +143,7 @@ class PolicyEngine:
         self,
         raw_vectors_by_student: dict[int, list[RawScoreVector]],
         cohort_stats: dict[str, dict[str, CohortStatistics]],
-        previous_snapshots: Optional[dict[int, object]] = None,
+        previous_snapshots: dict[int, object] | None = None,
     ) -> dict[int, DESResult]:
         """批量计算 DES（委托给 self.normalizer）"""
         return self.normalizer.compute_des_batch(
@@ -185,13 +187,13 @@ class PolicyEngine:
     # ── / ── / ── / ── / ── / ── / ── / ── / ── / ── /
 
     @classmethod
-    def from_yaml(cls, path: str) -> "PolicyEngine":
+    def from_yaml(cls, path: str) -> PolicyEngine:
         """从 YAML 文件加载配置并创建 PolicyEngine"""
         config = PolicyConfig.from_yaml(path)
         logger.info("policy_engine.loaded", path=path, version=config.version)
         return cls(config)
 
-    def reload_config(self, path: Optional[str] = None) -> None:
+    def reload_config(self, path: str | None = None) -> None:
         """
         热重载配置（生产环境用）。
         注意：此方法会创建新的子引擎实例，正在进行的计算可能用旧配置。

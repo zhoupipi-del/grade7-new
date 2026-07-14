@@ -1,0 +1,9 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.21
+    hooks:
+      # Lint 检查 (阻断提交)
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      # 格式化 (自动修正)
+      - id: ruff-format

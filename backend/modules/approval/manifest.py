@@ -15,4 +15,5 @@ ENABLED_BY_DEFAULT = True
 def register(router_prefix="/api/v1/approval"):
     """注册审批模块路由 — 返回 (router, prefix) 供 module_loader 使用"""
     from modules.approval.routers import router
+
     return router, router_prefix

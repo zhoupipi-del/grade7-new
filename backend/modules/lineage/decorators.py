@@ -21,12 +21,11 @@ modules/lineage/decorators.py — 零侵入审计装饰器
   3. 自动提取 student_id/school_id — 从函数参数中推断
 """
 
-import json
-import uuid
 import logging
+import uuid
+from collections.abc import Callable
 from contextvars import ContextVar
 from functools import wraps
-from typing import Optional, Callable, Any, Dict, List
 
 logger = logging.getLogger("lineage.decorators")
 
@@ -34,20 +33,16 @@ logger = logging.getLogger("lineage.decorators")
 # ContextVar — 线程安全的 trace_id 传播
 # ═══════════════════════════════════════════════════════════
 
-_current_trace_id: ContextVar[Optional[str]] = ContextVar(
-    "lineage_trace_id", default=None
-)
-_current_lineage_depth: ContextVar[int] = ContextVar(
-    "lineage_depth", default=0
-)
+_current_trace_id: ContextVar[str | None] = ContextVar("lineage_trace_id", default=None)
+_current_lineage_depth: ContextVar[int] = ContextVar("lineage_depth", default=0)
 
 
-def get_current_trace_id() -> Optional[str]:
+def get_current_trace_id() -> str | None:
     """获取当前上下文中的 trace_id（用于手动记录血缘）"""
     return _current_trace_id.get()
 
 
-def set_trace_context(trace_id: Optional[str] = None, depth: int = 0):
+def set_trace_context(trace_id: str | None = None, depth: int = 0):
     """设置血缘追踪上下文 — 由 HTTP middleware 或手动调用"""
     tid = trace_id or str(uuid.uuid4())
     _current_trace_id.set(tid)
@@ -64,12 +59,8 @@ def clear_trace_context():
 # #1193 审计上下文 ContextVars — 为 ScoreLog 新字段提供数据源
 # ═══════════════════════════════════════════════════════════
 
-_current_actor_id: ContextVar[Optional[int]] = ContextVar(
-    "audit_actor_id", default=None
-)
-_current_source_ip: ContextVar[Optional[str]] = ContextVar(
-    "audit_source_ip", default=None
-)
+_current_actor_id: ContextVar[int | None] = ContextVar("audit_actor_id", default=None)
+_current_source_ip: ContextVar[str | None] = ContextVar("audit_source_ip", default=None)
 
 
 def get_audit_context() -> dict:
@@ -100,8 +91,8 @@ def get_audit_context() -> dict:
 
 
 def set_audit_context(
-    actor_id: Optional[int] = None,
-    source_ip: Optional[str] = None,
+    actor_id: int | None = None,
+    source_ip: str | None = None,
 ):
     """
     设置审计上下文 — 由 @audit_score_log 装饰器或 HTTP middleware 调用。
@@ -120,11 +111,12 @@ def set_audit_context(
 # 装饰器
 # ═══════════════════════════════════════════════════════════
 
+
 def audit_lineage(
     transformation: str,
     source_type: str = "",
     target_type: str = "",
-    extract_context: Optional[Callable] = None,
+    extract_context: Callable | None = None,
 ):
     """
     零侵入审计装饰器 — 自动记录数据血缘
@@ -144,10 +136,10 @@ def audit_lineage(
         当被装饰函数内部调用另一个被装饰函数时，trace_id 自动继承，
         lineage_depth 自动递增，形成完整的因果链。
     """
+
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            from modules.lineage.models import LineageEvent
 
             # Step 1: 获取/创建 trace_id
             parent_trace = _current_trace_id.get()
@@ -193,6 +185,7 @@ def audit_lineage(
             return result
 
         return wrapper
+
     return decorator
 
 
@@ -206,7 +199,7 @@ async def _record_lineage_event(
     transformation: str,
     source_type: str,
     target_type: str,
-    extract_context: Optional[Callable],
+    extract_context: Callable | None,
 ):
     """静默记录一条血缘事件 — 失败不影响主流程"""
     from modules.lineage.models import LineageEvent
@@ -216,11 +209,11 @@ async def _record_lineage_event(
         db = None
         for a in args:
             # 检查是否有 add/flush 方法（AsyncSession 特征）
-            if hasattr(a, 'add') and hasattr(a, 'flush'):
+            if hasattr(a, "add") and hasattr(a, "flush"):
                 db = a
                 break
         if db is None:
-            db = kwargs.get('db')
+            db = kwargs.get("db")
 
         if db is None:
             return  # 没有 db session，无法记录
@@ -232,15 +225,15 @@ async def _record_lineage_event(
         sch_id = None
 
         # 从参数中提取常见字段
-        for key in ('source_id', 'discipline_id', 'behavior_record_id'):
+        for key in ("source_id", "discipline_id", "behavior_record_id"):
             if key in kwargs and kwargs[key]:
                 sid = kwargs[key]
                 break
-        for key in ('student_id',):
+        for key in ("student_id",):
             if key in kwargs and kwargs[key]:
                 stu_id = kwargs[key]
                 break
-        for key in ('school_id',):
+        for key in ("school_id",):
             if key in kwargs and kwargs[key]:
                 sch_id = kwargs[key]
                 break
@@ -257,16 +250,16 @@ async def _record_lineage_event(
             ctx = _default_extract_context(args, kwargs, result)
 
         # 覆盖/补充 source_type/target_type
-        st = ctx.pop('_source_type', source_type)
-        tt = ctx.pop('_target_type', target_type)
-        sid = ctx.pop('_source_id', sid) or sid
-        stu_id = ctx.pop('_student_id', stu_id) or stu_id
-        sch_id = ctx.pop('_school_id', sch_id) or sch_id
-        sbatch = ctx.pop('_source_batch', None) or sbatch
+        st = ctx.pop("_source_type", source_type)
+        tt = ctx.pop("_target_type", target_type)
+        sid = ctx.pop("_source_id", sid) or sid
+        stu_id = ctx.pop("_student_id", stu_id) or stu_id
+        sch_id = ctx.pop("_school_id", sch_id) or sch_id
+        sbatch = ctx.pop("_source_batch", None) or sbatch
 
         # 从 result 提取 target_id
         tid_val = None
-        if hasattr(result, 'id'):
+        if hasattr(result, "id"):
             tid_val = result.id
 
         event = LineageEvent(
@@ -294,23 +287,31 @@ async def _record_lineage_event(
 def _default_extract_context(args, kwargs, result) -> dict:
     """默认上下文提取 — 捕获学生、学期等关键参数"""
     ctx = {}
-    for key in ('student_id', 'semester', 'class_id', 'grade_id',
-                'indicator_id', 'discipline_type', 'source_type',
-                'policy_tag', 'exam_id'):
+    for key in (
+        "student_id",
+        "semester",
+        "class_id",
+        "grade_id",
+        "indicator_id",
+        "discipline_type",
+        "source_type",
+        "policy_tag",
+        "exam_id",
+    ):
         if key in kwargs and kwargs[key] is not None:
             ctx[key] = kwargs[key]
-    if hasattr(result, 'total_score'):
-        ctx['result_total_score'] = result.total_score
-    if hasattr(result, 'before_score') and hasattr(result, 'after_score'):
-        ctx['before_score'] = result.before_score
-        ctx['after_score'] = result.after_score
-        ctx['change_amount'] = result.change_amount
+    if hasattr(result, "total_score"):
+        ctx["result_total_score"] = result.total_score
+    if hasattr(result, "before_score") and hasattr(result, "after_score"):
+        ctx["before_score"] = result.before_score
+        ctx["after_score"] = result.after_score
+        ctx["change_amount"] = result.change_amount
     return ctx
 
 
 def _extract_trigger(args, kwargs) -> str:
     """提取触发者标识"""
-    for key in ('scorer_id', 'created_by', 'operator_id'):
+    for key in ("scorer_id", "created_by", "operator_id"):
         if key in kwargs and kwargs[key]:
             return f"user:{kwargs[key]}"
     return "system"
@@ -319,6 +320,7 @@ def _extract_trigger(args, kwargs) -> str:
 # ═══════════════════════════════════════════════════════════
 # #1193 @audit_score_log — 轻量级审计装饰器
 # ═══════════════════════════════════════════════════════════
+
 
 def audit_score_log(
     operator_key: str = "operator_id",
@@ -361,6 +363,7 @@ def audit_score_log(
         3. 自动补全 trace_id — 如果当前无 trace_id，自动生成新的
         4. 零侵入 — 对已有代码完全透明
     """
+
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -395,4 +398,5 @@ def audit_score_log(
             return await func(*args, **kwargs)
 
         return wrapper
+
     return decorator

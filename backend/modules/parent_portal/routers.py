@@ -17,21 +17,29 @@ modules/parent_portal/routers.py — 家长门户 FastAPI 路由
 """
 
 import logging
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.routers import get_current_user, get_db, require_role
-from core.models import User, UserRole
-
 from .schemas import (
-    FeedbackTypeEnum, FeedbackStatusEnum, AppealTargetModuleEnum,
-    FeedbackItem, FeedbackListResponse, ChildOverview, ParentDashboard,
-    AppealProxyResult, FeedbackCreatePayload, FeedbackReplyPayload,
-    AppealProxyPayload, fill_labels,
+    AppealProxyPayload,
+    AppealProxyResult,
+    ChildOverview,
+    FeedbackCreatePayload,
+    FeedbackItem,
+    FeedbackListResponse,
+    FeedbackReplyPayload,
+    FeedbackStatusEnum,
+    FeedbackTypeEnum,
+    ParentDashboard,
+    fill_labels,
 )
 from .services import (
-    ParentPortalService, FeedbackService, AppealProxyService,
+    AppealProxyService,
+    FeedbackService,
+    ParentPortalService,
     verify_parent_binding,
 )
 
@@ -43,6 +51,7 @@ router = APIRouter(tags=["parent_portal"])
 # ═══════════════════════════════════════════════════════════════
 # 越权铁闸依赖注入 — parent_id → bound_student_id 绑定校验
 # ═══════════════════════════════════════════════════════════════
+
 
 async def require_parent_with_binding(
     current_user: User = Depends(get_current_user),
@@ -94,6 +103,7 @@ async def require_teacher_or_admin(
 # 端点 1: GET /dashboard — 家长仪表盘
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/dashboard", response_model=ParentDashboard)
 async def get_dashboard(
     db: AsyncSession = Depends(get_db),
@@ -111,6 +121,7 @@ async def get_dashboard(
 # ═══════════════════════════════════════════════════════════════
 # 端点 2: GET /child/overview — 孩子概览
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/child/overview", response_model=ChildOverview)
 async def get_child_overview(
@@ -130,6 +141,7 @@ async def get_child_overview(
 # ═══════════════════════════════════════════════════════════════
 # 端点 3: POST /feedbacks — 提交反馈
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/feedbacks", response_model=FeedbackItem, status_code=201)
 async def create_feedback(
@@ -160,10 +172,11 @@ async def create_feedback(
 # 端点 4: GET /feedbacks — 反馈列表
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/feedbacks", response_model=FeedbackListResponse)
 async def list_feedbacks(
-    status: Optional[FeedbackStatusEnum] = None,
-    feedback_type: Optional[FeedbackTypeEnum] = None,
+    status: FeedbackStatusEnum | None = None,
+    feedback_type: FeedbackTypeEnum | None = None,
     offset: int = 0,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
@@ -175,16 +188,19 @@ async def list_feedbacks(
       - 教师/德育处: 看全校反馈
     """
     return await FeedbackService.list_feedbacks(
-        db, current_user,
+        db,
+        current_user,
         status_filter=status.value if status else None,
         feedback_type_filter=feedback_type.value if feedback_type else None,
-        offset=offset, limit=limit,
+        offset=offset,
+        limit=limit,
     )
 
 
 # ═══════════════════════════════════════════════════════════════
 # 端点 5: GET /feedbacks/{id} — 反馈详情
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/feedbacks/{feedback_id}", response_model=FeedbackItem)
 async def get_feedback_detail(
@@ -202,12 +218,15 @@ async def get_feedback_detail(
 # 端点 6: POST /feedbacks/{id}/reply — 处理反馈
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post("/feedbacks/{feedback_id}/reply", response_model=FeedbackItem)
 async def reply_feedback(
     feedback_id: int,
     body: FeedbackReplyPayload,
     db: AsyncSession = Depends(get_db),
-    handler: User = Depends(require_role(UserRole.CLASS_TEACHER, UserRole.GRADE_LEADER, UserRole.MS_ADMIN)),
+    handler: User = Depends(
+        require_role(UserRole.CLASS_TEACHER, UserRole.GRADE_LEADER, UserRole.MS_ADMIN)
+    ),
 ):
     """
     班主任/德育处处理反馈 — 双向闭环。
@@ -224,6 +243,7 @@ async def reply_feedback(
 # ═══════════════════════════════════════════════════════════════
 # 端点 7: POST /appeals/proxy — 申诉代理
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/appeals/proxy", response_model=AppealProxyResult)
 async def proxy_appeal(

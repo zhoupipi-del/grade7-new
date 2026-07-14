@@ -1,42 +1,42 @@
 """error_funnel/schemas.py — Pydantic 请求/响应模型"""
 
-from pydantic import BaseModel, Field
-from typing import Optional, List, Any
 from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 
 # ── 知识点 ──
 class KnowledgePointCreate(BaseModel):
     subject_id: int
     name: str = Field(..., max_length=100)
-    code: Optional[str] = None
-    description: Optional[str] = None
-    parent_id: Optional[int] = None
+    code: str | None = None
+    description: str | None = None
+    parent_id: int | None = None
     sort_order: int = 0
 
 
 class KnowledgePointUpdate(BaseModel):
-    name: Optional[str] = None
-    code: Optional[str] = None
-    description: Optional[str] = None
-    parent_id: Optional[int] = None
-    sort_order: Optional[int] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    code: str | None = None
+    description: str | None = None
+    parent_id: int | None = None
+    sort_order: int | None = None
+    is_active: bool | None = None
 
 
 class KnowledgePointResponse(BaseModel):
     id: int
     school_id: int
     subject_id: int
-    subject_name: Optional[str] = None
+    subject_name: str | None = None
     name: str
-    code: Optional[str] = None
-    description: Optional[str] = None
-    parent_id: Optional[int] = None
+    code: str | None = None
+    description: str | None = None
+    parent_id: int | None = None
     sort_order: int = 0
     is_active: bool = True
-    created_at: Optional[datetime] = None
-    children: Optional[List["KnowledgePointResponse"]] = None
+    created_at: datetime | None = None
+    children: list["KnowledgePointResponse"] | None = None
 
     class Config:
         from_attributes = True
@@ -47,40 +47,40 @@ class ErrorItemCreate(BaseModel):
     student_id: int
     subject_id: int
     source_type: str = "manual"
-    source_id: Optional[int] = None
-    source_desc: Optional[str] = None
+    source_id: int | None = None
+    source_desc: str | None = None
     question_content: str
-    question_type: Optional[str] = None
-    student_answer: Optional[str] = None
-    correct_answer: Optional[str] = None
+    question_type: str | None = None
+    student_answer: str | None = None
+    correct_answer: str | None = None
     error_type: str = "unknown"
-    knowledge_point_ids: Optional[List[int]] = None
-    difficulty: Optional[str] = None
+    knowledge_point_ids: list[int] | None = None
+    difficulty: str | None = None
 
 
 class ErrorItemResponse(BaseModel):
     id: int
     school_id: int
     student_id: int
-    student_name: Optional[str] = None
+    student_name: str | None = None
     subject_id: int
-    subject_name: Optional[str] = None
+    subject_name: str | None = None
     source_type: str
-    source_id: Optional[int] = None
-    source_desc: Optional[str] = None
+    source_id: int | None = None
+    source_desc: str | None = None
     question_content: str
-    question_type: Optional[str] = None
-    student_answer: Optional[str] = None
-    correct_answer: Optional[str] = None
+    question_type: str | None = None
+    student_answer: str | None = None
+    correct_answer: str | None = None
     error_type: str
-    knowledge_point_ids: Optional[List[int]] = None
-    knowledge_point_names: Optional[List[str]] = None
-    difficulty: Optional[str] = None
-    ai_analysis: Optional[str] = None
+    knowledge_point_ids: list[int] | None = None
+    knowledge_point_names: list[str] | None = None
+    difficulty: str | None = None
+    ai_analysis: str | None = None
     ai_status: str = "pending"
     is_resolved: bool = False
-    resolved_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
+    resolved_at: datetime | None = None
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -91,22 +91,22 @@ class KnowledgeGapResponse(BaseModel):
     id: int
     school_id: int
     student_id: int
-    student_name: Optional[str] = None
+    student_name: str | None = None
     subject_id: int
-    subject_name: Optional[str] = None
+    subject_name: str | None = None
     knowledge_point_id: int
     knowledge_point_name: str
     error_count: int = 0
     consecutive_errors: int = 0
-    last_error_date: Optional[datetime] = None
-    last_error_source: Optional[str] = None
+    last_error_date: datetime | None = None
+    last_error_source: str | None = None
     gap_level: str = "watch"
     gap_status: str = "active"
-    resolved_at: Optional[datetime] = None
-    ai_prescription: Optional[str] = None
-    ai_prescription_generated_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    resolved_at: datetime | None = None
+    ai_prescription: str | None = None
+    ai_prescription_generated_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -122,10 +122,10 @@ class DashboardResponse(BaseModel):
     watch_gaps: int = 0
     resolved_gaps: int = 0
     ai_prescriptions_generated: int = 0
-    top_error_knowledge_points: List[dict] = []
-    top_error_students: List[dict] = []
+    top_error_knowledge_points: list[dict] = []
+    top_error_students: list[dict] = []
     error_type_distribution: dict = {}
-    recent_errors: List[dict] = []
+    recent_errors: list[dict] = []
 
 
 # ── 批量导入 ──

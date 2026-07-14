@@ -7,6 +7,7 @@
   解密密钥从环境变量 PSY_ENCRYPTION_KEY 或 WINGS_ENCRYPTION_KEY 加载。
   生产环境必须手动注入强随机密钥。
 """
+
 MODULE_CODE = "psych_counseling"
 MODULE_NAME = "心理咨询预约与工作台"
 MODULE_CATEGORY = "wellness"
@@ -18,4 +19,5 @@ MODULE_PHASES = ["junior", "senior", "primary", "integrated"]
 
 def register(router_prefix="/api/v1/psych-counseling"):
     from modules.psych_counseling.routers import router
+
     return router, router_prefix

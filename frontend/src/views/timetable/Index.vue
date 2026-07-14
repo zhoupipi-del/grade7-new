@@ -4,62 +4,77 @@
       <div class="header">
         <h3>课程表管理</h3>
         <div class="actions">
-          <el-button type="primary" @click="showSlotDialog = true">+ 新增课节</el-button>
+          <el-button v-if="activeTab === 'slots'" type="primary" @click="showSlotDialog = true">+ 新增课节</el-button>
         </div>
       </div>
     </el-card>
 
-    <!-- 筛选栏 -->
-    <el-card class="filter-card">
-      <el-form :inline="true">
-        <el-form-item label="班级">
-          <el-select v-model="filterClassId" clearable placeholder="选择班级" @change="fetchSlots" style="width:160px">
-            <el-option v-for="c in classes" :key="c.id" :label="c.name" :value="c.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="教师">
-          <el-select v-model="filterTeacherId" clearable filterable placeholder="选择教师" @change="fetchSlots" style="width:160px">
-            <el-option v-for="t in teachers" :key="t.id" :label="t.display_name" :value="t.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="学期">
-          <el-input v-model="filterSemester" placeholder="2025-2026-1" @change="fetchSlots" style="width:140px" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="fetchSlots">查询</el-button>
-          <el-button v-if="filterClassId && filterSemester" @click="goWeekView">查看课表</el-button>
-          <el-button v-if="filterTeacherId && filterSemester" @click="goTeacherWeekView">教师课表</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+    <el-tabs v-model="activeTab" class="tt-tabs">
+      <!-- Tab 1: 课节管理 -->
+      <el-tab-pane label="课节管理" name="slots">
+        <!-- 筛选栏 -->
+        <el-card class="filter-card" shadow="never">
+          <el-form :inline="true">
+            <el-form-item label="班级">
+              <el-select v-model="filterClassId" clearable placeholder="选择班级" @change="fetchSlots" style="width:160px">
+                <el-option v-for="c in classes" :key="c.id" :label="c.name" :value="c.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="教师">
+              <el-select v-model="filterTeacherId" clearable filterable placeholder="选择教师" @change="fetchSlots" style="width:160px">
+                <el-option v-for="t in teachers" :key="t.id" :label="t.display_name" :value="t.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="学期">
+              <el-input v-model="filterSemester" placeholder="2025-2026-1" @change="fetchSlots" style="width:140px" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="fetchSlots">查询</el-button>
+              <el-button v-if="filterClassId && filterSemester" @click="goWeekView">查看课表</el-button>
+              <el-button v-if="filterTeacherId && filterSemester" @click="goTeacherWeekView">教师课表</el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
 
-    <!-- 课节列表 -->
-    <el-card>
-      <el-table :data="slots" stripe v-loading="loading">
-        <el-table-column prop="class_name" label="班级" width="100" v-if="!filterClassId" />
-        <el-table-column label="时间" width="160">
-          <template #default="{ row }">
-            周{{ row.day_of_week }} 第{{ row.period_start }}-{{ row.period_end }}节
-          </template>
-        </el-table-column>
-        <el-table-column prop="course_name" label="课程" width="100" />
-        <el-table-column prop="teacher_name" label="教师" width="100" />
-        <el-table-column prop="classroom_name" label="教室" width="120" />
-        <el-table-column label="周模式" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.week_pattern === 'every' ? '' : 'warning'" size="small">
-              {{ weekPatternLabel(row.week_pattern) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="semester" label="学期" width="130" />
-        <el-table-column label="操作" width="80" fixed="right">
-          <template #default="{ row }">
-            <el-button type="danger" size="small" @click="doDelete(row.id)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+        <!-- 课节列表 -->
+        <el-card shadow="never">
+          <el-table :data="slots" stripe v-loading="loading">
+            <el-table-column prop="class_name" label="班级" width="100" v-if="!filterClassId" />
+            <el-table-column label="时间" width="160">
+              <template #default="{ row }">
+                周{{ row.day_of_week }} 第{{ row.period_start }}-{{ row.period_end }}节
+              </template>
+            </el-table-column>
+            <el-table-column prop="course_name" label="课程" width="100" />
+            <el-table-column prop="teacher_name" label="教师" width="100" />
+            <el-table-column prop="classroom_name" label="教室" width="120" />
+            <el-table-column label="周模式" width="80">
+              <template #default="{ row }">
+                <el-tag :type="row.week_pattern === 'every' ? '' : 'warning'" size="small">
+                  {{ weekPatternLabel(row.week_pattern) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="semester" label="学期" width="130" />
+            <el-table-column label="操作" width="80" fixed="right">
+              <template #default="{ row }">
+                <el-button type="danger" size="small" @click="doDelete(row.id)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- Tab 2: 时空变轨网格 -->
+      <el-tab-pane label="时空变轨网格" name="grid">
+        <InstanceGrid :class-list="classes" />
+      </el-tab-pane>
+
+      <!-- Tab 3: 排课冲突 -->
+      <el-tab-pane label="排课冲突" name="conflicts">
+        <Conflicts />
+      </el-tab-pane>
+    </el-tabs>
 
     <!-- 新增课节弹窗 -->
     <el-dialog v-model="showSlotDialog" title="新增课节" width="520px" @opened="onSlotDialogOpen">
@@ -71,7 +86,7 @@
         </el-form-item>
         <el-form-item label="课程" required>
           <el-select v-model="slotForm.course_id" filterable placeholder="选择课程" style="width:100%">
-            <el-option v-for="c in courses" :key="c.id" :label="`${c.name} (${c.periods_per_week}节/周)`" :value="c.id" />
+            <el-option v-for="c in courses" :key="c.id" :label="`${c.name} (${c.weekly_slots || 0}节/周)`" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="授课教师" required>
@@ -140,8 +155,11 @@ import { listSlots, createSlot, deleteSlot, checkConflict, type CourseSlot, type
 import { listClassrooms, type Classroom } from '@/api/timetable'
 import { listCourses, type Course } from '@/api/timetable'
 import { listTeachers, type TeacherListItem } from '@/api/teachers'
+import InstanceGrid from './InstanceGrid.vue'
+import Conflicts from './Conflicts.vue'
 
 const router = useRouter()
+const activeTab = ref('slots')
 const loading = ref(false)
 const slots = ref<CourseSlot[]>([])
 const classrooms = ref<Classroom[]>([])
@@ -238,5 +256,6 @@ onMounted(async () => {
 .header-card { margin-bottom: 12px; }
 .header { display:flex; justify-content:space-between; align-items:center; }
 .header h3 { margin:0; }
+.tt-tabs { margin-top: 0; }
 .filter-card { margin-bottom: 12px; }
 </style>

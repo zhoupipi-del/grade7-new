@@ -1,0 +1,49 @@
+[tool.ruff]
+# Ruff 配置 — Wings 3.1 + grade7-new 项目
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# 启用的规则集
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes (未使用导入、未定义变量等)
+    "W",      # pycodestyle warnings
+    "I",      # isort (导入排序)
+    "UP",     # pyupgrade (语法现代化)
+    "B",      # flake8-bugbear (常见陷阱)
+    "C4",     # flake8-comprehensions (推导式优化)
+]
+
+# 忽略的规则
+ignore = [
+    "E501",   # 行太长 (交给 formatter)
+    "B008",   # 不在函数签名里调用 fastapi Depends()
+    "B904",   # raise from 在 exception handler 里
+    "E402",   # 模块级导入不在顶部 (FastAPI 延迟导入常见)
+]
+
+# 不检查的目录
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".workbuddy",
+    "node_modules",
+    "dist",
+    "*.egg-info",
+    "outputs",
+]
+
+# 按文件忽略特定规则
+[tool.ruff.lint.per-file-ignores]
+"grade7-new/**/*.py" = [
+    "B006",   # 可变默认参数 (Flask 旧代码太多)
+]
+
+[tool.ruff.format]
+# 格式化器配置 (替代 Black)
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

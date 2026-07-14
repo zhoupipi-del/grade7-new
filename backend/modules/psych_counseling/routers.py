@@ -25,52 +25,47 @@
   GET    /stats                    — 心理老师工作台统计概览
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from core.models import User, Student
-from core.routers import get_db, get_current_user
+from core.models import Student, User
+from core.routers import get_current_user, get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from modules.psych_counseling.models import (
-    PsyConsultableSlot,
     PsyAppointment,
-    PsyConsultRecord,
-)
-from modules.psych_counseling.services import (
-    create_slot,
-    list_slots,
-    get_slot,
-    update_slot_status,
-    delete_slot,
-    create_appointment,
-    list_appointments,
-    update_appointment,
-    create_consult_record,
-    get_consult_record,
-    list_consult_records,
-    get_counselor_stats,
-    _is_counselor_or_admin,
-    _mask_plaintext,
 )
 from modules.psych_counseling.schemas import (
-    SlotCreateRequest,
-    SlotResponse,
-    SlotListResponse,
     AppointmentCreateRequest,
-    AppointmentUpdateRequest,
-    AppointmentResponse,
     AppointmentListResponse,
+    AppointmentResponse,
+    AppointmentUpdateRequest,
     ConsultRecordCreateRequest,
-    ConsultRecordResponse,
     ConsultRecordListResponse,
+    ConsultRecordResponse,
     CounselorStatsResponse,
+    SlotCreateRequest,
+    SlotListResponse,
+    SlotResponse,
 )
+from modules.psych_counseling.services import (
+    create_appointment,
+    create_consult_record,
+    create_slot,
+    delete_slot,
+    get_consult_record,
+    get_counselor_stats,
+    get_slot,
+    list_appointments,
+    list_consult_records,
+    list_slots,
+    update_appointment,
+    update_slot_status,
+)
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["psych-counseling"])
 
 
 # ── 通用: 加载学生/教师姓名的辅助函数 ──
+
 
 async def _get_user_name(db: AsyncSession, user_id: int) -> str:
     stmt = select(User.display_name).where(User.id == user_id)
@@ -88,6 +83,7 @@ async def _get_student_name(db: AsyncSession, student_id: int) -> str:
 
 # ── 权限守卫: 心理老师角色 ──
 
+
 async def require_counselor(
     current_user: User = Depends(get_current_user),
 ) -> User:
@@ -104,6 +100,7 @@ async def require_counselor(
 # ============================================================
 # 一、时间槽位管理
 # ============================================================
+
 
 @router.post("/slots", response_model=SlotResponse)
 async def api_create_slot(
@@ -158,21 +155,23 @@ async def api_list_slots(
     )
     items = []
     for s in slots:
-        items.append(SlotResponse(
-            id=s.id,
-            teacher_id=s.teacher_id,
-            teacher_name=await _get_user_name(db, s.teacher_id),
-            date=str(s.date.date()) if s.date else "",
-            start_time=s.start_time,
-            end_time=s.end_time,
-            location=s.location,
-            max_capacity=s.max_capacity,
-            current_booked=s.current_booked,
-            status=s.status,
-            week_pattern=s.week_pattern,
-            is_recurring=s.is_recurring,
-            created_at=str(s.created_at) if s.created_at else None,
-        ))
+        items.append(
+            SlotResponse(
+                id=s.id,
+                teacher_id=s.teacher_id,
+                teacher_name=await _get_user_name(db, s.teacher_id),
+                date=str(s.date.date()) if s.date else "",
+                start_time=s.start_time,
+                end_time=s.end_time,
+                location=s.location,
+                max_capacity=s.max_capacity,
+                current_booked=s.current_booked,
+                status=s.status,
+                week_pattern=s.week_pattern,
+                is_recurring=s.is_recurring,
+                created_at=str(s.created_at) if s.created_at else None,
+            )
+        )
     return SlotListResponse(status="success", slots=items)
 
 
@@ -186,8 +185,10 @@ async def api_update_slot_status(
     """锁定/解锁时段"""
     try:
         slot = await update_slot_status(
-            db=db, school_id=current_user.school_id,
-            slot_id=slot_id, status=status_val,
+            db=db,
+            school_id=current_user.school_id,
+            slot_id=slot_id,
+            status=status_val,
         )
         return {
             "status": "success",
@@ -206,7 +207,9 @@ async def api_delete_slot(
     """删除空闲时段"""
     try:
         await delete_slot(
-            db=db, school_id=current_user.school_id, slot_id=slot_id,
+            db=db,
+            school_id=current_user.school_id,
+            slot_id=slot_id,
         )
         return {"status": "success", "message": "时段已删除"}
     except ValueError as e:
@@ -216,6 +219,7 @@ async def api_delete_slot(
 # ============================================================
 # 二、预约管理
 # ============================================================
+
 
 @router.post("/appointments", response_model=AppointmentResponse)
 async def api_create_appointment(
@@ -292,25 +296,27 @@ async def api_list_appointments(
     items = []
     for a in appointments:
         slot = await get_slot(db, current_user.school_id, a.slot_id)
-        items.append(AppointmentResponse(
-            id=a.id,
-            student_id=a.student_id,
-            student_name=await _get_student_name(db, a.student_id),
-            applicant_id=a.applicant_id,
-            applicant_name=await _get_user_name(db, a.applicant_id),
-            slot_id=a.slot_id,
-            source=a.source,
-            reason_summary=a.reason_summary,
-            status=a.status,
-            risk_flag=a.risk_flag,
-            counselor_note=a.counselor_note,
-            slot_date=str(slot.date.date()) if slot and slot.date else None,
-            slot_time=f"{slot.start_time}-{slot.end_time}" if slot else None,
-            slot_location=slot.location if slot else None,
-            created_at=str(a.created_at) if a.created_at else None,
-            confirmed_at=str(a.confirmed_at) if a.confirmed_at else None,
-            completed_at=str(a.completed_at) if a.completed_at else None,
-        ))
+        items.append(
+            AppointmentResponse(
+                id=a.id,
+                student_id=a.student_id,
+                student_name=await _get_student_name(db, a.student_id),
+                applicant_id=a.applicant_id,
+                applicant_name=await _get_user_name(db, a.applicant_id),
+                slot_id=a.slot_id,
+                source=a.source,
+                reason_summary=a.reason_summary,
+                status=a.status,
+                risk_flag=a.risk_flag,
+                counselor_note=a.counselor_note,
+                slot_date=str(slot.date.date()) if slot and slot.date else None,
+                slot_time=f"{slot.start_time}-{slot.end_time}" if slot else None,
+                slot_location=slot.location if slot else None,
+                created_at=str(a.created_at) if a.created_at else None,
+                confirmed_at=str(a.confirmed_at) if a.confirmed_at else None,
+                completed_at=str(a.completed_at) if a.completed_at else None,
+            )
+        )
     return AppointmentListResponse(status="success", appointments=items, total=total)
 
 
@@ -346,6 +352,7 @@ async def api_my_appointments(
     # 班主任模式: 仅看自己班级学生
     if role == "class_teacher" and current_user.class_id:
         from core.models import Student
+
         class_stmt = select(Student.id).where(
             Student.class_id == current_user.class_id,
             Student.school_id == current_user.school_id,
@@ -358,25 +365,27 @@ async def api_my_appointments(
     items = []
     for a in appointments:
         slot = await get_slot(db, current_user.school_id, a.slot_id)
-        items.append(AppointmentResponse(
-            id=a.id,
-            student_id=a.student_id,
-            student_name=await _get_student_name(db, a.student_id),
-            applicant_id=a.applicant_id,
-            applicant_name=await _get_user_name(db, a.applicant_id),
-            slot_id=a.slot_id,
-            source=a.source,
-            reason_summary=a.reason_summary,
-            status=a.status,
-            risk_flag=a.risk_flag,
-            counselor_note=a.counselor_note,
-            slot_date=str(slot.date.date()) if slot and slot.date else None,
-            slot_time=f"{slot.start_time}-{slot.end_time}" if slot else None,
-            slot_location=slot.location if slot else None,
-            created_at=str(a.created_at) if a.created_at else None,
-            confirmed_at=str(a.confirmed_at) if a.confirmed_at else None,
-            completed_at=str(a.completed_at) if a.completed_at else None,
-        ))
+        items.append(
+            AppointmentResponse(
+                id=a.id,
+                student_id=a.student_id,
+                student_name=await _get_student_name(db, a.student_id),
+                applicant_id=a.applicant_id,
+                applicant_name=await _get_user_name(db, a.applicant_id),
+                slot_id=a.slot_id,
+                source=a.source,
+                reason_summary=a.reason_summary,
+                status=a.status,
+                risk_flag=a.risk_flag,
+                counselor_note=a.counselor_note,
+                slot_date=str(slot.date.date()) if slot and slot.date else None,
+                slot_time=f"{slot.start_time}-{slot.end_time}" if slot else None,
+                slot_location=slot.location if slot else None,
+                created_at=str(a.created_at) if a.created_at else None,
+                confirmed_at=str(a.confirmed_at) if a.confirmed_at else None,
+                completed_at=str(a.completed_at) if a.completed_at else None,
+            )
+        )
     return AppointmentListResponse(status="success", appointments=items, total=total)
 
 
@@ -461,6 +470,7 @@ async def api_update_appointment(
 # 三、咨询记录 (加密工作台核心)
 # ============================================================
 
+
 @router.post("/records", response_model=ConsultRecordResponse)
 async def api_create_consult_record(
     payload: ConsultRecordCreateRequest,
@@ -520,24 +530,26 @@ async def api_list_consult_records(
     )
     items = []
     for r in records:
-        items.append(ConsultRecordResponse(
-            id=r.id,
-            appointment_id=r.appointment_id,
-            student_id=r.student_id,
-            student_name=await _get_student_name(db, r.student_id),
-            counselor_id=r.counselor_id,
-            counselor_name=await _get_user_name(db, r.counselor_id),
-            clog_display="【受限: 请查看详情解密】",
-            risk_level=r.risk_level,
-            consult_category=r.consult_category,
-            is_crisis=r.is_crisis,
-            is_referred=r.is_referred,
-            referral_target=r.referral_target,
-            followup_date=str(r.followup_date) if r.followup_date else None,
-            session_duration_min=r.session_duration_min,
-            created_at=str(r.created_at) if r.created_at else None,
-            updated_at=str(r.updated_at) if r.updated_at else None,
-        ))
+        items.append(
+            ConsultRecordResponse(
+                id=r.id,
+                appointment_id=r.appointment_id,
+                student_id=r.student_id,
+                student_name=await _get_student_name(db, r.student_id),
+                counselor_id=r.counselor_id,
+                counselor_name=await _get_user_name(db, r.counselor_id),
+                clog_display="【受限: 请查看详情解密】",
+                risk_level=r.risk_level,
+                consult_category=r.consult_category,
+                is_crisis=r.is_crisis,
+                is_referred=r.is_referred,
+                referral_target=r.referral_target,
+                followup_date=str(r.followup_date) if r.followup_date else None,
+                session_duration_min=r.session_duration_min,
+                created_at=str(r.created_at) if r.created_at else None,
+                updated_at=str(r.updated_at) if r.updated_at else None,
+            )
+        )
     return ConsultRecordListResponse(status="success", records=items, total=total)
 
 
@@ -602,29 +614,32 @@ async def api_student_consult_history(
     )
     items = []
     for r in records:
-        items.append(ConsultRecordResponse(
-            id=r.id,
-            appointment_id=r.appointment_id,
-            student_id=r.student_id,
-            student_name=await _get_student_name(db, r.student_id),
-            counselor_id=r.counselor_id,
-            counselor_name=await _get_user_name(db, r.counselor_id),
-            clog_display="【受限: 请查看详情解密】",
-            risk_level=r.risk_level,
-            consult_category=r.consult_category,
-            is_crisis=r.is_crisis,
-            is_referred=r.is_referred,
-            referral_target=r.referral_target,
-            followup_date=str(r.followup_date) if r.followup_date else None,
-            session_duration_min=r.session_duration_min,
-            created_at=str(r.created_at) if r.created_at else None,
-        ))
+        items.append(
+            ConsultRecordResponse(
+                id=r.id,
+                appointment_id=r.appointment_id,
+                student_id=r.student_id,
+                student_name=await _get_student_name(db, r.student_id),
+                counselor_id=r.counselor_id,
+                counselor_name=await _get_user_name(db, r.counselor_id),
+                clog_display="【受限: 请查看详情解密】",
+                risk_level=r.risk_level,
+                consult_category=r.consult_category,
+                is_crisis=r.is_crisis,
+                is_referred=r.is_referred,
+                referral_target=r.referral_target,
+                followup_date=str(r.followup_date) if r.followup_date else None,
+                session_duration_min=r.session_duration_min,
+                created_at=str(r.created_at) if r.created_at else None,
+            )
+        )
     return ConsultRecordListResponse(status="success", records=items, total=total)
 
 
 # ============================================================
 # 四、工作台统计
 # ============================================================
+
 
 @router.get("/stats", response_model=CounselorStatsResponse)
 async def api_counselor_stats(

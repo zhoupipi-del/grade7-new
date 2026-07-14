@@ -13,32 +13,34 @@ modules/risk_models/routers.py — 风险预警雷达 API 路由
 """
 
 import logging
-from datetime import datetime, date
-from typing import Optional, List
 
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.routers import get_db, get_current_user
-from core.models import User, UserRole
-from .services import RiskDeviationIndexCalculator, RiskWarningService, RiskMonitorService
 from .explainer import ExplainerService
 from .schemas import (
-    RDICalculateRequest, RDICalculateResponse,
-    RiskWarningOut, RiskDashboardOut,
-    MonitorPanelOut,
-    PenaltyExplanationRequest, PenaltyExplanationResponse,
-    TaskDispatchResponse,
     AsyncCalculateRequest,
     AsyncScanClassRequest,
     AsyncScanSchoolRequest,
+    MonitorPanelOut,
+    PenaltyExplanationRequest,
+    PenaltyExplanationResponse,
+    RDICalculateRequest,
+    RDICalculateResponse,
+    RiskDashboardOut,
+    RiskWarningOut,
+    TaskDispatchResponse,
 )
+from .services import RiskDeviationIndexCalculator, RiskMonitorService, RiskWarningService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["风险预警雷达"])
 
 # ── RDI 计算 ──
+
 
 @router.post("/calculate", response_model=RDICalculateResponse)
 async def calculate_rdi(
@@ -71,10 +73,11 @@ async def calculate_rdi(
 
 # ── 风险看板 ──
 
+
 @router.get("/dashboard", response_model=RiskDashboardOut)
 async def get_risk_dashboard(
-    class_id: Optional[int] = Query(None, description="班级ID (班主任必填)"),
-    grade_id: Optional[int] = Query(None, description="年级ID (级组长必填)"),
+    class_id: int | None = Query(None, description="班级ID (班主任必填)"),
+    grade_id: int | None = Query(None, description="年级ID (级组长必填)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -95,10 +98,11 @@ async def get_risk_dashboard(
 
 # ── 风险监控面板 ──
 
+
 @router.get("/monitor-panel", response_model=MonitorPanelOut)
 async def get_monitor_panel(
-    class_id: Optional[int] = Query(None, description="班级ID (班主任只看本班)"),
-    grade_id: Optional[int] = Query(None, description="年级ID (级组长看全年级)"),
+    class_id: int | None = Query(None, description="班级ID (班主任只看本班)"),
+    grade_id: int | None = Query(None, description="年级ID (级组长看全年级)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -136,10 +140,11 @@ async def get_monitor_panel(
 
 # ── 预警列表 ──
 
-@router.get("/warnings", response_model=List[RiskWarningOut])
+
+@router.get("/warnings", response_model=list[RiskWarningOut])
 async def list_warnings(
-    status: Optional[str] = Query(None, description="active/handled/false_positive/expired"),
-    risk_level: Optional[str] = Query(None, description="normal/attention/intervention"),
+    status: str | None = Query(None, description="active/handled/false_positive/expired"),
+    risk_level: str | None = Query(None, description="normal/attention/intervention"),
     days: int = Query(7, description="最近N天的预警"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -155,11 +160,12 @@ async def list_warnings(
 
 # ── 处置预警 ──
 
+
 @router.post("/warnings/{warning_id}/handle")
 async def handle_warning(
     warning_id: int,
     action: str = Query(..., description="heart_to_heart/talk_to_parent/intervention_plan/dismiss"),
-    note: Optional[str] = Query(None),
+    note: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -181,6 +187,7 @@ async def handle_warning(
 
 
 # ── 基线查询 ──
+
 
 @router.get("/baselines")
 async def get_baselines(
@@ -237,6 +244,7 @@ async def warmup_baselines(
 
 
 # ── 判罚透明化解释 ──
+
 
 @router.post("/explain", response_model=PenaltyExplanationResponse)
 async def explain_penalty(
@@ -310,6 +318,7 @@ async def explain_penalty(
 # 异步投递端点 (Phase 2B — fire-and-forget)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post("/calculate/async", response_model=TaskDispatchResponse)
 async def calculate_rdi_async(
     request: AsyncCalculateRequest,
@@ -337,6 +346,7 @@ async def calculate_rdi_async(
     # 同步计算 RDI + 可选存库 (单生计算 300-800ms, 无需 Celery)
     try:
         from .services import RiskDeviationIndexCalculator, RiskWarningService
+
         calculator = RiskDeviationIndexCalculator(db, current_user.school_id)
         rdi_result = await calculator.calculate_rdi(
             student_id=request.student_id,
@@ -349,12 +359,18 @@ async def calculate_rdi_async(
 
         if request.generate_warning and not rdi_result["warning_suppressed"]:
             await RiskWarningService.create_warning(
-                db, current_user.school_id, rdi_result,
+                db,
+                current_user.school_id,
+                rdi_result,
                 trigger_event_type="async_manual",
             )
             await db.commit()
 
-        task_id = str(rdi_result.get("calculated_at", "").timestamp()) if rdi_result.get("calculated_at") else "unknown"
+        task_id = (
+            str(rdi_result.get("calculated_at", "").timestamp())
+            if rdi_result.get("calculated_at")
+            else "unknown"
+        )
 
         return TaskDispatchResponse(
             status="completed",

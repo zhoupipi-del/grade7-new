@@ -52,14 +52,14 @@ export const RISK_COLORS: Record<RiskLevel, string> = {
 /** 评估类型 */
 export type AssessmentType = 'MSSMHS-55' | 'PCE-55' | 'SDS' | 'SAS' | 'clinical' | 'other'
 
-/** 干预类型 */
-export type InterventionType = 'counseling' | 'parent_notify' | 'crisis' | 'referral' | 'followup' | 'other'
+/** 干预类型 (对齐后端 INTERVENTION_TYPE_CHOICES) */
+export type InterventionType = '心理谈话' | '家长联动' | '心理辅导' | '危机干预' | '转介专业机构' | '其他'
 
 /** 干预状态 */
 export type InterventionStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 
-/** 效果评定 */
-export type EffectRating = 'improved' | 'stable' | 'worsened' | 'pending'
+/** 效果评定 (对齐后端 EFFECT_RATING_CHOICES) */
+export type EffectRating = '显著好转' | '略有好转' | '无变化' | '恶化'
 
 /** MSSMHS-55 维度定义 */
 export interface DimensionDef {
@@ -87,16 +87,15 @@ export interface PsychSurvey {
   grade_name?: string
   survey_type: string
   total_score: number
-  verify_status: 'valid' | 'invalid' | 'pending'
+  verify_status: string  // "VERIFIED" / "PENDING" 等
   completed_at: string
   dimensions: DimensionScore[]
 }
 
-/** 问卷答案项 */
+/** 问卷答案项 (对齐后端 SurveyAnswer schema) */
 export interface SurveyAnswer {
-  question_id: number
+  question_no: number
   score: number
-  dimension_code: string
 }
 
 /** 量表题目 */
@@ -127,23 +126,29 @@ export interface MentalHealthAssessment {
   created_at: string
 }
 
-/** 干预记录 */
+/** 干预记录 (对齐后端 InterventionOut) */
 export interface InterventionRecord {
   id: number
   student_id: number
-  student_name: string
-  class_name: string
+  student_name?: string
+  class_name?: string
+  teacher_id?: number
+  teacher_name?: string
   assessment_id?: number
+  mh_risk_before?: string
+  mh_risk_after?: string
   intervention_type: InterventionType
-  status: InterventionStatus
-  severity: RiskLevel
-  description: string
-  outcome?: string
+  notes?: string
+  parent_feedback?: string
   effect_rating?: EffectRating
-  assigned_to?: string
-  started_at?: string
-  completed_at?: string
-  followups: InterventionFollowup[]
+  intervention_date?: string
+  follow_up_date?: string
+  follow_up_done: boolean
+  follow_up_notes?: string
+  status: string
+  is_effective: boolean
+  mh_risk_improved?: boolean
+  created_at?: string
 }
 
 /** 干预随访 */
@@ -155,39 +160,38 @@ export interface InterventionFollowup {
   created_at: string
 }
 
-/** 仪表盘统计 */
+/** 仪表盘统计 (对齐后端 PsychDashboardResponse) */
 export interface PsychDashboardStats {
-  overview: {
-    total_surveys: number
-    high_risk_count: number
-    medium_risk_count: number
-    low_risk_count: number
-    critical_count: number
-    mssmhs_count?: number
-    pce_count?: number
+  survey_stats: {
+    total: number
+    mssmhs_count: number
+    pce_count: number
   }
-  dimension_ranking: Array<{
-    code: string
-    name: string
+  risk_distribution: {
+    high: number
+    medium: number
+    low: number
+  }
+  assessment_stats: {
+    total: number
+    by_type: Record<string, number>
+    need_intervention: number
+  }
+  intervention_stats: {
+    total: number
+    tracking: number
+    completed: number
+    effective: number
+  }
+  dimension_alerts: Array<{
+    dimension: string
     avg_score: number
     deviation_pct: number
   }>
-  risk_distribution: Array<{
-    level: string
-    count: number
-    percentage: number
-  }>
-  intervention_summary: {
-    total: number
-    pending: number
-    in_progress: number
-    completed: number
-    crisis_count: number
-  }
-  trend: Array<{
-    date: string
-    new_surveys: number
-    new_high_risk: number
+  dimension_ranking?: Array<{
+    code: string
+    name: string
+    deviation_pct: number
   }>
 }
 
@@ -225,7 +229,7 @@ export interface AIAnalysisResult {
 
 /** 获取元数据（维度定义、枚举值） */
 export function getMetadata() {
-  return request.get('/psych_screening/metadata')
+  return request.get('/api/v1/psych_screening/metadata')
 }
 
 /** 获取筛查问卷列表 */
@@ -236,7 +240,7 @@ export function listSurveys(params: {
   limit?: number
   offset?: number
 }) {
-  return request.get('/psych_screening/surveys', { params })
+  return request.get('/api/v1/psych_screening/surveys', { params })
 }
 
 /** 提交 MSSMHS-55 筛查问卷 */
@@ -245,7 +249,7 @@ export function submitSurvey(body: {
   survey_type: string
   answers: SurveyAnswer[]
 }) {
-  return request.post('/psych_screening/surveys/submit', body)
+  return request.post('/api/v1/psych_screening/surveys/submit', body)
 }
 
 /** 获取维度聚合数据 */
@@ -254,17 +258,17 @@ export function getDimensionData(params: {
   class_id?: number
   survey_type?: string
 }) {
-  return request.get('/psych_screening/surveys/dimension-data', { params })
+  return request.get('/api/v1/psych_screening/surveys/dimension-data', { params })
 }
 
 /** AI 白皮书诊断 */
 export function runAIAnalysis(body: { survey_id: number }) {
-  return request.post('/psych_screening/surveys/ai-analysis', body)
+  return request.post('/api/v1/psych_screening/surveys/ai-analysis', body)
 }
 
 /** 同步问卷到评估档案 */
 export function syncToAssessment(body: { survey_ids: number[] }) {
-  return request.post('/psych_screening/surveys/sync-to-assessment', body)
+  return request.post('/api/v1/psych_screening/surveys/sync-to-assessment', body)
 }
 
 /** 获取评估列表 */
@@ -275,12 +279,12 @@ export function listAssessments(params: {
   limit?: number
   offset?: number
 }) {
-  return request.get('/psych_screening/assessments', { params })
+  return request.get('/api/v1/psych_screening/assessments', { params })
 }
 
 /** 获取评估详情 */
 export function getAssessment(id: number) {
-  return request.get(`/psych_screening/assessments/${id}`)
+  return request.get(`/api/v1/psych_screening/assessments/${id}`)
 }
 
 /** 创建评估 */
@@ -291,7 +295,7 @@ export function createAssessment(body: {
   assessment_type: AssessmentType
   summary: string
 }) {
-  return request.post('/psych_screening/assessments', body)
+  return request.post('/api/v1/psych_screening/assessments', body)
 }
 
 /** 更新评估 */
@@ -301,68 +305,70 @@ export function updateAssessment(id: number, body: {
   summary?: string
   llm_output?: string
 }) {
-  return request.put(`/psych_screening/assessments/${id}`, body)
+  return request.put(`/api/v1/psych_screening/assessments/${id}`, body)
 }
 
 /** 删除评估 */
 export function deleteAssessment(id: number) {
-  return request.delete(`/psych_screening/assessments/${id}`)
+  return request.delete(`/api/v1/psych_screening/assessments/${id}`)
 }
 
 /** 获取干预记录列表 */
 export function listInterventions(params: {
   student_id?: number
-  status?: InterventionStatus
-  severity?: RiskLevel
+  status?: string
   limit?: number
   offset?: number
 }) {
-  return request.get('/psych_screening/interventions', { params })
+  return request.get('/api/v1/psych_screening/interventions', { params })
 }
 
-/** 创建干预记录 */
+/** 创建干预记录 (对齐后端 InterventionCreateRequest) */
 export function createIntervention(body: {
   student_id: number
   assessment_id?: number
   intervention_type: InterventionType
-  severity: RiskLevel
-  description: string
-  assigned_to?: string
+  notes?: string
+  parent_feedback?: string
+  intervention_date?: string
+  follow_up_date?: string
 }) {
-  return request.post('/psych_screening/interventions', body)
+  return request.post('/api/v1/psych_screening/interventions', body)
 }
 
-/** 干预随访 */
+/** 干预随访 (对齐后端 InterventionFollowupRequest) */
 export function followupIntervention(id: number, body: {
-  content: string
   effect_rating?: EffectRating
+  follow_up_notes?: string
+  parent_feedback?: string
+  mh_risk_after?: string
 }) {
-  return request.post(`/psych_screening/interventions/${id}/followup`, body)
+  return request.post(`/api/v1/psych_screening/interventions/${id}/followup`, body)
 }
 
 /** 获取学生干预时间线 */
 export function getInterventionTimeline(studentId: number) {
-  return request.get(`/psych_screening/interventions/timeline/${studentId}`)
+  return request.get(`/api/v1/psych_screening/interventions/timeline/${studentId}`)
 }
 
 /** 获取量表题目列表 */
 export function listQuestions() {
-  return request.get('/psych_screening/questions')
+  return request.get('/api/v1/psych_screening/questions')
 }
 
 /** 种子初始化 MSSMHS-55 题目 */
 export function seedQuestions() {
-  return request.post('/psych_screening/questions/seed')
+  return request.post('/api/v1/psych_screening/questions/seed')
 }
 
 /** 学生搜索 */
 export function searchStudents(params: {
-  keyword?: string
+  q?: string
   grade_id?: number
   class_id?: number
   risk_level?: RiskLevel
 }) {
-  return request.get('/psych_screening/students/search', { params })
+  return request.get('/api/v1/psych_screening/students/search', { params })
 }
 
 /** 统计仪表盘 */
@@ -370,5 +376,5 @@ export function getDashboard(params?: {
   grade_id?: number
   period?: string
 }) {
-  return request.get('/psych_screening/dashboard', { params })
+  return request.get('/api/v1/psych_screening/dashboard', { params })
 }

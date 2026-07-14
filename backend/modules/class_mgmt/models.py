@@ -4,24 +4,32 @@ modules/class_mgmt/models.py — 班级管理数据模型
 扩展 core.models.Class，增加班级变更记录和班级档案。
 """
 
+from core.models import Base, SchoolMixin, get_local_now
 from sqlalchemy import (
-    Column, Integer, BigInteger, String, Boolean, Date, DateTime,
-    ForeignKey, JSON, Text, Index,
+    JSON,
+    BigInteger,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
 )
 from sqlalchemy.orm import relationship
-
-from core.models import Base, SchoolMixin, get_local_now
 
 
 class ClassChangeLog(Base, SchoolMixin):
     """
     班级变更记录 — 分班/调班/合并/拆分/班主任变更的审计日志。
     """
+
     __tablename__ = "class_change_logs"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     class_id = Column(BigInteger, ForeignKey("classes.id"), nullable=False, index=True)
-    change_type = Column(String(30), nullable=False, comment="assign/transfer/merge/split/teacher_change")
+    change_type = Column(
+        String(30), nullable=False, comment="assign/transfer/merge/split/teacher_change"
+    )
     # 涉及的学生ID列表（JSON）
     affected_students = Column(JSON, nullable=True, comment="受影响的学生ID列表")
     # 变更详情
@@ -39,9 +47,7 @@ class ClassChangeLog(Base, SchoolMixin):
     cls = relationship("Class", foreign_keys=[class_id])
     operator = relationship("User")
 
-    __table_args__ = (
-        Index("idx_class_change_log", "class_id", "created_at"),
-    )
+    __table_args__ = (Index("idx_class_change_log", "class_id", "created_at"),)
 
 
 class ClassProfileExt(Base, SchoolMixin):
@@ -49,6 +55,7 @@ class ClassProfileExt(Base, SchoolMixin):
     班级档案扩展 — 存储 Class 表中未覆盖的档案信息。
     与 core.classes 表一对一关联。
     """
+
     __tablename__ = "class_profile_ext"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -57,7 +64,9 @@ class ClassProfileExt(Base, SchoolMixin):
     class_slogan = Column(String(200), nullable=True, comment="班级口号")
     class_features = Column(JSON, nullable=True, comment="班级特色标签")
     # 班委信息
-    class_committee = Column(JSON, nullable=True, comment="班委信息JSON: {monitor: id, vice_monitor: id, ...}")
+    class_committee = Column(
+        JSON, nullable=True, comment="班委信息JSON: {monitor: id, vice_monitor: id, ...}"
+    )
     # 班级荣誉
     honors = Column(JSON, nullable=True, comment="班级荣誉列表")
     # 班级档案

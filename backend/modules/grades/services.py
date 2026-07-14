@@ -12,21 +12,28 @@ import logging
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, text, update
-
-from core.models import Student, Class as ClassModel
+from core.models import Class as ClassModel
+from core.models import Student
 from modules.lineage.decorators import audit_score_log
-from .models import GradeSubject, GradeExam, GradeRecord, GradeAuditLog
+from sqlalchemy import and_, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .models import GradeAuditLog, GradeExam, GradeRecord, GradeSubject
 from .schemas import (
-    SubjectCreate, SubjectUpdate,
-    ExamCreate, ExamUpdate,
-    ScoreUploadRequest, ScoreUploadResult, ScoreEntry,
-    StudentScoreOut, StudentExamResult, ExamResultQuery,
-    ClassScoreSummary, SubjectSummary, ExamResultPage,
     AuditLogQuery,
+    ClassScoreSummary,
+    ExamCreate,
+    ExamResultPage,
+    ExamResultQuery,
+    ExamUpdate,
+    ScoreUploadRequest,
+    ScoreUploadResult,
+    StudentExamResult,
+    StudentScoreOut,
+    SubjectCreate,
+    SubjectSummary,
+    SubjectUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,6 +42,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════
 # SubjectService — 科目管理
 # ═══════════════════════════════════════════════════════════════
+
 
 class SubjectService:
     """科目 CRUD — 定义学校开设的考试科目（语文/数学/英语...）"""
@@ -81,7 +89,7 @@ class SubjectService:
         db: AsyncSession,
         school_id: int,
         subject_id: int,
-    ) -> Optional[GradeSubject]:
+    ) -> GradeSubject | None:
         """获取单个科目"""
         result = await db.execute(
             select(GradeSubject).where(
@@ -135,6 +143,7 @@ class SubjectService:
 # ExamService — 考试管理
 # ═══════════════════════════════════════════════════════════════
 
+
 class ExamService:
     """考试管理 — 创建/查询/修改考试元信息"""
 
@@ -165,7 +174,7 @@ class ExamService:
         db: AsyncSession,
         school_id: int,
         exam_id: int,
-    ) -> Optional[GradeExam]:
+    ) -> GradeExam | None:
         """获取单个考试"""
         result = await db.execute(
             select(GradeExam).where(
@@ -179,9 +188,9 @@ class ExamService:
     async def list_exams(
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
-        semester: Optional[str] = None,
-        status: Optional[str] = None,
+        grade_id: int | None = None,
+        semester: str | None = None,
+        status: str | None = None,
     ) -> list[GradeExam]:
         """列出考试（可按年级/学期/状态过滤）
 
@@ -257,6 +266,7 @@ class ExamService:
 # ScoreService — 成绩录入 + 查询
 # ═══════════════════════════════════════════════════════════════
 
+
 class ScoreService:
     """成绩管理核心服务 — 批量录入、排名计算、多维度查询"""
 
@@ -266,8 +276,8 @@ class ScoreService:
         db: AsyncSession,
         school_id: int,
         data: ScoreUploadRequest,
-        operator_id: Optional[int] = None,
-        operator_name: Optional[str] = None,
+        operator_id: int | None = None,
+        operator_name: str | None = None,
     ) -> ScoreUploadResult:
         """批量成绩录入 — 两趟扫描模式
 
@@ -303,10 +313,7 @@ class ScoreService:
                 GradeRecord.exam_id == data.exam_id,
             )
         )
-        existing_map = {
-            (r.student_id, r.subject_id): r
-            for r in existing_result.scalars().all()
-        }
+        existing_map = {(r.student_id, r.subject_id): r for r in existing_result.scalars().all()}
 
         # ── 扫描 1: 逐条 upsert ────────────────────
         errors: list[str] = []
@@ -343,23 +350,24 @@ class ScoreService:
 
                 # 审计日志：分数发生变化才记录
                 if _scores_differ(old_score, entry.score):
-                    audit_logs.append(GradeAuditLog(
-                        school_id=school_id,
-                        exam_id=data.exam_id,
-                        student_id=entry.student_id,
-                        subject_id=entry.subject_id,
-                        old_score=old_score,
-                        new_score=entry.score,
-                        action="upsert",
-                        operator_id=operator_id,
-                        operator_name=operator_name,
-                    ))
+                    audit_logs.append(
+                        GradeAuditLog(
+                            school_id=school_id,
+                            exam_id=data.exam_id,
+                            student_id=entry.student_id,
+                            subject_id=entry.subject_id,
+                            old_score=old_score,
+                            new_score=entry.score,
+                            action="upsert",
+                            operator_id=operator_id,
+                            operator_name=operator_name,
+                        )
+                    )
 
                 success += 1
             except Exception as e:
                 errors.append(
-                    f"student_id={entry.student_id}, "
-                    f"subject_id={entry.subject_id}: {str(e)}"
+                    f"student_id={entry.student_id}, subject_id={entry.subject_id}: {str(e)}"
                 )
                 logger.warning(f"成绩录入失败: {e}")
 
@@ -483,7 +491,7 @@ class ScoreService:
         # ── 第4步：按总分排序 + 计算整体排名 ───────
         sorted_students = sorted(
             student_map.values(),
-            key=lambda x: (x["total"] if x["scored_count"] > 0 else Decimal("-1")),
+            key=lambda x: x["total"] if x["scored_count"] > 0 else Decimal("-1"),
             reverse=True,
         )
 
@@ -524,10 +532,7 @@ class ScoreService:
         # ── 第5步：按学生姓名模糊搜索 ──────────────
         if query.student_name:
             keyword = query.student_name.strip()
-            sorted_students = [
-                sd for sd in sorted_students
-                if keyword in sd["student"].name
-            ]
+            sorted_students = [sd for sd in sorted_students if keyword in sd["student"].name]
 
         # ── 第6步：分页 ────────────────────────────
         total_count = len(sorted_students)
@@ -543,17 +548,19 @@ class ScoreService:
             total = sd["total"] if sd["scored_count"] > 0 else None
             avg = float(total) / sd["scored_count"] if sd["scored_count"] > 0 else None
 
-            results.append(StudentExamResult(
-                student_id=student.id,
-                student_name=student.name,
-                class_id=cls.id,
-                class_name=cls.name,
-                total_score=total,
-                avg_score=round(avg, 2) if avg else None,
-                class_rank=class_ranks.get((student.id, cls.id)),
-                grade_rank=grade_ranks.get(student.id),
-                subjects=sd["subjects"],
-            ))
+            results.append(
+                StudentExamResult(
+                    student_id=student.id,
+                    student_name=student.name,
+                    class_id=cls.id,
+                    class_name=cls.name,
+                    total_score=total,
+                    avg_score=round(avg, 2) if avg else None,
+                    class_rank=class_ranks.get((student.id, cls.id)),
+                    grade_rank=grade_ranks.get(student.id),
+                    subjects=sd["subjects"],
+                )
+            )
 
         # ── 第8步：班级汇总 ────────────────────────
         class_summaries = _build_class_summaries(student_map, sorted_students)
@@ -573,7 +580,7 @@ class ScoreService:
         school_id: int,
         exam_id: int,
         student_id: int,
-    ) -> Optional[StudentExamResult]:
+    ) -> StudentExamResult | None:
         """查询单个学生在某次考试中的全科成绩"""
         exam = await ExamService.get_exam(db, school_id, exam_id)
         if not exam:
@@ -606,21 +613,23 @@ class ScoreService:
 
         # ── 组装科目列表 ──────────────────────────
         student = rows[0][1]  # Student
-        cls = rows[0][2]       # ClassModel
+        cls = rows[0][2]  # ClassModel
         subjects = []
         total = Decimal("0")
         scored_count = 0
 
         for record, _, _, subject in rows:
-            subjects.append(StudentScoreOut(
-                subject_id=subject.id,
-                subject_name=subject.name,
-                full_score=subject.full_score,
-                score=record.score,
-                is_absent=record.is_absent,
-                class_rank=record.class_rank,
-                grade_rank=record.grade_rank,
-            ))
+            subjects.append(
+                StudentScoreOut(
+                    subject_id=subject.id,
+                    subject_name=subject.name,
+                    full_score=subject.full_score,
+                    score=record.score,
+                    is_absent=record.is_absent,
+                    class_rank=record.class_rank,
+                    grade_rank=record.grade_rank,
+                )
+            )
             if record.score is not None and not record.is_absent:
                 total += record.score
                 scored_count += 1
@@ -649,6 +658,7 @@ class ScoreService:
 # AuditService — 审计日志
 # ═══════════════════════════════════════════════════════════════
 
+
 class AuditService:
     """成绩变更审计 — 不可篡改的操作记录"""
 
@@ -659,10 +669,7 @@ class AuditService:
         query: AuditLogQuery,
     ) -> tuple[list[GradeAuditLog], int]:
         """分页查询审计日志"""
-        stmt = (
-            select(GradeAuditLog)
-            .where(GradeAuditLog.school_id == school_id)
-        )
+        stmt = select(GradeAuditLog).where(GradeAuditLog.school_id == school_id)
 
         if query.exam_id:
             stmt = stmt.where(GradeAuditLog.exam_id == query.exam_id)
@@ -688,6 +695,7 @@ class AuditService:
 # ═══════════════════════════════════════════════════════════════
 # 内部辅助函数
 # ═══════════════════════════════════════════════════════════════
+
 
 async def _compute_ranks(
     db: AsyncSession,
@@ -735,15 +743,13 @@ async def _get_student_overall_ranks(
     student_id: int,
     student_total: Decimal,
     scored_count: int,
-) -> tuple[Optional[int], Optional[int]]:
+) -> tuple[int | None, int | None]:
     """计算单个学生的整体班级排名和年级排名（基于总分）"""
     if scored_count == 0:
         return None, None
 
     # ── 获取该学生所在班级 ──────────────────────
-    student_row = await db.execute(
-        select(Student.class_id).where(Student.id == student_id)
-    )
+    student_row = await db.execute(select(Student.class_id).where(Student.id == student_id))
     class_id = student_row.scalar()
 
     # ── 班级排名：同班中有多少人总分 > 该生 ──────
@@ -813,17 +819,16 @@ def _build_class_summaries(
             continue
 
         cls = members[0]["class"]
-        totals = [
-            float(m["total"]) for m in members
-            if m["scored_count"] > 0
-        ]
+        totals = [float(m["total"]) for m in members if m["scored_count"] > 0]
 
         if not totals:
-            summaries.append(ClassScoreSummary(
-                class_id=cid,
-                class_name=cls.name,
-                student_count=0,
-            ))
+            summaries.append(
+                ClassScoreSummary(
+                    class_id=cid,
+                    class_name=cls.name,
+                    student_count=0,
+                )
+            )
             continue
 
         n = len(totals)
@@ -833,9 +838,7 @@ def _build_class_summaries(
 
         # 及格率（总分 >= 60% 满分）和优秀率（总分 >= 90% 满分）
         # 满分 = 各科满分之和（从第一个学生的科目推算）
-        full_total = sum(
-            float(s.full_score) for s in members[0]["subjects"]
-        ) if members else 100
+        full_total = sum(float(s.full_score) for s in members[0]["subjects"]) if members else 100
 
         pass_count = sum(1 for t in totals if t >= full_total * 0.6)
         excellent_count = sum(1 for t in totals if t >= full_total * 0.9)
@@ -843,17 +846,19 @@ def _build_class_summaries(
         # ── 单科统计 ─────────────────────────────
         subject_summaries = _build_subject_summaries(members)
 
-        summaries.append(ClassScoreSummary(
-            class_id=cid,
-            class_name=cls.name,
-            student_count=n,
-            avg_total=avg_total,
-            max_total=max_total,
-            min_total=min_total,
-            pass_rate=round(pass_count / n * 100, 1) if n > 0 else None,
-            excellent_rate=round(excellent_count / n * 100, 1) if n > 0 else None,
-            subjects=subject_summaries,
-        ))
+        summaries.append(
+            ClassScoreSummary(
+                class_id=cid,
+                class_name=cls.name,
+                student_count=n,
+                avg_total=avg_total,
+                max_total=max_total,
+                min_total=min_total,
+                pass_rate=round(pass_count / n * 100, 1) if n > 0 else None,
+                excellent_rate=round(excellent_count / n * 100, 1) if n > 0 else None,
+                subjects=subject_summaries,
+            )
+        )
 
     # 按班级名排序
     summaries.sort(key=lambda x: x.class_name)
@@ -887,22 +892,24 @@ def _build_subject_summaries(members: list) -> list[SubjectSummary]:
         pass_r = round(sum(1 for s in scores if s >= full_f * 0.6) / n * 100, 1)
         excel_r = round(sum(1 for s in scores if s >= full_f * 0.9) / n * 100, 1)
 
-        summaries.append(SubjectSummary(
-            subject_id=sid,
-            subject_name=name,
-            full_score=full,
-            avg_score=avg_s,
-            max_score=max_s,
-            min_score=min_s,
-            pass_rate=pass_r,
-            excellent_rate=excel_r,
-        ))
+        summaries.append(
+            SubjectSummary(
+                subject_id=sid,
+                subject_name=name,
+                full_score=full,
+                avg_score=avg_s,
+                max_score=max_s,
+                min_score=min_s,
+                pass_rate=pass_r,
+                excellent_rate=excel_r,
+            )
+        )
 
     summaries.sort(key=lambda x: x.subject_name)
     return summaries
 
 
-def _scores_differ(a: Optional[Decimal], b: Optional[Decimal]) -> bool:
+def _scores_differ(a: Decimal | None, b: Decimal | None) -> bool:
     """判断两个分数是否不同（处理 None vs Decimal 比较）"""
     if a is None and b is None:
         return False
@@ -914,6 +921,7 @@ def _scores_differ(a: Optional[Decimal], b: Optional[Decimal]) -> bool:
 def _exam_to_out(exam: GradeExam) -> "ExamOut":
     """ORM → Pydantic（避免循环导入）"""
     from .schemas import ExamOut
+
     return ExamOut(
         id=exam.id,
         name=exam.name,

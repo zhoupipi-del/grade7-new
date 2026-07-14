@@ -20,22 +20,20 @@ modules/red_flag/services.py — 流动红旗三维加权引擎
   get_leaderboard()      — 已发布排名展示
 """
 
-from datetime import date, datetime
-from typing import Optional
-
-from sqlalchemy import func, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import date
 
 from core.models import get_local_now
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ── 标准权重基座 ──
 BASE_WEIGHTS = [0.2, 0.3, 0.5]  # self, grade, ms
 
 # ── 周期→扣分系数映射 ──
 DEDUCTION_COEFFICIENTS = {
-    "week":  {"discipline": 0.10, "attendance": 0.05},
+    "week": {"discipline": 0.10, "attendance": 0.05},
     "month": {"discipline": 0.05, "attendance": 0.03},
-    "term":  {"discipline": 0.01, "attendance": 0.01},
+    "term": {"discipline": 0.01, "attendance": 0.01},
 }
 
 
@@ -48,9 +46,9 @@ class FlagService:
 
     @staticmethod
     def _calc_weights(
-        self_score: Optional[float],
-        grade_score: Optional[float],
-        ms_score: Optional[float],
+        self_score: float | None,
+        grade_score: float | None,
+        ms_score: float | None,
     ) -> tuple[list[float], float]:
         """
         计算三维度实际权重与加权底分。
@@ -100,8 +98,8 @@ class FlagService:
         scorer_type: str,
         record_date: date,
         school_id: int,
-        inspector: Optional[str] = None,
-        note: Optional[str] = None,
+        inspector: str | None = None,
+        note: str | None = None,
     ) -> dict:
         from .models import RoutineScore
 
@@ -128,9 +126,7 @@ class FlagService:
         }
 
     @staticmethod
-    async def add_routine_batch(
-        db: AsyncSession, scores: list[dict], school_id: int
-    ) -> dict:
+    async def add_routine_batch(db: AsyncSession, scores: list[dict], school_id: int) -> dict:
         from .models import RoutineScore
 
         created = []
@@ -155,12 +151,12 @@ class FlagService:
     async def list_routines(
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
-        class_id: Optional[int] = None,
-        scorer_type: Optional[str] = None,
-        category: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        grade_id: int | None = None,
+        class_id: int | None = None,
+        scorer_type: str | None = None,
+        category: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         offset: int = 0,
         limit: int = 100,
     ) -> dict:
@@ -369,8 +365,8 @@ class FlagService:
         """
         发布草稿 → 按 final_score 降序排列 → 分配 rank → 状态=published
         """
+
         from .models import FlagEvaluation
-        from sqlalchemy import update
 
         r = await db.execute(
             select(FlagEvaluation).where(
@@ -411,9 +407,9 @@ class FlagService:
     async def get_leaderboard(
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
-        period_type: Optional[str] = None,
-        period_label: Optional[str] = None,
+        grade_id: int | None = None,
+        period_type: str | None = None,
+        period_label: str | None = None,
     ) -> list[dict]:
         """获取已发布的排行榜"""
         from .models import FlagEvaluation
@@ -429,11 +425,15 @@ class FlagService:
         if period_label:
             conditions.append(FlagEvaluation.period_label == period_label)
 
-        q = select(FlagEvaluation).where(*conditions).order_by(
-            FlagEvaluation.period_label.desc(),
-            FlagEvaluation.grade_id,
-            FlagEvaluation.rank.is_(None).asc(),
-            FlagEvaluation.rank.asc(),
+        q = (
+            select(FlagEvaluation)
+            .where(*conditions)
+            .order_by(
+                FlagEvaluation.period_label.desc(),
+                FlagEvaluation.grade_id,
+                FlagEvaluation.rank.is_(None).asc(),
+                FlagEvaluation.rank.asc(),
+            )
         )
         r = await db.execute(q)
         items = r.scalars().all()
@@ -445,8 +445,8 @@ class FlagService:
     async def get_drafts(
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
-        period_type: Optional[str] = None,
+        grade_id: int | None = None,
+        period_type: str | None = None,
     ) -> list[dict]:
         """查看草稿列表"""
         from .models import FlagEvaluation
@@ -460,10 +460,14 @@ class FlagService:
         if period_type:
             conditions.append(FlagEvaluation.period_type == period_type)
 
-        q = select(FlagEvaluation).where(*conditions).order_by(
-            FlagEvaluation.period_label.desc(),
-            FlagEvaluation.grade_id,
-            FlagEvaluation.final_score.desc(),
+        q = (
+            select(FlagEvaluation)
+            .where(*conditions)
+            .order_by(
+                FlagEvaluation.period_label.desc(),
+                FlagEvaluation.grade_id,
+                FlagEvaluation.final_score.desc(),
+            )
         )
         r = await db.execute(q)
         items = r.scalars().all()
@@ -494,7 +498,7 @@ class FlagService:
           "deductions_detail": {discipline: {minus, raw_points}, attendance: {minus, exceptions_count}}
         }
         """
-        from .models import FlagEvaluation, FlagArchiveReport
+        from .models import FlagArchiveReport, FlagEvaluation
 
         # ── 幂等检查 ──
         r = await db.execute(
@@ -567,7 +571,7 @@ class FlagService:
             }
 
             # 判断是否获红旗（前 N 名）
-            has_flag = (fe.rank is not None and fe.rank <= flag_count)
+            has_flag = fe.rank is not None and fe.rank <= flag_count
 
             ar = FlagArchiveReport(
                 school_id=school_id,
@@ -603,9 +607,7 @@ class FlagService:
     # ═══════════════════════════════════════════════════════════
 
     @staticmethod
-    async def get_class_trends(
-        db: AsyncSession, school_id: int, class_id: int
-    ) -> dict:
+    async def get_class_trends(db: AsyncSession, school_id: int, class_id: int) -> dict:
         """获取某班级的历史趋势（归档数据）"""
         from .models import FlagArchiveReport
 
@@ -645,9 +647,9 @@ class FlagService:
     async def get_archive_history(
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
-        class_id: Optional[int] = None,
-        period_type: Optional[str] = None,
+        grade_id: int | None = None,
+        class_id: int | None = None,
+        period_type: str | None = None,
         offset: int = 0,
         limit: int = 50,
     ) -> dict:
@@ -743,21 +745,23 @@ class FlagService:
 
         result = []
         for ar in items:
-            result.append({
-                "id": ar.id,
-                "period_type": ar.period_type,
-                "period_label": ar.period_label,
-                "grade_id": ar.grade_id,
-                "class_id": ar.class_id,
-                "class_name": name_map.get(ar.class_id),
-                "final_score": ar.final_score,
-                "rank": ar.rank,
-                "has_flag": ar.has_flag,
-                "base_score": ar.base_score,
-                "discipline_deduction": ar.discipline_deduction,
-                "attendance_deduction": ar.attendance_deduction,
-                "snapshot_data": ar.snapshot_data if hasattr(ar, "snapshot_data") else None,
-                "archived_at": ar.archived_at.isoformat() if ar.archived_at else None,
-                "archived_by": ar.archived_by,
-            })
+            result.append(
+                {
+                    "id": ar.id,
+                    "period_type": ar.period_type,
+                    "period_label": ar.period_label,
+                    "grade_id": ar.grade_id,
+                    "class_id": ar.class_id,
+                    "class_name": name_map.get(ar.class_id),
+                    "final_score": ar.final_score,
+                    "rank": ar.rank,
+                    "has_flag": ar.has_flag,
+                    "base_score": ar.base_score,
+                    "discipline_deduction": ar.discipline_deduction,
+                    "attendance_deduction": ar.attendance_deduction,
+                    "snapshot_data": ar.snapshot_data if hasattr(ar, "snapshot_data") else None,
+                    "archived_at": ar.archived_at.isoformat() if ar.archived_at else None,
+                    "archived_by": ar.archived_by,
+                }
+            )
         return result

@@ -3,22 +3,23 @@ modules/notifications/schemas.py — 通知 Pydantic 模型
 """
 
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field
 
 # ── 输出模型 ──
 
+
 class NotificationOut(BaseModel):
     """通知输出"""
+
     id: int
     type: str
     title: str
-    body: Optional[str] = None
-    entity_type: Optional[str] = None
-    entity_id: Optional[int] = None
+    body: str | None = None
+    entity_type: str | None = None
+    entity_id: int | None = None
     is_read: bool = False
-    read_at: Optional[datetime] = None
+    read_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -26,7 +27,8 @@ class NotificationOut(BaseModel):
 
 class NotificationListResponse(BaseModel):
     """通知分页响应"""
-    items: List[NotificationOut]
+
+    items: list[NotificationOut]
     total: int
     limit: int
     offset: int
@@ -34,6 +36,7 @@ class NotificationListResponse(BaseModel):
 
 class UnreadCountResponse(BaseModel):
     """未读计数响应"""
+
     unread_count: int
     """总未读数"""
 

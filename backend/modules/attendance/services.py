@@ -5,25 +5,22 @@ modules/attendance/services.py — 考勤业务逻辑 (V2)
 V2 扩展: 仪表盘聚合 / 班级排行 / 日历热力图 / 异常预警增强 / 全局视图 / 数据导出
 """
 
-from datetime import date, datetime, timedelta
-from typing import Optional, List, Dict, Tuple, Set
-from collections import defaultdict, OrderedDict
 import logging
+from collections import defaultdict
+from datetime import date, timedelta
 
-from sqlalchemy import select, func, and_, or_, delete, desc, update, case
+from core.models import Class, Grade, Student, User, UserRole, get_local_now
+from sqlalchemy import and_, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import AttendanceRecord, LeaveRequest
 from .exceptions import (
-    AttendanceError,
-    StudentLeaveConflictError,
-    ScopePermissionDeniedError,
-    NoPermissionError,
+    DateRangeError,
     InvalidStatusError,
     LeaveNotFoundError,
-    DateRangeError,
+    NoPermissionError,
+    StudentLeaveConflictError,
 )
-from core.models import Student, Class, Grade, User, UserRole, get_local_now
+from .models import AttendanceRecord, LeaveRequest
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +53,18 @@ class AttendanceService:
     # ═══════════════════════════════════════════════════════════
 
     ROLE_ACTIONS = {
-        "batch_record":    {UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER},
-        "view_ranking":    {UserRole.MS_ADMIN, UserRole.GRADE_LEADER},
-        "view_overview":   {UserRole.MS_ADMIN},
-        "export_data":     {UserRole.MS_ADMIN, UserRole.GRADE_LEADER},
-        "submit_leave":    {UserRole.PARENT},
-        "approve_leave":   {UserRole.CLASS_TEACHER, UserRole.GRADE_LEADER},
-        "list_leaves":     {UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.PARENT},
+        "batch_record": {UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER},
+        "view_ranking": {UserRole.MS_ADMIN, UserRole.GRADE_LEADER},
+        "view_overview": {UserRole.MS_ADMIN},
+        "export_data": {UserRole.MS_ADMIN, UserRole.GRADE_LEADER},
+        "submit_leave": {UserRole.PARENT},
+        "approve_leave": {UserRole.CLASS_TEACHER, UserRole.GRADE_LEADER},
+        "list_leaves": {
+            UserRole.MS_ADMIN,
+            UserRole.GRADE_LEADER,
+            UserRole.CLASS_TEACHER,
+            UserRole.PARENT,
+        },
         "batch_process_leaves": {UserRole.MS_ADMIN, UserRole.GRADE_LEADER},
     }
 
@@ -70,7 +72,7 @@ class AttendanceService:
     def resolve_scope(user: User) -> dict:
         """
         根据用户角色解析数据访问范围。
-        
+
         支持角色兼任场景（如某教师同时担任班主任+年级组长）：
         返回 accessible_roles 集合 + 各维度的自动限定值。
 
@@ -90,7 +92,7 @@ class AttendanceService:
           }
         """
         role = user.role if isinstance(user.role, UserRole) else UserRole(user.role)
-        
+
         scope = {
             "role": role,
             "school_id": user.school_id,
@@ -125,16 +127,16 @@ class AttendanceService:
         """
         role = user.role if isinstance(user.role, UserRole) else UserRole(user.role)
         allowed = AttendanceService.ROLE_ACTIONS.get(action, set())
-        
+
         if role not in allowed:
             detail_map = {
-                "batch_record":  "无权录入考勤",
-                "view_ranking":  "无权查看班级排名",
+                "batch_record": "无权录入考勤",
+                "view_ranking": "无权查看班级排名",
                 "view_overview": "仅德育处管理员可查看全局视图",
-                "export_data":   "无权导出考勤数据",
-                "submit_leave":  "仅家长可提交请假申请",
+                "export_data": "无权导出考勤数据",
+                "submit_leave": "仅家长可提交请假申请",
                 "approve_leave": "仅班主任或年级组长可审批请假",
-                "list_leaves":   "无权查看请假列表",
+                "list_leaves": "无权查看请假列表",
                 "batch_process_leaves": "仅年级组长可批量审批请假",
             }
             raise NoPermissionError(detail_map.get(action, "无权执行此操作"))
@@ -151,10 +153,10 @@ class AttendanceService:
         class_id: int,
         grade_id: int,
         record_date: date,
-        records: List[Dict],  # [{"student_id": 1, "status": "present", "note": ""}]
+        records: list[dict],  # [{"student_id": 1, "status": "present", "note": ""}]
         created_by: int = 0,
         creator_role: str = "class_teacher",
-    ) -> Tuple[int, List[Dict]]:
+    ) -> tuple[int, list[dict]]:
         """
         批量录入某班级某日的考勤数据。V2 增强返回通知目标。
 
@@ -176,8 +178,9 @@ class AttendanceService:
         # 批量预加载学生信息（用于通知）
         student_map = {}
         stu_result = await db.execute(
-            select(Student.id, Student.name, Student.student_no, Student.class_id)
-            .where(Student.id.in_(student_ids))
+            select(Student.id, Student.name, Student.student_no, Student.class_id).where(
+                Student.id.in_(student_ids)
+            )
         )
         for row in stu_result.all():
             student_map[row[0]] = {"name": row[1], "student_no": row[2], "class_id": row[3]}
@@ -213,15 +216,17 @@ class AttendanceService:
             # 收集缺勤/迟到学生用于通知
             if rec["status"] in ("absent", "late"):
                 stu = student_map.get(rec["student_id"], {})
-                notification_targets.append({
-                    "student_id": rec["student_id"],
-                    "student_name": stu.get("name", ""),
-                    "student_no": stu.get("student_no", ""),
-                    "class_id": class_id,
-                    "status": rec["status"],
-                    "status_label": cls.STATUS_LABELS.get(rec["status"], rec["status"]),
-                    "note": rec.get("note", ""),
-                })
+                notification_targets.append(
+                    {
+                        "student_id": rec["student_id"],
+                        "student_name": stu.get("name", ""),
+                        "student_no": stu.get("student_no", ""),
+                        "class_id": class_id,
+                        "status": rec["status"],
+                        "status_label": cls.STATUS_LABELS.get(rec["status"], rec["status"]),
+                        "note": rec.get("note", ""),
+                    }
+                )
 
         db.add_all(new_records)
         await db.flush()  # 获取自增ID，供Hook使用
@@ -230,11 +235,13 @@ class AttendanceService:
         hook_targets = []
         for att in new_records:
             if att.status in ("late", "absent"):
-                hook_targets.append({
-                    "student_id": att.student_id,
-                    "record_id": att.id,
-                    "status": att.status,
-                })
+                hook_targets.append(
+                    {
+                        "student_id": att.student_id,
+                        "record_id": att.id,
+                        "status": att.status,
+                    }
+                )
 
         # ═══ 主业务commit — 考勤记录绝对优先 ═══
         await db.commit()
@@ -246,11 +253,12 @@ class AttendanceService:
         if hook_targets:
             try:
                 from modules.policy_engine import get_engine
+
                 engine = get_engine()
 
                 if engine:
-                    from modules.evaluation.services import EvaluationService
                     from modules.evaluation.models import ApprovalRequest
+                    from modules.evaluation.services import EvaluationService
 
                     # 考勤状态 → PolicyEngine behavior_type 映射
                     _STATUS_TYPE_MAP = {
@@ -259,9 +267,7 @@ class AttendanceService:
                     }
 
                     for target in hook_targets:
-                        behavior_type = _STATUS_TYPE_MAP.get(
-                            target["status"], target["status"]
-                        )
+                        behavior_type = _STATUS_TYPE_MAP.get(target["status"], target["status"])
 
                         # 1. 事件分类 → severity / dimension / penalty
                         classification = engine.classify(behavior_type)
@@ -271,15 +277,21 @@ class AttendanceService:
                         approval_mode = "parallel_or"
 
                         # L1: 尝试多租户审批链
-                        biz_type = "attendance_absence" if behavior_type == "absence" else "attendance_leave"
+                        biz_type = (
+                            "attendance_absence"
+                            if behavior_type == "absence"
+                            else "attendance_leave"
+                        )
                         try:
                             from modules.approval.services import resolve_chain_async
+
                             chain_config = await resolve_chain_async(db, school_id, biz_type)
                             if chain_config:
                                 approval_mode = chain_config.get("approval_mode", "serial_and")
                         except Exception as chain_err:
                             logger.warning(
-                                "[Attendance Hook] 多租户审批链查询失败(降级PolicyEngine): %s", chain_err
+                                "[Attendance Hook] 多租户审批链查询失败(降级PolicyEngine): %s",
+                                chain_err,
                             )
 
                         # L2: Fallback — PolicyEngine
@@ -343,11 +355,15 @@ class AttendanceService:
             if target["status"] == "absent":
                 try:
                     from core.event_bus import EventBus
-                    EventBus().publish("attendance.consecutive_absent", {
-                        "school_id": school_id,
-                        "student_id": target["student_id"],
-                        "class_id": class_id,
-                    })
+
+                    EventBus().publish(
+                        "attendance.consecutive_absent",
+                        {
+                            "school_id": school_id,
+                            "student_id": target["student_id"],
+                            "class_id": class_id,
+                        },
+                    )
                 except Exception:
                     pass  # 事件总线不可用时静默降级
 
@@ -363,10 +379,10 @@ class AttendanceService:
         db: AsyncSession,
         school_id: int,
         class_id: int,
-        record_date: Optional[date] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-    ) -> List[Dict]:
+        record_date: date | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[dict]:
         """
         获取某班级的考勤详情。
 
@@ -416,7 +432,7 @@ class AttendanceService:
         school_id: int,
         student_id: int,
         days: int = 30,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """获取某学生近 N 天的考勤历史"""
         since = date.today() - timedelta(days=days)
         result = await db.execute(
@@ -453,7 +469,7 @@ class AttendanceService:
         grade_id: int,
         start_date: date,
         end_date: date,
-    ) -> Dict:
+    ) -> dict:
         """
         年级考勤概览统计。
         返回各班级的各状态人数汇总。
@@ -473,8 +489,8 @@ class AttendanceService:
         )
 
         # 按班级聚合
-        class_stats: Dict[int, Dict[str, int]] = defaultdict(
-            lambda: {s: 0 for s in cls.VALID_STATUSES}
+        class_stats: dict[int, dict[str, int]] = defaultdict(
+            lambda: dict.fromkeys(cls.VALID_STATUSES, 0)
         )
         for class_id, status, cnt in result.all():
             class_stats[class_id][status] = cnt
@@ -492,14 +508,21 @@ class AttendanceService:
         summary = []
         for class_id, stats in class_stats.items():
             total = sum(stats.values())
-            summary.append({
-                "class_id": class_id,
-                "class_name": class_names.get(class_id, f"班级{class_id}"),
-                "total_records": total,
-                **stats,
-            })
+            summary.append(
+                {
+                    "class_id": class_id,
+                    "class_name": class_names.get(class_id, f"班级{class_id}"),
+                    "total_records": total,
+                    **stats,
+                }
+            )
 
-        return {"grade_id": grade_id, "start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "classes": summary}
+        return {
+            "grade_id": grade_id,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "classes": summary,
+        }
 
     @classmethod
     async def get_anomaly_alerts(
@@ -507,7 +530,7 @@ class AttendanceService:
         db: AsyncSession,
         school_id: int,
         days: int = 7,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         异常预警 V2: 三类规则
         ① 连续缺勤 ≥ 3 天 (严格相邻)
@@ -530,11 +553,11 @@ class AttendanceService:
         records = result.scalars().all()
 
         # 按学生分组
-        student_records: Dict[int, List[AttendanceRecord]] = defaultdict(list)
+        student_records: dict[int, list[AttendanceRecord]] = defaultdict(list)
         for r in records:
             student_records[r.student_id].append(r)
 
-        alerts: List[Dict] = []
+        alerts: list[dict] = []
         week_start = today - timedelta(days=today.weekday())
         month_start = today.replace(day=1)
 
@@ -558,50 +581,61 @@ class AttendanceService:
                     last_date = None
 
             if max_consecutive >= 3:
-                warnings.append({
-                    "type": "consecutive_absent",
-                    "level": "danger",
-                    "text": f"连续缺勤 {max_consecutive} 天",
-                    "days_value": max_consecutive,
-                })
+                warnings.append(
+                    {
+                        "type": "consecutive_absent",
+                        "level": "danger",
+                        "text": f"连续缺勤 {max_consecutive} 天",
+                        "days_value": max_consecutive,
+                    }
+                )
 
             # ② 本周迟到 ≥ 3
             week_late = sum(1 for r in recs if r.status == "late" and r.record_date >= week_start)
             if week_late >= 3:
-                warnings.append({
-                    "type": "weekly_late",
-                    "level": "warning",
-                    "text": f"本周已迟到 {week_late} 次",
-                    "days_value": week_late,
-                })
+                warnings.append(
+                    {
+                        "type": "weekly_late",
+                        "level": "warning",
+                        "text": f"本周已迟到 {week_late} 次",
+                        "days_value": week_late,
+                    }
+                )
 
             # ③ 本月缺勤 ≥ 5
-            month_absent = sum(1 for r in recs if r.status == "absent" and r.record_date >= month_start)
+            month_absent = sum(
+                1 for r in recs if r.status == "absent" and r.record_date >= month_start
+            )
             if month_absent >= 5:
-                warnings.append({
-                    "type": "monthly_absent",
-                    "level": "warning",
-                    "text": f"本月已缺勤 {month_absent} 次",
-                    "days_value": month_absent,
-                })
+                warnings.append(
+                    {
+                        "type": "monthly_absent",
+                        "level": "warning",
+                        "text": f"本月已缺勤 {month_absent} 次",
+                        "days_value": month_absent,
+                    }
+                )
 
             if warnings:
                 max_level = "danger" if any(w["level"] == "danger" for w in warnings) else "warning"
-                alerts.append({
-                    "student_id": student_id,
-                    "warnings": warnings,
-                    "max_level": max_level,
-                })
+                alerts.append(
+                    {
+                        "student_id": student_id,
+                        "warnings": warnings,
+                        "max_level": max_level,
+                    }
+                )
 
         # 排序: 危险优先
-        alerts.sort(key=lambda a: (0 if a["max_level"] == "danger" else 1))
+        alerts.sort(key=lambda a: 0 if a["max_level"] == "danger" else 1)
 
         # 补充学生姓名/班级
         if alerts:
             sids = [a["student_id"] for a in alerts]
             stu_result = await db.execute(
-                select(Student.id, Student.name, Student.student_no, Student.class_id)
-                .where(Student.id.in_(sids))
+                select(Student.id, Student.name, Student.student_no, Student.class_id).where(
+                    Student.id.in_(sids)
+                )
             )
             stu_map = {r[0]: r for r in stu_result.all()}
 
@@ -683,9 +717,7 @@ class AttendanceService:
         approver_role: str,
     ) -> LeaveRequest:
         """班主任/年级组长审批请假"""
-        result = await db.execute(
-            select(LeaveRequest).where(LeaveRequest.id == leave_id)
-        )
+        result = await db.execute(select(LeaveRequest).where(LeaveRequest.id == leave_id))
         leave = result.scalar_one_or_none()
         if not leave:
             raise LeaveNotFoundError(leave_id)
@@ -761,13 +793,13 @@ class AttendanceService:
         cls,
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
-        class_id: Optional[int] = None,
-        student_id: Optional[int] = None,
-        status: Optional[str] = None,
+        grade_id: int | None = None,
+        class_id: int | None = None,
+        student_id: int | None = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> Dict:
+    ) -> dict:
         """
         列出请假申请，支持多维度过滤和分页。
 
@@ -809,22 +841,28 @@ class AttendanceService:
 
         items = []
         for leave, stu_name, stu_no in rows:
-            items.append({
-                "id": leave.id,
-                "student_id": leave.student_id,
-                "student_name": stu_name,
-                "student_no": stu_no,
-                "class_id": leave.class_id,
-                "grade_id": leave.grade_id,
-                "start_date": leave.start_date.isoformat(),
-                "end_date": leave.end_date.isoformat(),
-                "reason": leave.reason,
-                "status": leave.status,
-                "submitted_by": leave.submitted_by,
-                "created_at": leave.created_at.isoformat() if leave.created_at else None,
-                "approved_at_class": leave.approved_at_class.isoformat() if leave.approved_at_class else None,
-                "approved_at_grade": leave.approved_at_grade.isoformat() if leave.approved_at_grade else None,
-            })
+            items.append(
+                {
+                    "id": leave.id,
+                    "student_id": leave.student_id,
+                    "student_name": stu_name,
+                    "student_no": stu_no,
+                    "class_id": leave.class_id,
+                    "grade_id": leave.grade_id,
+                    "start_date": leave.start_date.isoformat(),
+                    "end_date": leave.end_date.isoformat(),
+                    "reason": leave.reason,
+                    "status": leave.status,
+                    "submitted_by": leave.submitted_by,
+                    "created_at": leave.created_at.isoformat() if leave.created_at else None,
+                    "approved_at_class": leave.approved_at_class.isoformat()
+                    if leave.approved_at_class
+                    else None,
+                    "approved_at_grade": leave.approved_at_grade.isoformat()
+                    if leave.approved_at_grade
+                    else None,
+                }
+            )
 
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
@@ -832,11 +870,11 @@ class AttendanceService:
     async def batch_process_leaves(
         cls,
         db: AsyncSession,
-        leave_ids: List[int],
+        leave_ids: list[int],
         action: str,
         approver_id: int,
         approver_role: str,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         批量处理请假申请（审批或拒绝）。
 
@@ -850,9 +888,7 @@ class AttendanceService:
         now = get_local_now()
 
         for leave_id in leave_ids:
-            result = await db.execute(
-                select(LeaveRequest).where(LeaveRequest.id == leave_id)
-            )
+            result = await db.execute(select(LeaveRequest).where(LeaveRequest.id == leave_id))
             leave = result.scalar_one_or_none()
 
             if not leave:
@@ -860,33 +896,39 @@ class AttendanceService:
                 continue
 
             if leave.status != "pending":
-                results.append({
-                    "leave_id": leave_id,
-                    "success": False,
-                    "error": f"当前状态 {leave.status} 不允许批量处理",
-                })
+                results.append(
+                    {
+                        "leave_id": leave_id,
+                        "success": False,
+                        "error": f"当前状态 {leave.status} 不允许批量处理",
+                    }
+                )
                 continue
 
             if action == "reject":
                 leave.status = "rejected"
-                results.append({
-                    "leave_id": leave_id,
-                    "success": True,
-                    "status": "rejected",
-                    "student_id": leave.student_id,
-                })
+                results.append(
+                    {
+                        "leave_id": leave_id,
+                        "success": True,
+                        "status": "rejected",
+                        "student_id": leave.student_id,
+                    }
+                )
 
             elif action == "approve":
                 if approver_role == "class_teacher":
                     leave.status = "class_approved"
                     leave.approved_by_class = approver_id
                     leave.approved_at_class = now
-                    results.append({
-                        "leave_id": leave_id,
-                        "success": True,
-                        "status": "class_approved",
-                        "student_id": leave.student_id,
-                    })
+                    results.append(
+                        {
+                            "leave_id": leave_id,
+                            "success": True,
+                            "status": "class_approved",
+                            "student_id": leave.student_id,
+                        }
+                    )
 
                 elif approver_role == "grade_leader":
                     leave.status = "grade_approved"
@@ -894,7 +936,9 @@ class AttendanceService:
                     leave.approved_at_grade = now
 
                     # ── 🔥 逆熵冲正: absent → leave ──
-                    correction_note = f"请假冲正: {leave.reason[:30]}" if leave.reason else "请假冲正"
+                    correction_note = (
+                        f"请假冲正: {leave.reason[:30]}" if leave.reason else "请假冲正"
+                    )
                     correct_result = await db.execute(
                         update(AttendanceRecord)
                         .where(
@@ -940,17 +984,20 @@ class AttendanceService:
                     if att_records:
                         db.add_all(att_records)
 
-                    results.append({
-                        "leave_id": leave_id,
-                        "success": True,
-                        "status": "grade_approved",
-                        "student_id": leave.student_id,
-                        "attendance_created": len(att_records),
-                        "corrected_count": corrected_count,
-                    })
+                    results.append(
+                        {
+                            "leave_id": leave_id,
+                            "success": True,
+                            "status": "grade_approved",
+                            "student_id": leave.student_id,
+                            "attendance_created": len(att_records),
+                            "corrected_count": corrected_count,
+                        }
+                    )
 
         await db.commit()
         return results
+
     #  所有领域校验集中于此，Router 层不再触碰业务规则。
     #  抛出领域异常 → 全局异常处理器映射到 HTTP 响应。
     # ═══════════════════════════════════════════════════════════
@@ -971,7 +1018,7 @@ class AttendanceService:
             raise DateRangeError()
 
     @staticmethod
-    def _resolve_period(today: date, period: str) -> Tuple[date, date]:
+    def _resolve_period(today: date, period: str) -> tuple[date, date]:
         """解析时间周期 → (start_date, end_date)"""
         if period == "today":
             return today, today
@@ -1005,13 +1052,13 @@ class AttendanceService:
         cls,
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
-        class_id: Optional[int] = None,
-        student_id: Optional[int] = None,
+        grade_id: int | None = None,
+        class_id: int | None = None,
+        student_id: int | None = None,
         period: str = "week",
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-    ) -> Dict:
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> dict:
         """
         仪表盘数据聚合:
         - cards: 概览卡片 (出勤/迟到/缺勤/请假人数)
@@ -1044,9 +1091,7 @@ class AttendanceService:
         if student_id:
             conditions.append(AttendanceRecord.student_id == student_id)
 
-        result = await db.execute(
-            select(AttendanceRecord).where(and_(*conditions))
-        )
+        result = await db.execute(select(AttendanceRecord).where(and_(*conditions)))
         period_records = result.scalars().all()
 
         # 概览卡片
@@ -1058,7 +1103,7 @@ class AttendanceService:
         }
 
         # 按日分组
-        day_records: Dict[date, List] = defaultdict(list)
+        day_records: dict[date, list] = defaultdict(list)
         for r in period_records:
             day_records[r.record_date].append(r)
 
@@ -1078,7 +1123,9 @@ class AttendanceService:
             trend_series["present"].append(sum(1 for r in day_recs if r.status == "present"))
             trend_series["late"].append(sum(1 for r in day_recs if r.status == "late"))
             trend_series["absent"].append(sum(1 for r in day_recs if r.status == "absent"))
-            trend_series["leave_early"].append(sum(1 for r in day_recs if r.status in ("leave", "early")))
+            trend_series["leave_early"].append(
+                sum(1 for r in day_recs if r.status in ("leave", "early"))
+            )
             current += timedelta(days=1)
 
         # 饼图数据
@@ -1115,9 +1162,9 @@ class AttendanceService:
         cls,
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
-        record_date: Optional[date] = None,
-    ) -> List[Dict]:
+        grade_id: int | None = None,
+        record_date: date | None = None,
+    ) -> list[dict]:
         """
         班级横向对比排行: 按今日/指定日期缺勤率排序
         """
@@ -1141,7 +1188,9 @@ class AttendanceService:
 
         # 批量查询当日考勤
         att_result = await db.execute(
-            select(AttendanceRecord.class_id, AttendanceRecord.status, func.count(AttendanceRecord.id))
+            select(
+                AttendanceRecord.class_id, AttendanceRecord.status, func.count(AttendanceRecord.id)
+            )
             .where(
                 AttendanceRecord.school_id == school_id,
                 AttendanceRecord.class_id.in_(class_ids),
@@ -1151,7 +1200,9 @@ class AttendanceService:
         )
 
         # 按班级聚合
-        class_day_stats: Dict[int, Dict[str, int]] = defaultdict(lambda: {"present": 0, "absent": 0, "late": 0, "leave_early": 0})
+        class_day_stats: dict[int, dict[str, int]] = defaultdict(
+            lambda: {"present": 0, "absent": 0, "late": 0, "leave_early": 0}
+        )
         for cid, status, cnt in att_result.all():
             if status == "present":
                 class_day_stats[cid]["present"] = cnt
@@ -1177,7 +1228,9 @@ class AttendanceService:
         # 组装排名
         ranking = []
         for cls_id, cls_name in classes:
-            stats = class_day_stats.get(cls_id, {"present": 0, "absent": 0, "late": 0, "leave_early": 0})
+            stats = class_day_stats.get(
+                cls_id, {"present": 0, "absent": 0, "late": 0, "leave_early": 0}
+            )
             recorded = sum(stats.values())
             total_students = student_counts.get(cls_id, 0)
 
@@ -1185,19 +1238,21 @@ class AttendanceService:
             present_rate = round(stats["present"] / recorded * 100, 1) if recorded > 0 else 0
             late_rate = round(stats["late"] / recorded * 100, 1) if recorded > 0 else 0
 
-            ranking.append({
-                "class_id": cls_id,
-                "class_name": cls_name,
-                "total_students": total_students,
-                "recorded": recorded,
-                "present": stats["present"],
-                "absent": stats["absent"],
-                "late": stats["late"],
-                "leave_early": stats["leave_early"],
-                "absence_rate": absence_rate,
-                "present_rate": present_rate,
-                "late_rate": late_rate,
-            })
+            ranking.append(
+                {
+                    "class_id": cls_id,
+                    "class_name": cls_name,
+                    "total_students": total_students,
+                    "recorded": recorded,
+                    "present": stats["present"],
+                    "absent": stats["absent"],
+                    "late": stats["late"],
+                    "leave_early": stats["leave_early"],
+                    "absence_rate": absence_rate,
+                    "present_rate": present_rate,
+                    "late_rate": late_rate,
+                }
+            )
 
         # 按缺勤率降序
         ranking.sort(key=lambda x: x["absence_rate"], reverse=True)
@@ -1214,7 +1269,7 @@ class AttendanceService:
         db: AsyncSession,
         school_id: int,
         student_id: int,
-    ) -> Dict:
+    ) -> dict:
         """
         学生考勤日历热力图:
         - 90 天历史记录
@@ -1237,7 +1292,7 @@ class AttendanceService:
         records = result.scalars().all()
 
         # date → status 映射
-        status_map: Dict[date, str] = {}
+        status_map: dict[date, str] = {}
         for r in records:
             if r.record_date not in status_map:
                 status_map[r.record_date] = r.status
@@ -1247,17 +1302,19 @@ class AttendanceService:
         calendar_days = []
         for i in range(35):
             d = calendar_start + timedelta(days=i)
-            calendar_days.append({
-                "date": d.isoformat(),
-                "weekday": d.weekday(),
-                "status": status_map.get(d),
-                "color": cls.STATUS_COLORS.get(status_map.get(d), "#e9ecef"),
-            })
+            calendar_days.append(
+                {
+                    "date": d.isoformat(),
+                    "weekday": d.weekday(),
+                    "status": status_map.get(d),
+                    "color": cls.STATUS_COLORS.get(status_map.get(d), "#e9ecef"),
+                }
+            )
 
         # 按周分组
         weeks = []
         for w_start in range(0, 35, 7):
-            week_chunk = calendar_days[w_start:w_start + 7]
+            week_chunk = calendar_days[w_start : w_start + 7]
             weeks.append(week_chunk)
 
         # 历史记录摘要
@@ -1303,7 +1360,7 @@ class AttendanceService:
         school_id: int,
         start_date: date,
         end_date: date,
-    ) -> Dict:
+    ) -> dict:
         """
         德育处全局考勤视图: 所有年级/班级汇总
         """
@@ -1323,7 +1380,7 @@ class AttendanceService:
         )
 
         # 聚合结构: grade → class → status → count
-        grade_data: Dict[int, Dict[int, Dict[str, int]]] = defaultdict(
+        grade_data: dict[int, dict[int, dict[str, int]]] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(int))
         )
         for grade_id, class_id, status, cnt in result.all():
@@ -1366,31 +1423,37 @@ class AttendanceService:
                 grade_total["late"] += late
                 grade_total["leave_early"] += leave_early
 
-                cls_info = class_map.get(class_id, {"name": f"班级{class_id}", "grade_id": grade_id})
+                cls_info = class_map.get(
+                    class_id, {"name": f"班级{class_id}", "grade_id": grade_id}
+                )
                 absence_rate = round(absent / total_records * 100, 1) if total_records > 0 else 0
 
-                class_summaries.append({
-                    "class_id": class_id,
-                    "class_name": cls_info["name"],
-                    "total_records": total_records,
-                    "present": present,
-                    "absent": absent,
-                    "late": late,
-                    "leave_early": leave_early,
-                    "absence_rate": absence_rate,
-                })
+                class_summaries.append(
+                    {
+                        "class_id": class_id,
+                        "class_name": cls_info["name"],
+                        "total_records": total_records,
+                        "present": present,
+                        "absent": absent,
+                        "late": late,
+                        "leave_early": leave_early,
+                        "absence_rate": absence_rate,
+                    }
+                )
 
             class_summaries.sort(key=lambda x: x["absence_rate"], reverse=True)
 
             for k in grade_total:
                 total[k] += grade_total[k]
 
-            grades_summary.append({
-                "grade_id": grade_id,
-                "grade_name": grade_map.get(grade_id, f"年级{grade_id}"),
-                "classes": class_summaries,
-                "grade_total": grade_total,
-            })
+            grades_summary.append(
+                {
+                    "grade_id": grade_id,
+                    "grade_name": grade_map.get(grade_id, f"年级{grade_id}"),
+                    "classes": class_summaries,
+                    "grade_total": grade_total,
+                }
+            )
 
         grand_total = sum(total.values())
 
@@ -1401,7 +1464,9 @@ class AttendanceService:
             "summary": {
                 **total,
                 "total_records": grand_total,
-                "attendance_rate": round(total["present"] / grand_total * 100, 1) if grand_total > 0 else 0,
+                "attendance_rate": round(total["present"] / grand_total * 100, 1)
+                if grand_total > 0
+                else 0,
             },
         }
 
@@ -1417,7 +1482,7 @@ class AttendanceService:
         grade_id: int,
         start_date: date,
         end_date: date,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         导出考勤数据: 扁平化记录，含学生姓名、班级、状态。
         供前端生成 Excel/CSV。
@@ -1443,15 +1508,17 @@ class AttendanceService:
 
         rows = []
         for record_date, stu_name, stu_no, class_name, status, note in result.all():
-            rows.append({
-                "date": record_date.isoformat(),
-                "student_name": stu_name,
-                "student_no": stu_no,
-                "class_name": class_name,
-                "status": status,
-                "status_label": cls.STATUS_LABELS.get(status, status),
-                "note": note or "",
-            })
+            rows.append(
+                {
+                    "date": record_date.isoformat(),
+                    "student_name": stu_name,
+                    "student_no": stu_no,
+                    "class_name": class_name,
+                    "status": status,
+                    "status_label": cls.STATUS_LABELS.get(status, status),
+                    "note": note or "",
+                }
+            )
 
         return rows
 
@@ -1467,7 +1534,7 @@ class AttendanceService:
         class_id: int,
         start_date: date,
         end_date: date,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         班级考勤历史聚合 — 按天多态状态矩阵 (对齐前端 ClassHistoryMetric)
 
@@ -1481,21 +1548,11 @@ class AttendanceService:
             select(
                 AttendanceRecord.record_date.label("date"),
                 func.count(AttendanceRecord.id).label("total"),
-                func.sum(case(
-                    (AttendanceRecord.status == "present", 1), else_=0
-                )).label("present"),
-                func.sum(case(
-                    (AttendanceRecord.status == "late", 1), else_=0
-                )).label("late"),
-                func.sum(case(
-                    (AttendanceRecord.status == "early", 1), else_=0
-                )).label("early"),
-                func.sum(case(
-                    (AttendanceRecord.status == "absent", 1), else_=0
-                )).label("absent"),
-                func.sum(case(
-                    (AttendanceRecord.status == "leave", 1), else_=0
-                )).label("leave"),
+                func.sum(case((AttendanceRecord.status == "present", 1), else_=0)).label("present"),
+                func.sum(case((AttendanceRecord.status == "late", 1), else_=0)).label("late"),
+                func.sum(case((AttendanceRecord.status == "early", 1), else_=0)).label("early"),
+                func.sum(case((AttendanceRecord.status == "absent", 1), else_=0)).label("absent"),
+                func.sum(case((AttendanceRecord.status == "leave", 1), else_=0)).label("leave"),
             )
             .where(
                 and_(
@@ -1522,15 +1579,17 @@ class AttendanceService:
             leave = int(row.leave or 0)
             # 出勤率 = present / total * 100 (请假不扣分)
             attendance_rate = round(present / total * 100, 1) if total > 0 else 0.0
-            result.append({
-                "date": str(row.date) if row.date else None,
-                "total": total,
-                "present": present,
-                "late": late,
-                "early": early,
-                "absent": absent,
-                "leave": leave,
-                "attendance_rate": attendance_rate,
-            })
+            result.append(
+                {
+                    "date": str(row.date) if row.date else None,
+                    "total": total,
+                    "present": present,
+                    "late": late,
+                    "early": early,
+                    "absent": absent,
+                    "leave": leave,
+                    "attendance_rate": attendance_rate,
+                }
+            )
 
         return result

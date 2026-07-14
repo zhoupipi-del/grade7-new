@@ -8,19 +8,22 @@ modules/student_registry/routers.py — 学籍管理 API 路由
 """
 
 import logging
-from typing import Optional, List
-
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import User, UserRole
-from core.routers import get_db, get_current_user, require_role, verify_school_access
+from core.routers import get_current_user, get_db, require_role, verify_school_access
+from fastapi import APIRouter, Depends, HTTPException, Query
 from modules.student_registry.schemas import (
-    StudentCreate, StudentUpdate, StudentOut, StudentBrief,
-    StatusChangeCreate, StatusChangeOut, BatchImportResult,
-    RegistryStatsOut, PaginatedStudents,
+    BatchImportResult,
+    PaginatedStudents,
+    RegistryStatsOut,
+    StatusChangeCreate,
+    StatusChangeOut,
+    StudentCreate,
+    StudentOut,
+    StudentUpdate,
 )
 from modules.student_registry.services import StudentRegistryService
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["student-registry"])
@@ -36,6 +39,7 @@ REGISTRY_ROLES = (
 # ═══════════════════════════════════════════════════════════════
 # CRUD
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/students", response_model=StudentOut, status_code=201)
 async def create_student(
@@ -58,17 +62,23 @@ async def create_student(
 async def list_students(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    class_id: Optional[int] = None,
-    grade_id: Optional[int] = None,
-    status: Optional[str] = None,
-    keyword: Optional[str] = None,
+    class_id: int | None = None,
+    grade_id: int | None = None,
+    status: str | None = None,
+    keyword: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """学籍列表（分页/筛选/搜索）"""
     items, total = await StudentRegistryService.list_students(
-        db, current_user.school_id, page, page_size,
-        class_id, grade_id, status, keyword,
+        db,
+        current_user.school_id,
+        page,
+        page_size,
+        class_id,
+        grade_id,
+        status,
+        keyword,
     )
     return {"total": total, "page": page, "page_size": page_size, "items": items}
 
@@ -110,6 +120,7 @@ async def update_student(
 # 状态变更（状态机）
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post("/students/{student_id}/transfer", response_model=StatusChangeOut)
 async def transfer_student(
     student_id: int,
@@ -120,14 +131,17 @@ async def transfer_student(
     """转学办理"""
     try:
         change = await StudentRegistryService.change_status(
-            db, current_user.school_id, student_id,
+            db,
+            current_user.school_id,
+            student_id,
             StatusChangeCreate(
                 change_type="transfer",
                 reason=body.reason,
                 target_school=body.target_school,
                 remark=body.remark,
             ),
-            current_user.id, current_user.display_name,
+            current_user.id,
+            current_user.display_name,
         )
         return change
     except ValueError as e:
@@ -144,14 +158,17 @@ async def suspend_student(
     """休学办理"""
     try:
         change = await StudentRegistryService.change_status(
-            db, current_user.school_id, student_id,
+            db,
+            current_user.school_id,
+            student_id,
             StatusChangeCreate(
                 change_type="suspend",
                 reason=body.reason,
                 expected_resume_date=body.expected_resume_date,
                 remark=body.remark,
             ),
-            current_user.id, current_user.display_name,
+            current_user.id,
+            current_user.display_name,
         )
         return change
     except ValueError as e:
@@ -168,13 +185,16 @@ async def resume_student(
     """复学办理"""
     try:
         change = await StudentRegistryService.change_status(
-            db, current_user.school_id, student_id,
+            db,
+            current_user.school_id,
+            student_id,
             StatusChangeCreate(
                 change_type="resume",
                 reason=body.reason or "休学期满复学",
                 remark=body.remark,
             ),
-            current_user.id, current_user.display_name,
+            current_user.id,
+            current_user.display_name,
         )
         return change
     except ValueError as e:
@@ -191,21 +211,24 @@ async def graduate_student(
     """毕业处理"""
     try:
         change = await StudentRegistryService.change_status(
-            db, current_user.school_id, student_id,
+            db,
+            current_user.school_id,
+            student_id,
             StatusChangeCreate(
                 change_type="graduate",
                 reason=body.reason or "顺利毕业",
                 target_school=body.target_school,
                 remark=body.remark,
             ),
-            current_user.id, current_user.display_name,
+            current_user.id,
+            current_user.display_name,
         )
         return change
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/students/{student_id}/status-history", response_model=List[StatusChangeOut])
+@router.get("/students/{student_id}/status-history", response_model=list[StatusChangeOut])
 async def get_status_history(
     student_id: int,
     db: AsyncSession = Depends(get_db),
@@ -220,9 +243,10 @@ async def get_status_history(
 # 批量导入
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post("/students/batch-import", response_model=BatchImportResult)
 async def batch_import(
-    students_data: List[dict],
+    students_data: list[dict],
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
@@ -240,6 +264,7 @@ async def batch_import(
 # ═══════════════════════════════════════════════════════════════
 # 统计
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/stats", response_model=RegistryStatsOut)
 async def get_stats(

@@ -25,21 +25,19 @@
   GET    /tags/suggestions               — 标签建议(高频标签)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from core.models import Class, Grade, Student, User, get_local_now
+from core.routers import get_current_user, get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from modules.psych_profiles import services as svc
+from modules.psych_profiles.models import PsyProfile
+from modules.psych_profiles.schemas import (
+    PsyProfileCreate,
+    PsyProfileUpdate,
+    PsyScreeningCreate,
+    TagsUpdate,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from core.models import User, Student, Class, Grade, get_local_now
-from core.routers import get_db, get_current_user
-from modules.psych_profiles.models import PsyProfile, PsyScreeningRecord
-from modules.psych_profiles import services as svc
-from modules.psych_profiles.schemas import (
-    PsyProfileCreate, PsyProfileUpdate, TagsUpdate, RiskLevelUpdate,
-    PsyProfileResponse, PsyProfileDetailResponse,
-    PsyScreeningCreate, PsyScreeningResponse,
-    NexusListResponse, NexusStudentDetail,
-    DashboardResponse,
-)
 
 router = APIRouter(tags=["心理档案与双轨预警"])
 
@@ -134,9 +132,12 @@ async def api_list_profiles(
 ):
     """心理档案列表 — 支持风险等级/标签筛选"""
     profiles, total = await svc.list_profiles(
-        db, school_id=current_user.school_id,
-        risk_level=risk_level, tag=tag,
-        page=page, page_size=page_size,
+        db,
+        school_id=current_user.school_id,
+        risk_level=risk_level,
+        tag=tag,
+        page=page,
+        page_size=page_size,
     )
 
     # 批量获取学生姓名
@@ -182,8 +183,10 @@ async def api_get_profile(
     screenings = await svc.get_student_screenings(db, current_user.school_id, student_id, limit=5)
     item["recent_screenings"] = [
         {
-            "id": s.id, "scale_name": s.scale_name,
-            "risk_level": s.risk_level, "total_score": s.total_score,
+            "id": s.id,
+            "scale_name": s.scale_name,
+            "risk_level": s.risk_level,
+            "total_score": s.total_score,
             "test_date": s.test_date.isoformat() if s.test_date else None,
         }
         for s in screenings
@@ -193,6 +196,7 @@ async def api_get_profile(
     item["recent_counselings"] = []
     try:
         from modules.psych_counseling.models import PsyConsultRecord
+
         counsel_stmt = (
             select(PsyConsultRecord)
             .where(PsyConsultRecord.student_id == student_id)
@@ -200,15 +204,17 @@ async def api_get_profile(
             .limit(5)
         )
         for cr in (await db.execute(counsel_stmt)).scalars().all():
-            item["recent_counselings"].append({
-                "id": cr.id,
-                "risk_level": cr.risk_level,
-                "consult_category": cr.consult_category,
-                "is_crisis": cr.is_crisis,
-                "is_referred": cr.is_referred,
-                "created_at": cr.created_at.isoformat() if cr.created_at else None,
-                # 注意: encrypted_clog 不返回 — 隐私切面
-            })
+            item["recent_counselings"].append(
+                {
+                    "id": cr.id,
+                    "risk_level": cr.risk_level,
+                    "consult_category": cr.consult_category,
+                    "is_crisis": cr.is_crisis,
+                    "is_referred": cr.is_referred,
+                    "created_at": cr.created_at.isoformat() if cr.created_at else None,
+                    # 注意: encrypted_clog 不返回 — 隐私切面
+                }
+            )
     except ImportError:
         pass
 
@@ -216,6 +222,7 @@ async def api_get_profile(
     item["recent_interventions"] = []
     try:
         from modules.psych_screening.models import InterventionRecord
+
         interv_stmt = (
             select(InterventionRecord)
             .where(InterventionRecord.student_id == student_id)
@@ -223,13 +230,17 @@ async def api_get_profile(
             .limit(5)
         )
         for ir in (await db.execute(interv_stmt)).scalars().all():
-            item["recent_interventions"].append({
-                "id": ir.id,
-                "intervention_type": ir.intervention_type,
-                "intervention_date": ir.intervention_date.isoformat() if ir.intervention_date else None,
-                "status": ir.status,
-                "effect_rating": ir.effect_rating,
-            })
+            item["recent_interventions"].append(
+                {
+                    "id": ir.id,
+                    "intervention_type": ir.intervention_type,
+                    "intervention_date": ir.intervention_date.isoformat()
+                    if ir.intervention_date
+                    else None,
+                    "status": ir.status,
+                    "effect_rating": ir.effect_rating,
+                }
+            )
     except ImportError:
         pass
 
@@ -252,11 +263,16 @@ async def api_create_profile(
     # 应用传入的初始值
     update_data = payload.model_dump(exclude_none=True)
     if update_data:
-        updated = await svc.update_profile(db, current_user.school_id, student_id, {
-            **update_data,
-            "risk_level_updated_at": get_local_now(),
-            "risk_level_updated_by": current_user.id,
-        })
+        updated = await svc.update_profile(
+            db,
+            current_user.school_id,
+            student_id,
+            {
+                **update_data,
+                "risk_level_updated_at": get_local_now(),
+                "risk_level_updated_by": current_user.id,
+            },
+        )
         if updated:
             profile = updated
 
@@ -341,7 +357,8 @@ async def api_create_screening(
 ):
     """录入筛查快照 — 自动更新心理档案风险等级"""
     record = await svc.create_screening(
-        db, school_id=current_user.school_id,
+        db,
+        school_id=current_user.school_id,
         operator_id=current_user.id,
         data=payload.model_dump(),
     )
@@ -367,16 +384,23 @@ async def api_list_screenings(
 ):
     """筛查快照列表"""
     records, total = await svc.list_screenings(
-        db, school_id=current_user.school_id,
-        student_id=student_id, scale_name=scale_name,
-        page=page, page_size=page_size,
+        db,
+        school_id=current_user.school_id,
+        student_id=student_id,
+        scale_name=scale_name,
+        page=page,
+        page_size=page_size,
     )
     return {
-        "total": total, "page": page, "page_size": page_size,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
         "items": [
             {
-                "id": r.id, "student_id": r.student_id,
-                "scale_name": r.scale_name, "risk_level": r.risk_level,
+                "id": r.id,
+                "student_id": r.student_id,
+                "scale_name": r.scale_name,
+                "risk_level": r.risk_level,
                 "total_score": r.total_score,
                 "risk_factors": r.risk_factors or [],
                 "test_date": r.test_date.isoformat() if r.test_date else None,
@@ -400,7 +424,8 @@ async def api_student_screenings(
         "total": len(records),
         "items": [
             {
-                "id": r.id, "scale_name": r.scale_name,
+                "id": r.id,
+                "scale_name": r.scale_name,
                 "scale_version": r.scale_version,
                 "raw_scores": r.raw_scores,
                 "total_score": r.total_score,
@@ -438,10 +463,12 @@ async def api_comprehensive_risks(
       - psy_screening_records (筛查快照)
     """
     data = await svc.get_comprehensive_risks(
-        db, school_id=current_user.school_id,
+        db,
+        school_id=current_user.school_id,
         co_trigger_only=co_trigger_only,
         min_priority=min_priority,
-        page=page, page_size=page_size,
+        page=page,
+        page_size=page_size,
     )
     return data
 

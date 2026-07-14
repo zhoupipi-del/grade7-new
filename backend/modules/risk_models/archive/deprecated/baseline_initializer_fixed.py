@@ -9,35 +9,34 @@ risk_baseline_initializer_fixed.py — 风险基线冷启动预热脚本 (修正
   - created_at → updated_at (student_scores 时间戳字段)
 """
 
-import pymysql
-import logging
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Tuple
-import sys
 import getopt
+import logging
+import sys
+from datetime import date, timedelta
+
+import pymysql
 
 # 数据库配置
 DB_CONFIG = {
     "host": "127.0.0.1",
     "port": 3307,
     "user": "grade7",
-    "password": "waOPKoyFf4ByQD1h",
+    "password": os.environ.get("DATABASE_URL", "").split(":")[-1].split("@")[0],
     "database": "wings3",
-    "charset": "utf8mb4"
+    "charset": "utf8mb4",
 }
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def get_students(school_id: int) -> List[Dict]:
+def get_students(school_id: int) -> list[dict]:
     """获取学校所有学生"""
     conn = pymysql.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT id, class_id, grade_id FROM students WHERE school_id=%s",
-                (school_id,)
+                "SELECT id, class_id, grade_id FROM students WHERE school_id=%s", (school_id,)
             )
             columns = [desc[0] for desc in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -45,7 +44,7 @@ def get_students(school_id: int) -> List[Dict]:
         conn.close()
 
 
-def calculate_behavior_baseline(student_id: int, window_days: int) -> Tuple[float, float, int]:
+def calculate_behavior_baseline(student_id: int, window_days: int) -> tuple[float, float, int]:
     """
     计算行为维度基线 (从 discipline_records 表)
 
@@ -63,7 +62,7 @@ def calculate_behavior_baseline(student_id: int, window_days: int) -> Tuple[floa
                 WHERE student_id = %s
                   AND created_at >= %s
                 """,
-                (student_id, start_date)
+                (student_id, start_date),
             )
             result = cursor.fetchone()
             count = result[0] if result else 0
@@ -78,7 +77,7 @@ def calculate_behavior_baseline(student_id: int, window_days: int) -> Tuple[floa
         conn.close()
 
 
-def calculate_attendance_baseline(student_id: int, window_days: int) -> Tuple[float, float, int]:
+def calculate_attendance_baseline(student_id: int, window_days: int) -> tuple[float, float, int]:
     """计算考勤维度基线 (从 attendance_records 表)"""
     conn = pymysql.connect(**DB_CONFIG)
     try:
@@ -94,7 +93,7 @@ def calculate_attendance_baseline(student_id: int, window_days: int) -> Tuple[fl
                 WHERE student_id = %s
                   AND record_date >= %s
                 """,
-                (student_id, start_date)
+                (student_id, start_date),
             )
             result = cursor.fetchone()
             if result and result[2] > 0:
@@ -107,7 +106,7 @@ def calculate_attendance_baseline(student_id: int, window_days: int) -> Tuple[fl
         conn.close()
 
 
-def calculate_score_baseline(student_id: int, window_days: int) -> Tuple[float, float, int]:
+def calculate_score_baseline(student_id: int, window_days: int) -> tuple[float, float, int]:
     """计算评价维度基线 (从 student_scores 表)"""
     conn = pymysql.connect(**DB_CONFIG)
     try:
@@ -122,7 +121,7 @@ def calculate_score_baseline(student_id: int, window_days: int) -> Tuple[float, 
                 WHERE student_id = %s
                   AND updated_at >= %s
                 """,
-                (student_id, start_date)
+                (student_id, start_date),
             )
             result = cursor.fetchone()
             if result and result[0] is not None:
@@ -140,7 +139,7 @@ def upsert_baseline(
     window_days: int,
     mean: float,
     std: float,
-    sample_size: int
+    sample_size: int,
 ):
     """插入或更新基线记录"""
     conn = pymysql.connect(**DB_CONFIG)
@@ -153,7 +152,7 @@ def upsert_baseline(
                 WHERE school_id=%s AND student_id=%s
                   AND baseline_type=%s AND window_days=%s
                 """,
-                (school_id, student_id, baseline_type, window_days)
+                (school_id, student_id, baseline_type, window_days),
             )
             existing = cursor.fetchone()
 
@@ -165,7 +164,7 @@ def upsert_baseline(
                     SET mean_value=%s, std_value=%s, sample_size=%s, last_updated=NOW()
                     WHERE id=%s
                     """,
-                    (mean, std, sample_size, existing[0])
+                    (mean, std, sample_size, existing[0]),
                 )
             else:
                 # 插入
@@ -176,8 +175,16 @@ def upsert_baseline(
                      mean_value, std_value, sample_size, last_updated)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     """,
-                    (school_id, student_id, class_id, baseline_type, window_days,
-                     mean, std, sample_size)
+                    (
+                        school_id,
+                        student_id,
+                        class_id,
+                        baseline_type,
+                        window_days,
+                        mean,
+                        std,
+                        sample_size,
+                    ),
                 )
             conn.commit()
     except Exception as e:
@@ -220,22 +227,19 @@ def initialize_baselines(school_id: int = 1, window_days: int = 30):
             # 行为基线
             mean_b, std_b, size_b = calculate_behavior_baseline(student_id, window_days)
             upsert_baseline(
-                school_id, student_id, class_id,
-                "behavior", window_days, mean_b, std_b, size_b
+                school_id, student_id, class_id, "behavior", window_days, mean_b, std_b, size_b
             )
 
             # 考勤基线
             mean_a, std_a, size_a = calculate_attendance_baseline(student_id, window_days)
             upsert_baseline(
-                school_id, student_id, class_id,
-                "attendance", window_days, mean_a, std_a, size_a
+                school_id, student_id, class_id, "attendance", window_days, mean_a, std_a, size_a
             )
 
             # 评价基线
             mean_s, std_s, size_s = calculate_score_baseline(student_id, window_days)
             upsert_baseline(
-                school_id, student_id, class_id,
-                "score", window_days, mean_s, std_s, size_s
+                school_id, student_id, class_id, "score", window_days, mean_s, std_s, size_s
             )
 
             success_count += 1
@@ -244,7 +248,7 @@ def initialize_baselines(school_id: int = 1, window_days: int = 30):
             logger.error(f"   ❌ 处理学生 {student_id} 失败: {e}")
             error_count += 1
 
-    logger.info(f"✅ 基线初始化完成！")
+    logger.info("✅ 基线初始化完成！")
     logger.info(f"   成功: {success_count}/{len(students)}")
     if error_count > 0:
         logger.warning(f"   失败: {error_count}/{len(students)}")

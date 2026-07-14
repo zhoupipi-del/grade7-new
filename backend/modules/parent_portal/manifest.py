@@ -16,4 +16,5 @@ MODULE_DEPENDENCIES = ["evaluation", "attendance", "behavior", "risk_models", "g
 
 def register(router_prefix="/api/v1/parent_portal"):
     from modules.parent_portal.routers import router
+
     return router, router_prefix

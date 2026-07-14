@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 tests/test_student_registry.py — 学籍管理模块单元测试
 
@@ -10,12 +9,13 @@ BOSS 要求：单元测试先行，每个新接口都要有测试。
     python -m pytest tests/test_student_registry.py -v
 """
 
-import pytest
-import asyncio
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 # ── 测试学号生成 ──
+
 
 class TestStudentNoGeneration:
     """学号生成规则测试"""
@@ -72,6 +72,7 @@ class TestStudentNoGeneration:
 
 # ── 测试状态机 ──
 
+
 class TestStatusMachine:
     """学籍状态机测试"""
 
@@ -110,9 +111,8 @@ class TestStatusMachine:
     @pytest.mark.asyncio
     async def test_change_status_valid(self):
         """合法状态变更"""
-        from modules.student_registry.services import StudentRegistryService
-        from modules.student_registry.models import StudentRegistryExt
         from modules.student_registry.schemas import StatusChangeCreate
+        from modules.student_registry.services import StudentRegistryService
 
         db = MagicMock()
 
@@ -140,9 +140,12 @@ class TestStatusMachine:
         db.flush = AsyncMock()
 
         change = await StudentRegistryService.change_status(
-            db, 1, 1,
+            db,
+            1,
+            1,
             StatusChangeCreate(change_type="suspend", reason="病休"),
-            operated_by=1, operator_name="管理员",
+            operated_by=1,
+            operator_name="管理员",
         )
 
         assert change.from_status == "active"
@@ -152,8 +155,8 @@ class TestStatusMachine:
     @pytest.mark.asyncio
     async def test_change_status_invalid(self):
         """非法状态变更应抛 ValueError"""
-        from modules.student_registry.services import StudentRegistryService
         from modules.student_registry.schemas import StatusChangeCreate
+        from modules.student_registry.services import StudentRegistryService
 
         db = MagicMock()
 
@@ -170,13 +173,17 @@ class TestStatusMachine:
         # 尝试从 graduated 转到 active（非法）
         with pytest.raises(ValueError, match="非法状态转换"):
             await StudentRegistryService.change_status(
-                db, 1, 1,
+                db,
+                1,
+                1,
                 StatusChangeCreate(change_type="resume"),
-                operated_by=1, operator_name="管理员",
+                operated_by=1,
+                operator_name="管理员",
             )
 
 
 # ── 测试批量导入 ──
+
 
 class TestBatchImport:
     """批量导入测试"""
@@ -199,7 +206,8 @@ class TestBatchImport:
 
         with patch.object(StudentRegistryService, "create_student", mock_create):
             result = await StudentRegistryService.batch_import(
-                db, 1,
+                db,
+                1,
                 [
                     {"name": "张三", "class_id": 1, "grade_id": 1},
                     {"name": "李四", "class_id": 1, "grade_id": 1},
@@ -231,7 +239,8 @@ class TestBatchImport:
 
         with patch.object(StudentRegistryService, "create_student", mock_create):
             result = await StudentRegistryService.batch_import(
-                db, 1,
+                db,
+                1,
                 [
                     {"name": "张三", "class_id": 1, "grade_id": 1},
                     {"name": "李四", "class_id": 999, "grade_id": 1},  # 错误数据
@@ -249,14 +258,15 @@ class TestBatchImport:
 
 # ── 测试创建学籍 ──
 
+
 class TestCreateStudent:
     """创建学籍测试"""
 
     @pytest.mark.asyncio
     async def test_create_student_success(self):
         """成功创建学籍"""
-        from modules.student_registry.services import StudentRegistryService
         from modules.student_registry.schemas import StudentCreate
+        from modules.student_registry.services import StudentRegistryService
 
         db = MagicMock()
 
@@ -274,7 +284,9 @@ class TestCreateStudent:
         db.get = AsyncMock(side_effect=[cls, grade])
 
         # Mock 学号生成
-        with patch.object(StudentRegistryService, "generate_student_no", AsyncMock(return_value="202670101")):
+        with patch.object(
+            StudentRegistryService, "generate_student_no", AsyncMock(return_value="202670101")
+        ):
             # Mock 学号查重
             existing_mock = MagicMock()
             existing_mock.scalar_one_or_none = MagicMock(return_value=None)
@@ -299,8 +311,8 @@ class TestCreateStudent:
     @pytest.mark.asyncio
     async def test_create_student_class_not_found(self):
         """班级不存在"""
-        from modules.student_registry.services import StudentRegistryService
         from modules.student_registry.schemas import StudentCreate
+        from modules.student_registry.services import StudentRegistryService
 
         db = MagicMock()
         db.get = AsyncMock(return_value=None)  # 班级不存在
@@ -313,8 +325,8 @@ class TestCreateStudent:
     @pytest.mark.asyncio
     async def test_create_student_duplicate_no(self):
         """学号重复"""
-        from modules.student_registry.services import StudentRegistryService
         from modules.student_registry.schemas import StudentCreate
+        from modules.student_registry.services import StudentRegistryService
 
         db = MagicMock()
 
@@ -325,7 +337,9 @@ class TestCreateStudent:
         grade.sort_order = 7
         db.get = AsyncMock(side_effect=[cls, grade])
 
-        with patch.object(StudentRegistryService, "generate_student_no", AsyncMock(return_value="202670101")):
+        with patch.object(
+            StudentRegistryService, "generate_student_no", AsyncMock(return_value="202670101")
+        ):
             # Mock 学号已存在
             existing_student = MagicMock()
             existing_mock = MagicMock()

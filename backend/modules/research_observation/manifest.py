@@ -14,4 +14,5 @@ MODULE_PHASES = ["junior", "senior", "primary"]
 
 def register(router_prefix="/api/v1/research_observation"):
     from modules.research_observation.routers import router
+
     return router, router_prefix

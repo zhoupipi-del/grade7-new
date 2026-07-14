@@ -192,6 +192,42 @@
             </div>
           </div>
 
+          <!-- 打点弹幕 -->
+          <div class="section timeline-section">
+            <h3 class="section-title">
+              打点弹幕
+              <el-tag v-if="timelineComments.length" size="small" type="info" effect="plain">{{ timelineComments.length }}条</el-tag>
+            </h3>
+            <el-timeline v-if="timelineComments.length">
+              <el-timeline-item
+                v-for="(c, i) in timelineComments"
+                :key="i"
+                :type="timelineCommentType(c.type)"
+                :timestamp="formatSeconds(c.seconds_in_lesson)"
+                placement="top"
+              >
+                <div class="timeline-comment-item">
+                  <el-tag :type="timelineCommentType(c.type)" size="small">{{ timelineCommentLabel(c.type) }}</el-tag>
+                  <span class="timeline-comment-text">{{ c.text }}</span>
+                  <span v-if="c.author_name" class="timeline-comment-author">{{ c.author_name }}</span>
+                </div>
+              </el-timeline-item>
+            </el-timeline>
+            <el-empty v-else description="暂无打点记录" :image-size="60" />
+            <!-- 弹幕输入 -->
+            <div v-if="canManage && currentDetail.feedback_status === 'pending'" class="timeline-input-row">
+              <el-input-number v-model="timelineInput.seconds" :min="0" :max="240" :step="1" placeholder="秒" style="width: 100px" />
+              <el-select v-model="timelineInput.type" style="width: 120px">
+                <el-option label="精彩" value="highlight" />
+                <el-option label="建议" value="suggestion" />
+                <el-option label="问题" value="question" />
+                <el-option label="关键事件" value="key_event" />
+              </el-select>
+              <el-input v-model="timelineInput.text" placeholder="输入弹幕内容..." style="flex: 1" @keyup.enter="doAddTimelineComment" />
+              <el-button type="primary" :icon="Plus" :loading="timelineSending" @click="doAddTimelineComment">发送</el-button>
+            </div>
+          </div>
+
           <!-- 申诉历史 -->
           <div class="section">
             <h3 class="section-title">反馈/申诉历史</h3>
@@ -261,6 +297,13 @@
         <el-form-item label="课题">
           <el-input v-model="createForm.lesson_title" placeholder="听课课题" />
         </el-form-item>
+        <!-- 时空自动定位 -->
+        <div class="auto-locate-row">
+          <el-alert type="info" :closable="false" style="flex: 1">
+            填写班级和听课时间后，点击「自动定位」可一键获取教师、学科等信息
+          </el-alert>
+          <el-button type="warning" :icon="Aim" :loading="autoLocateLoading" @click="doAutoLocate">自动定位</el-button>
+        </div>
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="听课时间" required>
@@ -354,7 +397,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, Check, WarningFilled, EditPen, Checked, Link, CircleCheck } from '@element-plus/icons-vue'
+import { Plus, Delete, Check, WarningFilled, EditPen, Checked, Link, CircleCheck, Aim } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store/user'
 import * as obsApi from '@/api/researchObservation'
 import type { ObservationResponse, ObservationDetailResponse, FeedbackStatus, ObservationType, PlanAdherence, RubricDimension } from '@/api/researchObservation'
@@ -433,6 +476,12 @@ const createForm = reactive({
   plan_adherence: '' as PlanAdherence | '',
 })
 
+/* ──── 自动定位 + 打点弹幕 ──── */
+const autoLocateLoading = ref(false)
+const timelineInput = reactive({ seconds: 0, type: 'highlight', text: '' })
+const timelineSending = ref(false)
+const timelineComments = computed(() => currentDetail.value?.timeline_comments || [])
+
 async function doCreate() {
   if (!createForm.teacher_id || !createForm.class_id || !createForm.subject_code || !createForm.observed_at) {
     ElMessage.warning('请填写必填项')
@@ -455,6 +504,78 @@ async function doCreate() {
     await loadList()
   } catch (e: any) { ElMessage.error(e.message || '创建失败') }
   finally { creating.value = false }
+}
+
+/* ──── 自动定位 ──── */
+async function doAutoLocate() {
+  if (!createForm.class_id || !createForm.observed_at) {
+    ElMessage.warning('请先填写班级和听课时间')
+    return
+  }
+  autoLocateLoading.value = true
+  try {
+    const res = await obsApi.autoLocate({
+      class_id: createForm.class_id,
+      occurred_at: createForm.observed_at,
+    })
+    if (!res.matched) {
+      ElMessage.warning(res.message || res.context_desc || '未匹配到课表')
+      return
+    }
+    if (!res.subject_code && !res.teacher_id) {
+      ElMessage.info(res.context_desc || '该时段在课中但未排课，请手动填写')
+      return
+    }
+    if (res.teacher_id) createForm.teacher_id = res.teacher_id
+    if (res.subject_code) createForm.subject_code = res.subject_code
+    ElMessage.success(`定位成功: 第${res.slot_number}节 ${res.subject_name || res.subject_code} / ${res.teacher_name || '教师#' + res.teacher_id}`)
+  } catch (e: any) { ElMessage.error(e.message || '自动定位失败') }
+  finally { autoLocateLoading.value = false }
+}
+
+/* ──── 打点弹幕 ──── */
+async function doAddTimelineComment() {
+  if (!currentDetail.value) return
+  if (!timelineInput.text.trim()) {
+    ElMessage.warning('请输入弹幕内容')
+    return
+  }
+  timelineSending.value = true
+  try {
+    await obsApi.addTimelineComment(currentDetail.value.id, {
+      seconds_in_lesson: timelineInput.seconds,
+      type: timelineInput.type,
+      text: timelineInput.text.trim(),
+    })
+    ElMessage.success('弹幕已发送')
+    timelineInput.text = ''
+    await refreshDetail()
+  } catch (e: any) { ElMessage.error(e.message || '发送失败') }
+  finally { timelineSending.value = false }
+}
+
+function formatSeconds(sec: number): string {
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+function timelineCommentType(type: string): 'primary' | 'success' | 'warning' | 'danger' | 'info' {
+  const map: Record<string, 'primary' | 'success' | 'warning' | 'danger' | 'info'> = {
+    highlight: 'success',
+    suggestion: 'warning',
+    question: 'danger',
+    key_event: 'primary',
+  }
+  return map[type] || 'info'
+}
+function timelineCommentLabel(type: string): string {
+  const map: Record<string, string> = {
+    highlight: '精彩',
+    suggestion: '建议',
+    question: '问题',
+    key_event: '关键事件',
+  }
+  return map[type] || type
 }
 
 /* ──── 评分 ──── */
@@ -623,4 +744,13 @@ onMounted(loadList)
 .rubric-editor-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .rubric-dim-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .form-hint { font-size: 12px; color: var(--el-text-color-secondary); }
+
+/* 自动定位 */
+.auto-locate-row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+
+/* 打点弹幕 */
+.timeline-comment-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.timeline-comment-text { flex: 1; line-height: 1.6; }
+.timeline-comment-author { font-size: 12px; color: var(--el-text-color-secondary); }
+.timeline-input-row { display: flex; gap: 8px; align-items: center; margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--el-border-color-lighter); }
 </style>

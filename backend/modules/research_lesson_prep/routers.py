@@ -25,16 +25,17 @@ research_lesson_prep/routers.py — 集体备课协同编辑 API 网关
   GET    /dashboard                 教研看板统计
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
-
-from core.routers import get_db, get_current_user
 from core.models import User
+from core.routers import get_current_user, get_db
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from . import schemas, services
 from .models import (
-    STATUS_DRAFT, STATUS_COLLECTIVE_REVIEW,
-    STATUS_ADMIN_APPROVE, STATUS_PUBLISHED,
+    STATUS_ADMIN_APPROVE,
+    STATUS_COLLECTIVE_REVIEW,
+    STATUS_DRAFT,
+    STATUS_PUBLISHED,
 )
 
 router = APIRouter(tags=["集体备课协同编辑"])
@@ -49,30 +50,35 @@ ROLE_CLASS_TEACHER = "CLASS_TEACHER"
 # 权限校验
 # ═══════════════════════════════════════════════
 
+
 def _can_create(user: User) -> bool:
     """谁能创建教案"""
-    return user.role in (ROLE_MS_ADMIN, ROLE_GRADE_LEADER, ROLE_CLASS_TEACHER)
+    role = user.role.upper() if isinstance(user.role, str) else str(user.role).upper()
+    return role in (ROLE_MS_ADMIN, ROLE_GRADE_LEADER, ROLE_CLASS_TEACHER)
 
 
 def _can_manage_plan(user: User, plan_creator_id: int) -> bool:
     """谁能管理教案 (创建者本人 或 管理员/组长)"""
-    if user.role == ROLE_MS_ADMIN:
+    role = user.role.upper() if isinstance(user.role, str) else str(user.role).upper()
+    if role == ROLE_MS_ADMIN:
         return True
-    if user.role == ROLE_GRADE_LEADER:
+    if role == ROLE_GRADE_LEADER:
         return True
-    if user.role == ROLE_CLASS_TEACHER and user.id == plan_creator_id:
+    if role == ROLE_CLASS_TEACHER and user.id == plan_creator_id:
         return True
     return False
 
 
 def _can_review(user: User) -> bool:
     """谁能批注/审核/发布"""
-    return user.role in (ROLE_MS_ADMIN, ROLE_GRADE_LEADER)
+    role = user.role.upper() if isinstance(user.role, str) else str(user.role).upper()
+    return role in (ROLE_MS_ADMIN, ROLE_GRADE_LEADER)
 
 
 # ═══════════════════════════════════════════════
 # 教案 CRUD
 # ═══════════════════════════════════════════════
+
 
 @router.post("/", response_model=schemas.PlanDetailResponse, status_code=201)
 async def api_create_plan(
@@ -85,7 +91,10 @@ async def api_create_plan(
         raise HTTPException(403, "无权创建教案: 需教师/组长/管理员角色")
 
     plan, version = await services.create_plan(
-        db, current_user.school_id, current_user.id, payload,
+        db,
+        current_user.school_id,
+        current_user.id,
+        payload,
     )
 
     # 构造详情响应
@@ -99,10 +108,10 @@ async def api_create_plan(
 
 @router.get("/")
 async def api_list_plans(
-    subject_code: Optional[str] = Query(None),
-    grade_level: Optional[str] = Query(None),
-    plan_status: Optional[str] = Query(None, alias="status"),
-    creator_id: Optional[int] = Query(None),
+    subject_code: str | None = Query(None),
+    grade_level: str | None = Query(None),
+    plan_status: str | None = Query(None, alias="status"),
+    creator_id: int | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -110,12 +119,14 @@ async def api_list_plans(
 ):
     """教案列表 (分页+筛选)"""
     items, total = await services.list_plans(
-        db, current_user.school_id,
+        db,
+        current_user.school_id,
         subject_code=subject_code,
         grade_level=grade_level,
         status=plan_status,
         creator_id=creator_id,
-        page=page, page_size=page_size,
+        page=page,
+        page_size=page_size,
     )
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
@@ -147,7 +158,10 @@ async def api_get_plan(
 
     # 获取未解决批注数
     _, unresolved_count = await services.list_reviews(
-        db, current_user.school_id, plan_id, unresolved_only=True,
+        db,
+        current_user.school_id,
+        plan_id,
+        unresolved_only=True,
     )
 
     creator_name = await services._get_user_name(db, plan.creator_id)
@@ -207,6 +221,7 @@ async def api_delete_plan(
 # 版本控制
 # ═══════════════════════════════════════════════
 
+
 @router.post("/{plan_id}/versions", response_model=schemas.VersionResponse, status_code=201)
 async def api_create_version(
     plan_id: int,
@@ -226,16 +241,22 @@ async def api_create_version(
         raise HTTPException(400, f"当前状态({plan.status})不允许编辑, 请先打回草稿")
 
     version = await services.create_version(
-        db, current_user.school_id, plan_id, current_user.id, payload,
+        db,
+        current_user.school_id,
+        plan_id,
+        current_user.id,
+        payload,
     )
     if not version:
         raise HTTPException(500, "版本创建失败")
 
     editor_name = await services._get_user_name(db, version.editor_id)
     return {
-        "id": version.id, "plan_id": version.plan_id,
+        "id": version.id,
+        "plan_id": version.plan_id,
         "version_number": version.version_number,
-        "editor_id": version.editor_id, "editor_name": editor_name,
+        "editor_id": version.editor_id,
+        "editor_name": editor_name,
         "content": version.content_json,
         "change_log": version.change_log,
         "is_major": version.is_major,
@@ -267,16 +288,21 @@ async def api_get_version(
 ):
     """获取特定版本"""
     version = await services.get_version(
-        db, current_user.school_id, plan_id, version_number,
+        db,
+        current_user.school_id,
+        plan_id,
+        version_number,
     )
     if not version:
         raise HTTPException(404, "版本不存在")
 
     editor_name = await services._get_user_name(db, version.editor_id)
     return {
-        "id": version.id, "plan_id": version.plan_id,
+        "id": version.id,
+        "plan_id": version.plan_id,
         "version_number": version.version_number,
-        "editor_id": version.editor_id, "editor_name": editor_name,
+        "editor_id": version.editor_id,
+        "editor_name": editor_name,
         "content": version.content_json,
         "change_log": version.change_log,
         "is_major": version.is_major,
@@ -287,6 +313,7 @@ async def api_get_version(
 # ═══════════════════════════════════════════════
 # 协同批注
 # ═══════════════════════════════════════════════
+
 
 @router.post("/{plan_id}/reviews", response_model=schemas.ReviewResponse, status_code=201)
 async def api_create_review(
@@ -300,21 +327,29 @@ async def api_create_review(
         raise HTTPException(403, "无权批注: 需组长/管理员角色")
 
     review = await services.create_review(
-        db, current_user.school_id, current_user.id, plan_id, payload,
+        db,
+        current_user.school_id,
+        current_user.id,
+        plan_id,
+        payload,
     )
     if not review:
         raise HTTPException(400, "批注失败: 教案不存在或当前状态不允许批注")
 
     reviewer_name = await services._get_user_name(db, review.reviewer_id)
     return {
-        "id": review.id, "plan_id": review.plan_id,
+        "id": review.id,
+        "plan_id": review.plan_id,
         "version_number": review.version_number,
-        "reviewer_id": review.reviewer_id, "reviewer_name": reviewer_name,
+        "reviewer_id": review.reviewer_id,
+        "reviewer_name": reviewer_name,
         "target_section": review.target_section,
         "target_anchor": review.target_anchor,
-        "comment": review.comment, "severity": review.severity,
+        "comment": review.comment,
+        "severity": review.severity,
         "is_resolved": review.is_resolved,
-        "resolved_by": review.resolved_by, "resolved_at": review.resolved_at,
+        "resolved_by": review.resolved_by,
+        "resolved_at": review.resolved_at,
         "resolution_note": review.resolution_note,
         "parent_review_id": review.parent_review_id,
         "created_at": review.created_at,
@@ -324,14 +359,16 @@ async def api_create_review(
 @router.get("/{plan_id}/reviews")
 async def api_list_reviews(
     plan_id: int,
-    version_number: Optional[int] = Query(None),
+    version_number: int | None = Query(None),
     unresolved_only: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """批注列表"""
     items, total = await services.list_reviews(
-        db, current_user.school_id, plan_id,
+        db,
+        current_user.school_id,
+        plan_id,
         version_number=version_number,
         unresolved_only=unresolved_only,
     )
@@ -351,22 +388,30 @@ async def api_resolve_review(
         raise HTTPException(403, "无权操作: 需组长/管理员角色")
 
     review = await services.resolve_review(
-        db, current_user.school_id, plan_id, review_id,
-        current_user.id, payload,
+        db,
+        current_user.school_id,
+        plan_id,
+        review_id,
+        current_user.id,
+        payload,
     )
     if not review:
         raise HTTPException(404, "批注不存在")
 
     reviewer_name = await services._get_user_name(db, review.reviewer_id)
     return {
-        "id": review.id, "plan_id": review.plan_id,
+        "id": review.id,
+        "plan_id": review.plan_id,
         "version_number": review.version_number,
-        "reviewer_id": review.reviewer_id, "reviewer_name": reviewer_name,
+        "reviewer_id": review.reviewer_id,
+        "reviewer_name": reviewer_name,
         "target_section": review.target_section,
         "target_anchor": review.target_anchor,
-        "comment": review.comment, "severity": review.severity,
+        "comment": review.comment,
+        "severity": review.severity,
         "is_resolved": review.is_resolved,
-        "resolved_by": review.resolved_by, "resolved_at": review.resolved_at,
+        "resolved_by": review.resolved_by,
+        "resolved_at": review.resolved_at,
         "resolution_note": review.resolution_note,
         "parent_review_id": review.parent_review_id,
         "created_at": review.created_at,
@@ -376,6 +421,7 @@ async def api_resolve_review(
 # ═══════════════════════════════════════════════
 # 状态机流转
 # ═══════════════════════════════════════════════
+
 
 @router.post("/{plan_id}/submit", response_model=schemas.PlanResponse)
 async def api_submit_plan(
@@ -392,8 +438,11 @@ async def api_submit_plan(
         raise HTTPException(403, "无权操作他人教案")
 
     plan, err = await services.transition_status(
-        db, current_user.school_id, plan_id,
-        STATUS_COLLECTIVE_REVIEW, current_user.id,
+        db,
+        current_user.school_id,
+        plan_id,
+        STATUS_COLLECTIVE_REVIEW,
+        current_user.id,
     )
     if err:
         raise HTTPException(400, err)
@@ -413,8 +462,11 @@ async def api_approve_plan(
         raise HTTPException(403, "无权审核: 需组长/管理员角色")
 
     plan, err = await services.transition_status(
-        db, current_user.school_id, plan_id,
-        STATUS_ADMIN_APPROVE, current_user.id,
+        db,
+        current_user.school_id,
+        plan_id,
+        STATUS_ADMIN_APPROVE,
+        current_user.id,
     )
     if err:
         raise HTTPException(400, err)
@@ -434,8 +486,11 @@ async def api_publish_plan(
         raise HTTPException(403, "无权发布: 需组长/管理员角色")
 
     plan, err = await services.transition_status(
-        db, current_user.school_id, plan_id,
-        STATUS_PUBLISHED, current_user.id,
+        db,
+        current_user.school_id,
+        plan_id,
+        STATUS_PUBLISHED,
+        current_user.id,
     )
     if err:
         raise HTTPException(400, err)
@@ -456,8 +511,11 @@ async def api_reject_plan(
         raise HTTPException(403, "无权打回: 需组长/管理员角色")
 
     plan, err = await services.transition_status(
-        db, current_user.school_id, plan_id,
-        STATUS_DRAFT, current_user.id,
+        db,
+        current_user.school_id,
+        plan_id,
+        STATUS_DRAFT,
+        current_user.id,
         reject_reason=payload.reject_reason,
     )
     if err:
@@ -471,6 +529,7 @@ async def api_reject_plan(
 # Fork派生
 # ═══════════════════════════════════════════════
 
+
 @router.post("/{plan_id}/fork", response_model=schemas.PlanDetailResponse, status_code=201)
 async def api_fork_plan(
     plan_id: int,
@@ -483,7 +542,11 @@ async def api_fork_plan(
         raise HTTPException(403, "无权创建教案")
 
     result = await services.fork_plan(
-        db, current_user.school_id, plan_id, current_user.id, payload,
+        db,
+        current_user.school_id,
+        plan_id,
+        current_user.id,
+        payload,
     )
     if not result:
         raise HTTPException(400, "Fork失败: 教案不存在或未发布")
@@ -502,13 +565,18 @@ async def api_fork_plan(
 # 辅助函数
 # ═══════════════════════════════════════════════
 
+
 def _plan_to_dict(plan, creator_name: str = None) -> dict:
     """ORM → dict"""
     return {
-        "id": plan.id, "school_id": plan.school_id,
-        "title": plan.title, "description": plan.description,
-        "subject_code": plan.subject_code, "grade_level": plan.grade_level,
-        "lesson_type": plan.lesson_type, "duration": plan.duration,
+        "id": plan.id,
+        "school_id": plan.school_id,
+        "title": plan.title,
+        "description": plan.description,
+        "subject_code": plan.subject_code,
+        "grade_level": plan.grade_level,
+        "lesson_type": plan.lesson_type,
+        "duration": plan.duration,
         "tags": plan.tags or [],
         "status": plan.status,
         "status_updated_at": plan.status_updated_at,
@@ -520,5 +588,60 @@ def _plan_to_dict(plan, creator_name: str = None) -> dict:
         "creator_name": creator_name or f"用户{plan.creator_id}",
         "grade_leader_id": plan.grade_leader_id,
         "forked_from_id": plan.forked_from_id,
-        "created_at": plan.created_at, "updated_at": plan.updated_at,
+        "content_markdown": getattr(plan, "content_markdown", None),
+        "ai_bias_prescription": getattr(plan, "ai_bias_prescription", None),
+        "ai_prescription_generated_at": getattr(plan, "ai_prescription_generated_at", None),
+        "created_at": plan.created_at,
+        "updated_at": plan.updated_at,
+    }
+
+
+# ═══════════════════════════════════════════════
+# AI学情逆向处方 (Wings 3.1 — 从error_funnel逆向注入)
+# ═══════════════════════════════════════════════
+
+
+@router.post("/{plan_id}/generate-ai-bias")
+async def api_generate_ai_bias(
+    plan_id: int,
+    payload: schemas.AIBiasGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    AI学情逆向处方 — 从error_funnel拉取断层数据 → 聚合 → DeepSeek → 写入教案
+
+    流程:
+      1. 查询目标班级/年级的knowledge_gaps (critical/warning)
+      2. 按知识点聚合断层统计
+      3. 调用DeepSeek生成Markdown格式教学偏方
+      4. 写入plan.ai_bias_prescription
+
+    需教师/组长/管理员角色
+    """
+    if not _can_create(current_user):
+        raise HTTPException(403, "无权生成AI处方: 需教师/组长/管理员角色")
+
+    plan = await services.get_plan(db, current_user.school_id, plan_id)
+    if not plan:
+        raise HTTPException(404, "教案不存在")
+
+    if not _can_manage_plan(current_user, plan.creator_id):
+        raise HTTPException(403, "无权操作他人教案")
+
+    prescription, err = await services.generate_ai_bias(
+        db,
+        current_user.school_id,
+        plan_id,
+        grade_id=payload.grade_id,
+        class_id=payload.class_id,
+    )
+
+    if err:
+        raise HTTPException(400, err)
+
+    return {
+        "plan_id": plan_id,
+        "ai_bias_prescription": prescription,
+        "generated_at": plan.ai_prescription_generated_at,
     }

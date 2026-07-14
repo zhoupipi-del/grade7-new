@@ -22,18 +22,28 @@ modules/growth/analytics.py — 动态五维降维引擎 + 德育量化闭环
 
 ═══════════════════════════════════════════════════════════════════════
 """
-import math
-import logging
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
 
-from sqlalchemy import (
-    select, func, and_, desc,
-    Column, Integer, String, DateTime, Float, Text, Boolean, Index,
-)
-from sqlalchemy.ext.asyncio import AsyncSession
+import logging
+import math
+from datetime import datetime, timedelta
+from typing import Any
 
 from core.models import Base
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    and_,
+    desc,
+    func,
+    select,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +52,7 @@ logger = logging.getLogger(__name__)
 #  表3: 德育量化自动流水账 — 闭环工单
 # ═══════════════════════════════════════════════════════════════
 
+
 class MoralEducationLedger(Base):
     """
     德育量化工单 — 动态降维引擎自动挂牌/解除的持久化记录。
@@ -49,6 +60,7 @@ class MoralEducationLedger(Base):
     生命周期: AUTO_WARN/RED_ZONE → RESOLVED (班主任干预后)
     防刷机制: 同一学生+维度 24h 内不重复挂牌
     """
+
     __tablename__ = "growth_moral_education_ledger"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -84,6 +96,7 @@ class MoralEducationLedger(Base):
 #  DynamicGrowthEngine — 动态五维降维引擎
 # ═══════════════════════════════════════════════════════════════
 
+
 class DynamicGrowthEngine:
     """
     将 13 路全息时序事件流降维为 5 维雷达得分。
@@ -97,50 +110,50 @@ class DynamicGrowthEngine:
     """
 
     # ── 数学参数 ──
-    LAMBDA_DECAY = 0.05          # 14天半衰期
-    SIGMOID_THRESHOLD = 30.0     # penalty=30时 Sigmoid=50
-    SIGMOID_K = 0.1              # Sigmoid陡度
-    LOOKBACK_DAYS = 90           # 数据回溯窗口
+    LAMBDA_DECAY = 0.05  # 14天半衰期
+    SIGMOID_THRESHOLD = 30.0  # penalty=30时 Sigmoid=50
+    SIGMOID_K = 0.1  # Sigmoid陡度
+    LOOKBACK_DAYS = 90  # 数据回溯窗口
 
     # ── 13路 → 5维 映射权重矩阵 ──
     # key = 数据源标识, value = {维度: 权重}
     MAP_MATRIX = {
-        "attendance":        {"habit": 0.8},
-        "discipline":        {"moral": 0.7, "habit": 0.3},
-        "punishment":        {"moral": 0.9},
-        "academic_trend":    {"academic": 0.8},
-        "rdi_warning":       {"psych": 0.6, "habit": 0.4},
-        "psych_factors":     {"psych": 0.9},
-        "growth_timeline":   {"moral": 0.3, "habit": 0.4, "practice": 0.3},
-        "periodical_snap":   {"moral": 0.4, "academic": 0.4, "practice": 0.2},
-        "homework":          {"academic": 0.7, "habit": 0.3},
-        "error_funnel":      {"academic": 0.9},
-        "psych_deep_risk":   {"psych": 1.0},
+        "attendance": {"habit": 0.8},
+        "discipline": {"moral": 0.7, "habit": 0.3},
+        "punishment": {"moral": 0.9},
+        "academic_trend": {"academic": 0.8},
+        "rdi_warning": {"psych": 0.6, "habit": 0.4},
+        "psych_factors": {"psych": 0.9},
+        "growth_timeline": {"moral": 0.3, "habit": 0.4, "practice": 0.3},
+        "periodical_snap": {"moral": 0.4, "academic": 0.4, "practice": 0.2},
+        "homework": {"academic": 0.7, "habit": 0.3},
+        "error_funnel": {"academic": 0.9},
+        "psych_deep_risk": {"psych": 1.0},
     }
 
     # ── 事件烈度权重 ──
     SEVERITY = {
-        "absent":            5.0,
-        "late":              2.0,
-        "early":             2.0,
-        "discipline":        4.0,
-        "punishment":        8.0,
-        "gap_critical":      4.0,
-        "gap_watch":         1.0,
-        "psych_red":         10.0,
-        "psych_yellow":      5.0,
-        "hw_missing":        2.0,
+        "absent": 5.0,
+        "late": 2.0,
+        "early": 2.0,
+        "discipline": 4.0,
+        "punishment": 8.0,
+        "gap_critical": 4.0,
+        "gap_watch": 1.0,
+        "psych_red": 10.0,
+        "psych_yellow": 5.0,
+        "hw_missing": 2.0,
         "timeline_critical": 5.0,
-        "timeline_warning":  2.0,
-        "timeline_bonus":   -3.0,   # 负值 = 正向加分，抵扣 penalty
+        "timeline_warning": 2.0,
+        "timeline_bonus": -3.0,  # 负值 = 正向加分，抵扣 penalty
     }
 
     # ── 德育闭环警戒线 ──
     ALERT_THRESHOLDS = {
-        "moral":    {"warn": 60.0, "red": 50.0},
+        "moral": {"warn": 60.0, "red": 50.0},
         "academic": {"warn": 55.0, "red": 40.0},
-        "psych":    {"warn": 60.0, "red": 45.0},
-        "habit":    {"warn": 65.0, "red": 50.0},
+        "psych": {"warn": 60.0, "red": 45.0},
+        "habit": {"warn": 65.0, "red": 50.0},
         "practice": {"warn": 50.0, "red": 35.0},
     }
 
@@ -154,7 +167,7 @@ class DynamicGrowthEngine:
         db: AsyncSession,
         student_id: int,
         school_id: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         全息五维雷达计算 — 13路数据采集 → 时间衰减 → 降维映射 → Sigmoid归一化
 
@@ -171,7 +184,7 @@ class DynamicGrowthEngine:
 
         # 初始化五维扣分累加器
         penalties = {"moral": 0.0, "academic": 0.0, "psych": 0.0, "habit": 0.0, "practice": 0.0}
-        sources: Dict[str, Any] = {}
+        sources: dict[str, Any] = {}
 
         # ── 路1: 考勤离子流 ──
         att_data = await cls._fetch_attendance(db, student_id, school_id, lookback)
@@ -233,7 +246,9 @@ class DynamicGrowthEngine:
             decayed = cls._time_decay(psych_data.get("updated_at", now), cls.SEVERITY["psych_red"])
             penalties["psych"] += decayed * cls.MAP_MATRIX["psych_deep_risk"]["psych"]
         elif risk == "yellow":
-            decayed = cls._time_decay(psych_data.get("updated_at", now), cls.SEVERITY["psych_yellow"])
+            decayed = cls._time_decay(
+                psych_data.get("updated_at", now), cls.SEVERITY["psych_yellow"]
+            )
             penalties["psych"] += decayed * cls.MAP_MATRIX["psych_factors"]["psych"]
 
         # ── 路8+9: 时光轴事件 (含 Redis 实时注入) ──
@@ -295,11 +310,11 @@ class DynamicGrowthEngine:
         cls,
         db: AsyncSession,
         school_id: int,
-        student_id: Optional[int] = None,
+        student_id: int | None = None,
         unresolved_only: bool = False,
         page: int = 1,
         page_size: int = 20,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """查询德育工单列表"""
         conditions = [MoralEducationLedger.school_id == school_id]
         if student_id is not None:
@@ -353,7 +368,7 @@ class DynamicGrowthEngine:
         school_id: int,
         resolved_by: int,
         note: str = "",
-    ) -> Optional[MoralEducationLedger]:
+    ) -> MoralEducationLedger | None:
         """解除德育工单挂牌"""
         stmt = select(MoralEducationLedger).where(
             and_(
@@ -416,8 +431,8 @@ class DynamicGrowthEngine:
         db: AsyncSession,
         student_id: int,
         school_id: int,
-        scores: Dict[str, float],
-    ) -> List[Dict[str, Any]]:
+        scores: dict[str, float],
+    ) -> list[dict[str, Any]]:
         """
         闭环看守: 分值跌破警戒线 → 自动挂牌德育工单
         防刷: 同一学生+维度 24h 内不重复挂牌
@@ -452,6 +467,7 @@ class DynamicGrowthEngine:
 
             # 创建工单
             import json
+
             entry = MoralEducationLedger(
                 school_id=school_id,
                 student_id=student_id,
@@ -466,13 +482,15 @@ class DynamicGrowthEngine:
                 score_snapshot=json.dumps(scores, ensure_ascii=False),
             )
             db.add(entry)
-            alerts.append({
-                "dimension": dim,
-                "score": score,
-                "action_type": action_type,
-                "threshold_warn": warn_line,
-                "threshold_red": red_line,
-            })
+            alerts.append(
+                {
+                    "dimension": dim,
+                    "score": score,
+                    "action_type": action_type,
+                    "threshold_warn": warn_line,
+                    "threshold_red": red_line,
+                }
+            )
             logger.info(
                 f"[analytics] 德育工单挂牌 student={student_id} dim={dim} "
                 f"score={score} action={action_type}"
@@ -489,9 +507,12 @@ class DynamicGrowthEngine:
 
     @classmethod
     async def _fetch_attendance(
-        cls, db: AsyncSession, student_id: int, school_id: int,
+        cls,
+        db: AsyncSession,
+        student_id: int,
+        school_id: int,
         since: datetime,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """路1: 考勤记录 — absent / late / early"""
         records = []
         try:
@@ -514,10 +535,12 @@ class DynamicGrowthEngine:
             )
             result = await db.execute(stmt)
             for row in result:
-                records.append({
-                    "status": row[0],
-                    "occurred_at": datetime.combine(row[1], datetime.min.time()),
-                })
+                records.append(
+                    {
+                        "status": row[0],
+                        "occurred_at": datetime.combine(row[1], datetime.min.time()),
+                    }
+                )
         except Exception as e:
             logger.warning(f"[analytics] 考勤数据采集失败 student={student_id}: {e}")
 
@@ -530,9 +553,12 @@ class DynamicGrowthEngine:
 
     @classmethod
     async def _fetch_behavior(
-        cls, db: AsyncSession, student_id: int, school_id: int,
+        cls,
+        db: AsyncSession,
+        student_id: int,
+        school_id: int,
         since: datetime,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """路2+3: 违纪记录 + 处分记录"""
         violations = []
         punishments = []
@@ -571,8 +597,11 @@ class DynamicGrowthEngine:
 
     @classmethod
     async def _fetch_academic(
-        cls, db: AsyncSession, student_id: int, school_id: int,
-    ) -> Dict[str, Any]:
+        cls,
+        db: AsyncSession,
+        student_id: int,
+        school_id: int,
+    ) -> dict[str, Any]:
         """路5+12: 考试均分 + 错题断层"""
         exam_avg = None
         gaps = {"active_critical": []}
@@ -597,23 +626,22 @@ class DynamicGrowthEngine:
         try:
             from modules.error_funnel.models import KnowledgeGap
 
-            stmt = (
-                select(KnowledgeGap)
-                .where(
-                    and_(
-                        KnowledgeGap.student_id == student_id,
-                        KnowledgeGap.gap_level == "critical",
-                        KnowledgeGap.gap_status == "active",
-                    )
+            stmt = select(KnowledgeGap).where(
+                and_(
+                    KnowledgeGap.student_id == student_id,
+                    KnowledgeGap.gap_level == "critical",
+                    KnowledgeGap.gap_status == "active",
                 )
             )
             result = await db.execute(stmt)
             for gap in result.scalars():
-                gaps["active_critical"].append({
-                    "id": gap.id,
-                    "updated_at": getattr(gap, "last_error_date", None) or datetime.utcnow(),
-                    "consecutive_errors": getattr(gap, "consecutive_errors", 1),
-                })
+                gaps["active_critical"].append(
+                    {
+                        "id": gap.id,
+                        "updated_at": getattr(gap, "last_error_date", None) or datetime.utcnow(),
+                        "consecutive_errors": getattr(gap, "consecutive_errors", 1),
+                    }
+                )
         except Exception as e:
             logger.warning(f"[analytics] 学业-错题断层采集失败 student={student_id}: {e}")
 
@@ -625,31 +653,33 @@ class DynamicGrowthEngine:
 
     @classmethod
     async def _fetch_homework(
-        cls, db: AsyncSession, student_id: int, school_id: int,
+        cls,
+        db: AsyncSession,
+        student_id: int,
+        school_id: int,
         since: datetime,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """路11: 作业缺交流"""
         missing = []
         try:
             from modules.homework_mgmt.models import HwSubmission
 
-            stmt = (
-                select(HwSubmission)
-                .where(
-                    and_(
-                        HwSubmission.student_id == student_id,
-                        HwSubmission.school_id == school_id,
-                        HwSubmission.status.in_(["missing", "overdue", "late"]),
-                        HwSubmission.created_at >= since,
-                    )
+            stmt = select(HwSubmission).where(
+                and_(
+                    HwSubmission.student_id == student_id,
+                    HwSubmission.school_id == school_id,
+                    HwSubmission.status.in_(["missing", "overdue", "late"]),
+                    HwSubmission.created_at >= since,
                 )
             )
             result = await db.execute(stmt)
             for sub in result.scalars():
-                missing.append({
-                    "due_date": getattr(sub, "due_date", None) or datetime.utcnow(),
-                    "status": getattr(sub, "status", "missing"),
-                })
+                missing.append(
+                    {
+                        "due_date": getattr(sub, "due_date", None) or datetime.utcnow(),
+                        "status": getattr(sub, "status", "missing"),
+                    }
+                )
         except Exception as e:
             logger.warning(f"[analytics] 作业数据采集失败 student={student_id}: {e}")
 
@@ -657,21 +687,21 @@ class DynamicGrowthEngine:
 
     @classmethod
     async def _fetch_psych(
-        cls, db: AsyncSession, student_id: int, school_id: int,
-    ) -> Dict[str, Any]:
+        cls,
+        db: AsyncSession,
+        student_id: int,
+        school_id: int,
+    ) -> dict[str, Any]:
         """路7+13: 心理风险等级"""
         risk_level = "green"
         updated_at = None
         try:
             from modules.psych_profiles.models import PsychProfile
 
-            stmt = (
-                select(PsychProfile)
-                .where(
-                    and_(
-                        PsychProfile.student_id == student_id,
-                        PsychProfile.school_id == school_id,
-                    )
+            stmt = select(PsychProfile).where(
+                and_(
+                    PsychProfile.student_id == student_id,
+                    PsychProfile.school_id == school_id,
                 )
             )
             result = await db.execute(stmt)
@@ -686,9 +716,12 @@ class DynamicGrowthEngine:
 
     @classmethod
     async def _fetch_timeline_events(
-        cls, db: AsyncSession, student_id: int, school_id: int,
+        cls,
+        db: AsyncSession,
+        student_id: int,
+        school_id: int,
         since: datetime,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """路8+9: 时光轴事件 (含 Redis 实时注入的)"""
         events = []
         try:
@@ -710,11 +743,13 @@ class DynamicGrowthEngine:
             )
             result = await db.execute(stmt)
             for row in result:
-                events.append({
-                    "severity": row[0],
-                    "occurred_at": row[1],
-                    "event_type": row[2],
-                })
+                events.append(
+                    {
+                        "severity": row[0],
+                        "occurred_at": row[1],
+                        "event_type": row[2],
+                    }
+                )
         except Exception as e:
             logger.warning(f"[analytics] 时光轴采集失败 student={student_id}: {e}")
 
@@ -728,8 +763,11 @@ class DynamicGrowthEngine:
 
     @classmethod
     async def _fetch_latest_snapshot(
-        cls, db: AsyncSession, student_id: int, school_id: int,
-    ) -> Optional[Dict[str, Any]]:
+        cls,
+        db: AsyncSession,
+        student_id: int,
+        school_id: int,
+    ) -> dict[str, Any] | None:
         """路10: 最新阶段性快照"""
         try:
             stmt = (
@@ -760,7 +798,9 @@ class DynamicGrowthEngine:
 
     @classmethod
     async def _fetch_activity_count(
-        cls, db: AsyncSession, student_id: int,
+        cls,
+        db: AsyncSession,
+        student_id: int,
     ) -> int:
         """综合实践: 活动参与次数"""
         try:
@@ -781,4 +821,4 @@ class DynamicGrowthEngine:
 #  模块内引用 — 确保 GrowthTimelineEvent / GrowthPeriodicalSnapshot 可用
 # ═══════════════════════════════════════════════════════════════
 
-from modules.growth.models import GrowthTimelineEvent, GrowthPeriodicalSnapshot
+from modules.growth.models import GrowthPeriodicalSnapshot, GrowthTimelineEvent

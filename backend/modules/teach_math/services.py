@@ -8,25 +8,23 @@ modules/teach_math/services.py — 数学教学辅助业务逻辑
 import json
 import logging
 import os
-from collections import Counter
 from datetime import datetime, timedelta
-from typing import Optional
 
 import httpx
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
-
 from core.models import User
 from modules.risk_models.models import RiskWarning
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .models import TranslationRecord
 from .schemas import (
+    BlindSpotItem,
+    MathReportKPI,
+    StudentUsageItem,
+    TranslatedSentence,
     TranslateRequest,
     TranslateResponse,
-    TranslatedSentence,
-    MathReportKPI,
     TrendDataPoint,
-    BlindSpotItem,
-    StudentUsageItem,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,7 +74,7 @@ class TranslationService:
     async def translate(
         request: TranslateRequest,
         db: AsyncSession,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
     ) -> TranslateResponse:
         """调用 DeepSeek 逐句翻译数学应用题
 
@@ -112,11 +110,13 @@ class TranslationService:
             if isinstance(raw_response, dict):
                 trans_list = raw_response.get("translations", [])
                 for t in trans_list:
-                    translations.append(TranslatedSentence(
-                        sentence=t.get("sentence", ""),
-                        math_expression=t.get("math_expression", ""),
-                        explanation=t.get("explanation", ""),
-                    ))
+                    translations.append(
+                        TranslatedSentence(
+                            sentence=t.get("sentence", ""),
+                            math_expression=t.get("math_expression", ""),
+                            explanation=t.get("explanation", ""),
+                        )
+                    )
                 suggested_vars = raw_response.get("suggested_variables", {})
         except Exception as e:
             logger.warning(f"LLM 响应解析异常: {e}, raw={raw_response}")
@@ -167,7 +167,8 @@ class TranslationService:
 # DeepSeek 调用工具函数
 # ═══════════════════════════════════════════════════════════
 
-def _call_deepseek(prompt: str, system_prompt: str, timeout: int = 60) -> tuple[dict, Optional[str]]:
+
+def _call_deepseek(prompt: str, system_prompt: str, timeout: int = 60) -> tuple[dict, str | None]:
     """调用 DeepSeek API，返回 (响应dict, 错误信息)
 
     Returns:
@@ -210,6 +211,7 @@ def _call_deepseek(prompt: str, system_prompt: str, timeout: int = 60) -> tuple[
 # 教师端学情报表服务
 # ═══════════════════════════════════════════════════════════
 
+
 def _parse_time_range(time_range: str) -> datetime:
     """将时间范围字符串转换为截止时间"""
     now = datetime.now()
@@ -248,8 +250,7 @@ class ReportService:
 
         # ── 获取班级内的活跃用户 ID ─────────────────
         user_rows = await db.execute(
-            select(User.id, User.display_name)
-            .where(
+            select(User.id, User.display_name).where(
                 User.class_id == class_id,
                 User.school_id == school_id,
                 User.is_active == True,
@@ -284,8 +285,7 @@ class ReportService:
 
         # ── RDI 风险学生数 ─────────────────────────
         risk_result = await db.execute(
-            select(func.count(func.distinct(RiskWarning.student_id)))
-            .where(
+            select(func.count(func.distinct(RiskWarning.student_id))).where(
                 RiskWarning.student_id.in_(user_ids),
                 RiskWarning.school_id == school_id,
                 RiskWarning.risk_level.in_(["attention", "intervention"]),
@@ -307,10 +307,7 @@ class ReportService:
             .group_by(func.date(TranslationRecord.created_at))
             .order_by(func.date(TranslationRecord.created_at).asc())
         )
-        trend = [
-            TrendDataPoint(date=str(row.day), count=row.cnt)
-            for row in trend_rows.all()
-        ]
+        trend = [TrendDataPoint(date=str(row.day), count=row.cnt) for row in trend_rows.all()]
 
         avg = round(total / active, 1) if active > 0 else 0.0
 
@@ -338,8 +335,7 @@ class ReportService:
 
         # ── 获取班级内的活跃用户 ───────────────────
         user_rows = await db.execute(
-            select(User.id)
-            .where(
+            select(User.id).where(
                 User.class_id == class_id,
                 User.school_id == school_id,
                 User.is_active == True,
@@ -373,11 +369,13 @@ class ReportService:
             freq = row.cnt
             # 根据知识点类型推断错误类型标签
             error_type = _classify_error_type(knowledge)
-            spots.append(BlindSpotItem(
-                term=knowledge,
-                frequency=freq,
-                error_type=error_type,
-            ))
+            spots.append(
+                BlindSpotItem(
+                    term=knowledge,
+                    frequency=freq,
+                    error_type=error_type,
+                )
+            )
 
         return spots
 
@@ -393,8 +391,7 @@ class ReportService:
         """
         # ── 获取班级内的活跃用户 ───────────────────
         user_rows = await db.execute(
-            select(User.id, User.display_name)
-            .where(
+            select(User.id, User.display_name).where(
                 User.class_id == class_id,
                 User.school_id == school_id,
                 User.is_active == True,
@@ -425,6 +422,7 @@ class ReportService:
         # ── 每个人的最高频知识点 ────────────────────
         # 用子查询：找出每人最高频的 knowledge_point
         from sqlalchemy import text as sa_text
+
         top_blind_rows = await db.execute(
             sa_text("""
                 SELECT t.student_id, t.knowledge_point, COUNT(*) AS cnt
@@ -447,8 +445,7 @@ class ReportService:
 
         # ── RDI 风险状态 ──────────────────────────
         risk_rows = await db.execute(
-            select(RiskWarning.student_id, RiskWarning.risk_level)
-            .where(
+            select(RiskWarning.student_id, RiskWarning.risk_level).where(
                 RiskWarning.student_id.in_(user_ids),
                 RiskWarning.school_id == school_id,
             )
@@ -467,14 +464,18 @@ class ReportService:
         items = []
         for uid in user_ids:
             query_count = stats.get(uid, 0)
-            items.append(StudentUsageItem(
-                student_id=uid,
-                student_name=user_map.get(uid, f"用户{uid}"),
-                query_count=query_count,
-                top_blind_spot=top_blind_map.get(uid, "无数据"),
-                independence_score=round(min(query_count / max_cnt * 100, 100), 1) if max_cnt > 0 else 0.0,
-                rdi_status=_rdi_status_label(risk_map.get(uid)),
-            ))
+            items.append(
+                StudentUsageItem(
+                    student_id=uid,
+                    student_name=user_map.get(uid, f"用户{uid}"),
+                    query_count=query_count,
+                    top_blind_spot=top_blind_map.get(uid, "无数据"),
+                    independence_score=round(min(query_count / max_cnt * 100, 100), 1)
+                    if max_cnt > 0
+                    else 0.0,
+                    rdi_status=_rdi_status_label(risk_map.get(uid)),
+                )
+            )
 
         # 按 query_count 降序排列
         items.sort(key=lambda x: x.query_count, reverse=True)
@@ -484,6 +485,7 @@ class ReportService:
 # ═══════════════════════════════════════════════════════════
 # ReportService 辅助函数
 # ═══════════════════════════════════════════════════════════
+
 
 def _classify_error_type(knowledge_point: str) -> str:
     """根据知识点名称推断错误类型标签"""
@@ -510,7 +512,7 @@ def _risk_priority(risk_level: str) -> int:
     return priorities.get(risk_level, 0)
 
 
-def _rdi_status_label(risk_level: Optional[str]) -> str:
+def _rdi_status_label(risk_level: str | None) -> str:
     """RDI risk_level → 前端状态标签"""
     if not risk_level or risk_level == "normal":
         return "safe"

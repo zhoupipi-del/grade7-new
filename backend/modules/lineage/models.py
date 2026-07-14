@@ -8,11 +8,15 @@ lineage_events 表记录每一次数据转换的溯源信息：
 - 因果链 (trace_id 串联)
 """
 
-from sqlalchemy import (
-    Column, BigInteger, String, DateTime, JSON, Index, Text,
-)
-from sqlalchemy.orm import relationship
 from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Column,
+    DateTime,
+    Index,
+    String,
+)
 
 
 class LineageEvent(Base, SchoolMixin):
@@ -103,23 +107,32 @@ class MigrationBatch(Base, SchoolMixin):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     batch_id = Column(
-        String(36), nullable=False, unique=True, index=True,
+        String(36),
+        nullable=False,
+        unique=True,
+        index=True,
         comment="批次 UUID, 用于关联数据行的 sync_batch",
     )
     source_type = Column(
-        String(30), nullable=False,
+        String(30),
+        nullable=False,
         comment="源类型: mysql_legacy/sqlite_dump/excel/csv/api",
     )
     source_desc = Column(
-        String(255), nullable=True,
+        String(255),
+        nullable=True,
         comment="源描述: 旧数据库IP/文件名/API URL",
     )
     target_table = Column(
-        String(50), nullable=False, index=True,
+        String(50),
+        nullable=False,
+        index=True,
         comment="目标表: students/classes/grade_records/...",
     )
     status = Column(
-        String(30), nullable=False, default="pending",
+        String(30),
+        nullable=False,
+        default="pending",
         comment="批次状态: pending/processing/completed/completed_with_errors/failed",
     )
     total_rows = Column(BigInteger, default=0, comment="源端总行数")
@@ -129,11 +142,13 @@ class MigrationBatch(Base, SchoolMixin):
 
     errors_summary = Column(JSON, nullable=True, comment="失败摘要(前50条)")
     mapping_config = Column(
-        JSON, nullable=True,
+        JSON,
+        nullable=True,
         comment="迁移映射配置: 字段映射/满分缩放/科目别名等",
     )
     transform_script = Column(
-        String(100), nullable=True,
+        String(100),
+        nullable=True,
         comment="使用的变换脚本: legacy_data_etl.py / legacy_score_sampler.py",
     )
 
@@ -142,7 +157,10 @@ class MigrationBatch(Base, SchoolMixin):
     completed_at = Column(DateTime, nullable=True, comment="迁移完成时间")
     created_at = Column(DateTime, default=get_local_now, nullable=False)
     updated_at = Column(
-        DateTime, default=get_local_now, onupdate=get_local_now, nullable=False,
+        DateTime,
+        default=get_local_now,
+        onupdate=get_local_now,
+        nullable=False,
     )
 
     __table_args__ = (

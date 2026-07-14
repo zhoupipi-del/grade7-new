@@ -42,6 +42,15 @@ export interface TextFeedback {
   overall_comment: string
 }
 
+export interface TimelineComment {
+  seconds_in_lesson: number
+  type: string
+  text: string
+  author_id: number
+  author_name: string | null
+  created_at: string
+}
+
 export interface RubricResponse {
   id: number
   observation_id: number
@@ -99,6 +108,8 @@ export interface ObservationResponse {
   duration_minutes: number
   created_at: string
   updated_at: string
+  schedule_instance_id: number | null
+  timeline_comments: TimelineComment[]
 }
 
 export interface ObservationDetailResponse extends ObservationResponse {
@@ -161,6 +172,39 @@ export interface AppealResolvePayload {
   resolution: string
   score_adjusted?: boolean
   adjusted_total_score?: number
+}
+
+export interface AutoLocatePayload {
+  class_id: number
+  occurred_at: string
+}
+
+export interface AutoLocateResponse {
+  in_lesson: boolean
+  period_index: number | null
+  slot_id: number | null
+  subject_id: number | null
+  teacher_id: number | null
+  teacher_name: string | null
+  context_desc: string
+  schedule_instance_id: number | null
+  matched: boolean
+  message: string | null
+  slot_number: number | null
+  subject_code: string | null
+  subject_name: string | null
+}
+
+export interface TimelineCommentCreatePayload {
+  seconds_in_lesson: number
+  type: string
+  text: string
+}
+
+export interface TimelineCommentResponse {
+  observation_id: number
+  comment: TimelineComment
+  total_comments: number
 }
 
 export interface ListParams {
@@ -246,6 +290,16 @@ export function resolveAppeal(obsId: number, payload: AppealResolvePayload) {
 /** GET — 申诉/反馈历史 */
 export function listAppeals(obsId: number) {
   return request.get<any, ListResponse<AppealResponse>>(`/research_observation/${obsId}/appeals`)
+}
+
+/** POST — 自动定位课表（TimetableEnricher时空卡位：class_id+时间→节次/学科/教师） */
+export function autoLocate(payload: AutoLocatePayload) {
+  return request.post<any, AutoLocateResponse>('/research_observation/auto-locate', payload)
+}
+
+/** POST — 追加打点弹幕（时间戳标记的课堂观察批注） */
+export function addTimelineComment(obsId: number, payload: TimelineCommentCreatePayload) {
+  return request.post<any, TimelineCommentResponse>(`/research_observation/${obsId}/timeline`, payload)
 }
 
 /* ──────────────── 辅助函数 ──────────────── */

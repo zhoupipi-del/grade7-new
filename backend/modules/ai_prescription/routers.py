@@ -3,26 +3,20 @@ AI 德育处方大脑 — API 路由
 双核心端点：班级诊断 + 学生干预
 异步 Celery 模式：202 Accepted → 轮询结果
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 from celery.result import AsyncResult
+from core.routers import UserRole, get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
-
-from core.routers import get_db, get_current_user, require_role, UserRole
 from modules.ai_prescription.aggregator import AIPrescriptionAggregator
 from modules.ai_prescription.models import (
     AIPrescription,
-    PrescriptionType,
-    RiskLevel,
 )
 from modules.ai_prescription.schemas import (
     ClassDiagnosisRequest,
-    PrescriptionHistoryItem,
     PrescriptionHistoryOut,
     PrescriptionResultOut,
     PrescriptionTaskOut,
@@ -34,6 +28,7 @@ from modules.ai_prescription.tasks import (
     generate_class_diagnosis,
     generate_student_intervention,
 )
+from sqlalchemy import select, text
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +38,7 @@ router = APIRouter(tags=["AI 德育处方"])
 # ─────────────────────────────────────────────
 # 核心端点：提交诊断 / 干预任务
 # ─────────────────────────────────────────────
+
 
 @router.post(
     "/class-diagnosis",
@@ -67,10 +63,7 @@ async def create_class_diagnosis(
 
     # 校验班级存在（直接查询 classes 表）
     clazz_result = await db.execute(
-        text(
-            "SELECT id, name FROM classes "
-            "WHERE id = :class_id AND school_id = :school_id"
-        ),
+        text("SELECT id, name FROM classes WHERE id = :class_id AND school_id = :school_id"),
         {"class_id": body.class_id, "school_id": school_id},
     )
     clazz_row = clazz_result.fetchone()
@@ -83,13 +76,13 @@ async def create_class_diagnosis(
     )
 
     # 提交 Celery 异步任务
-    task: AsyncResult = generate_class_diagnosis.delay(
-        context, current_user.id, school_id
-    )
+    task: AsyncResult = generate_class_diagnosis.delay(context, current_user.id, school_id)
 
     logger.info(
         "[AI-Router] 班级诊断任务已提交：task_id=%s, class_id=%s, user=%s",
-        task.id, body.class_id, current_user.username
+        task.id,
+        body.class_id,
+        current_user.username,
     )
 
     return {
@@ -142,13 +135,13 @@ async def create_student_intervention(
     )
 
     # 提交 Celery 任务
-    task: AsyncResult = generate_student_intervention.delay(
-        context, current_user.id, school_id
-    )
+    task: AsyncResult = generate_student_intervention.delay(context, current_user.id, school_id)
 
     logger.info(
         "[AI-Router] 学生干预任务已提交：task_id=%s, student_id=%s, user=%s",
-        task.id, body.student_id, current_user.username
+        task.id,
+        body.student_id,
+        current_user.username,
     )
 
     return {
@@ -161,6 +154,7 @@ async def create_student_intervention(
 # ─────────────────────────────────────────────
 # 任务轮询端点
 # ─────────────────────────────────────────────
+
 
 @router.get(
     "/tasks/{task_id}",
@@ -213,10 +207,7 @@ async def get_task_result(
     task = AsyncResult(task_id, app=celery_engine)
 
     if task.state != "SUCCESS":
-        raise HTTPException(
-            status_code=400,
-            detail=f"任务尚未完成，当前状态：{task.state}"
-        )
+        raise HTTPException(status_code=400, detail=f"任务尚未完成，当前状态：{task.state}")
 
     record_id = task.result.get("record_id")
     if not record_id:
@@ -250,6 +241,7 @@ async def get_task_result(
 # 历史处方列表
 # ─────────────────────────────────────────────
 
+
 @router.get(
     "/history",
     response_model=PrescriptionHistoryOut,
@@ -268,7 +260,6 @@ async def list_prescription_history(
     分页查询本校历史 AI 处方记录
     支持按类型 + 目标 ID + 目标类型过滤
     """
-    from modules.ai_prescription.models import RiskLevel
 
     school_id = current_user.school_id
 
@@ -285,9 +276,8 @@ async def list_prescription_history(
 
     # 统计总数（与查询同口径）
     from sqlalchemy import func
-    total = await db.scalar(
-        select(func.count()).select_from(AIPrescription).where(*conditions)
-    )
+
+    total = await db.scalar(select(func.count()).select_from(AIPrescription).where(*conditions))
 
     # 分页查询（最新在前）
     records = await db.execute(
@@ -310,16 +300,18 @@ async def list_prescription_history(
             user_row = user_result.fetchone()
             if user_row:
                 creator_name = user_row.username
-        items.append({
-            "id": r.id,
-            "prescription_type": r.prescription_type.value,
-            "target_id": r.target_id,
-            "target_type": r.target_type,
-            "risk_level": r.risk_level.value if r.risk_level else None,
-            "summary": r.summary,
-            "created_at": r.created_at.isoformat() if r.created_at else "",
-            "creator_name": creator_name,
-        })
+        items.append(
+            {
+                "id": r.id,
+                "prescription_type": r.prescription_type.value,
+                "target_id": r.target_id,
+                "target_type": r.target_type,
+                "risk_level": r.risk_level.value if r.risk_level else None,
+                "summary": r.summary,
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+                "creator_name": creator_name,
+            }
+        )
 
     return {"total": total or 0, "items": items}
 
@@ -327,6 +319,7 @@ async def list_prescription_history(
 # ─────────────────────────────────────────────
 # 单条处方详情
 # ─────────────────────────────────────────────
+
 
 @router.get(
     "/records/{record_id}",

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 tests/test_legacy_etl.py — 旧数据 ETL 脚本测试
 
@@ -9,16 +8,13 @@ tests/test_legacy_etl.py — 旧数据 ETL 脚本测试
     python -m pytest tests/test_legacy_etl.py -v
 """
 
-import pytest
-import json
 import os
 import tempfile
-from datetime import datetime
 
 # ── 测试血缘标记 ──
 
-class TestLineageMarker:
 
+class TestLineageMarker:
     def test_lineage_marker_creation(self):
         from scripts.legacy_data_etl import LineageMarker
 
@@ -51,8 +47,8 @@ class TestLineageMarker:
 
 # ── 测试影子存储 ──
 
-class TestShadowStore:
 
+class TestShadowStore:
     def test_save_and_load_students(self):
         from scripts.legacy_data_etl import ShadowStore
 
@@ -99,8 +95,8 @@ class TestShadowStore:
 
 # ── 测试数据转换 ──
 
-class TestDataTransform:
 
+class TestDataTransform:
     def test_transform_students_gender(self):
         """性别字段转换"""
         from scripts.legacy_data_etl import ETLPipeline, ShadowStore
@@ -194,8 +190,8 @@ class TestDataTransform:
 
 # ── 测试按需激活 ──
 
-class TestActivateStudent:
 
+class TestActivateStudent:
     def test_activate_student_found(self):
         from scripts.legacy_data_etl import ETLPipeline, ShadowStore
 
@@ -227,8 +223,8 @@ class TestActivateStudent:
 
 # ── 测试完整 ETL 流程 ──
 
-class TestFullETL:
 
+class TestFullETL:
     def test_full_etl_with_csv(self):
         """CSV 完整 ETL 流程"""
         from scripts.legacy_data_etl import ETLPipeline, ShadowStore

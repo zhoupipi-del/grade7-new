@@ -13,13 +13,12 @@ Wings 3.1 时空拉伸泵 — TimetableDataPump
 
 import logging
 from datetime import date, timedelta
-from typing import Dict, List, Any
+from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from modules.timetable.models import CourseSlot, TimetableScheduleInstance, TimetableSlot
 from sqlalchemy import select
 from sqlalchemy.dialects.mysql import insert as mysql_insert
-
-from modules.timetable.models import CourseSlot, TimetableSlot, TimetableScheduleInstance
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ class TimetableDataPump:
         start_date: date,
         end_date: date,
         db: AsyncSession,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         主泵入口：将指定日期范围内的静态课表拉伸为日历级实例。
 
@@ -66,9 +65,7 @@ class TimetableDataPump:
         lesson_slots = result.scalars().all()
 
         # period_index (1-8) → slot_id
-        period_to_slot_id: Dict[int, int] = {
-            s.period_index: s.id for s in lesson_slots
-        }
+        period_to_slot_id: dict[int, int] = {s.period_index: s.id for s in lesson_slots}
 
         if not period_to_slot_id:
             logger.warning(
@@ -92,25 +89,26 @@ class TimetableDataPump:
 
         if not templates:
             logger.warning(
-                f"[DataPump] school_id={school_id} 的 course_slots 为空仓，"
-                f"请先灌注静态课表母版"
+                f"[DataPump] school_id={school_id} 的 course_slots 为空仓，请先灌注静态课表母版"
             )
             return {"processed_days": 0, "inserted_instances": 0, "skipped_weekends": 0}
 
         logger.info(f"[DataPump] 静态课表母版已加载: {len(templates)} 条模板")
 
         # ── Step 3: 建立 (class_id, day_of_week) → [slot_info] 索引 ──
-        template_index: Dict[str, List[Dict]] = {}
+        template_index: dict[str, list[dict]] = {}
         for t in templates:
             key = f"{t.class_id}:{t.day_of_week}"
             if key not in template_index:
                 template_index[key] = []
-            template_index[key].append({
-                "slot_number": t.slot_number,
-                "course_id": t.course_id,
-                "teacher_id": t.teacher_id,
-                "classroom_id": t.classroom_id,
-            })
+            template_index[key].append(
+                {
+                    "slot_number": t.slot_number,
+                    "course_id": t.course_id,
+                    "teacher_id": t.teacher_id,
+                    "classroom_id": t.classroom_id,
+                }
+            )
 
         # ── Step 4: 逐日扫描，生成实例 ──
         inserted_total = 0
@@ -145,16 +143,18 @@ class TimetableDataPump:
                         )
                         continue
 
-                    instance_payloads.append({
-                        "school_id": school_id,
-                        "class_id": cid,
-                        "date": current,
-                        "slot_id": slot_id,
-                        "period_index": slot_number,
-                        "subject_id": sl["course_id"],
-                        "teacher_id": sl["teacher_id"],
-                        "classroom_id": sl["classroom_id"],
-                    })
+                    instance_payloads.append(
+                        {
+                            "school_id": school_id,
+                            "class_id": cid,
+                            "date": current,
+                            "slot_id": slot_id,
+                            "period_index": slot_number,
+                            "subject_id": sl["course_id"],
+                            "teacher_id": sl["teacher_id"],
+                            "classroom_id": sl["classroom_id"],
+                        }
+                    )
 
             if instance_payloads:
                 # 使用 MySQL ON DUPLICATE KEY UPDATE 保证幂等

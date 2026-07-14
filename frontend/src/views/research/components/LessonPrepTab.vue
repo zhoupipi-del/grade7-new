@@ -202,6 +202,42 @@
             </el-collapse>
           </div>
 
+          <!-- Markdown 教案正文 -->
+          <div class="content-section">
+            <h3 class="section-title">教案正文 (Markdown + LaTeX)</h3>
+            <MdEditor
+              v-model="editableMarkdown"
+              theme="dark"
+              preview-theme="default"
+              code-theme="atom"
+              :toolbars-exclude="['github', 'save', 'pageFullscreen']"
+              placeholder="支持 Markdown 语法和 LaTeX 数学公式... 例: $E=mc^2$"
+              style="height: 400px"
+            />
+          </div>
+
+          <!-- AI学情逆向处方 -->
+          <div class="ai-bias-section">
+            <div class="section-header">
+              <h3 class="section-title">
+                AI学情逆向处方
+                <el-tag v-if="currentPlan.ai_prescription_generated_at" size="small" type="success" effect="plain">
+                  {{ formatTime(currentPlan.ai_prescription_generated_at) }}
+                </el-tag>
+              </h3>
+              <el-button
+                type="danger"
+                :icon="MagicStick"
+                :loading="aiBiasLoading"
+                @click="doGenerateAiBias"
+              >一键唤醒AI偏方</el-button>
+            </div>
+            <div v-if="aiBiasContent" class="ai-bias-content">
+              <MdPreview :model-value="aiBiasContent" theme="dark" />
+            </div>
+            <el-empty v-else description="点击「一键唤醒AI偏方」，基于学情断层数据生成教学偏方" :image-size="60" />
+          </div>
+
           <!-- 版本历史 -->
           <div class="version-section">
             <div class="section-header">
@@ -345,6 +381,9 @@
     <!-- 新版本弹窗 -->
     <el-dialog v-model="showVersionDialog" title="保存新版本" width="500px" destroy-on-close>
       <el-form :model="versionForm" label-width="100px">
+        <el-alert type="info" :closable="false" style="margin-bottom: 16px">
+          当前教案正文(Markdown)内容将随新版本一同保存
+        </el-alert>
         <el-form-item label="变更说明">
           <el-input v-model="versionForm.change_log" type="textarea" :rows="3" placeholder="本次修改的变更说明" />
         </el-form-item>
@@ -401,8 +440,10 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, Delete, Promotion, Check, Upload, RefreshLeft, CopyDocument,
-  EditPen, ChatDotRound, CircleCheck,
+  EditPen, ChatDotRound, CircleCheck, MagicStick,
 } from '@element-plus/icons-vue'
+import { MdEditor, MdPreview } from 'md-editor-v3'
+import 'md-editor-v3/lib/style.css'
 import { useUserStore } from '@/store/user'
 import * as lpApi from '@/api/researchLessonPrep'
 import type { PlanResponse, PlanDetailResponse, VersionResponse, ReviewResponse, PlanStatus, LessonContent } from '@/api/researchLessonPrep'
@@ -457,6 +498,11 @@ const detailVisible = ref(false)
 const currentPlan = ref<PlanDetailResponse | null>(null)
 const activeCollapse = ref(['objectives', 'process'])
 
+/* ──── Markdown编辑 + AI偏方 ──── */
+const editableMarkdown = ref('')
+const aiBiasLoading = ref(false)
+const aiBiasContent = ref('')
+
 const pipelineActive = computed(() => {
   if (!currentPlan.value) return 0
   const map: Record<PlanStatus, number> = { DRAFT: 0, COLLECTIVE_REVIEW: 1, ADMIN_APPROVE: 2, PUBLISHED: 3 }
@@ -468,6 +514,8 @@ async function openDetail(row: any) {
   currentPlan.value = null
   try {
     currentPlan.value = await lpApi.getPlan(row.id)
+    editableMarkdown.value = currentPlan.value.content_markdown || ''
+    aiBiasContent.value = currentPlan.value.ai_bias_prescription || ''
     loadVersions()
     loadReviews()
   } catch (e: any) {
@@ -652,9 +700,10 @@ async function doCreateVersion() {
   try {
     await lpApi.createVersion(currentPlan.value.id, {
       content: currentPlan.value.latest_content || {} as LessonContent,
+      content_markdown: editableMarkdown.value,
       change_log: versionForm.change_log || '内容更新',
       is_major: versionForm.is_major,
-    })
+    } as any)
     ElMessage.success('版本已保存')
     showVersionDialog.value = false
     versionForm.change_log = ''
@@ -664,6 +713,22 @@ async function doCreateVersion() {
     ElMessage.error(e.message || '保存失败')
   } finally {
     versionSaving.value = false
+  }
+}
+
+/* ──── AI学情逆向处方 ──── */
+async function doGenerateAiBias() {
+  if (!currentPlan.value) return
+  aiBiasLoading.value = true
+  try {
+    const res = await lpApi.generateAiBias(currentPlan.value.id)
+    aiBiasContent.value = res.ai_bias_prescription
+    ElMessage.success('AI偏方已生成')
+    await refreshDetail()
+  } catch (e: any) {
+    ElMessage.error(e.message || 'AI偏方生成失败')
+  } finally {
+    aiBiasLoading.value = false
   }
 }
 
@@ -814,6 +879,14 @@ onMounted(loadList)
 .method-tag { margin-right: 8px; margin-bottom: 4px; }
 .blackboard-pre { white-space: pre-wrap; font-family: monospace; background: var(--el-fill-color); padding: 12px; border-radius: 6px; }
 .reflection-text { line-height: 1.8; }
+
+/* AI偏方区域 */
+.ai-bias-section { margin-bottom: 28px; }
+.ai-bias-content {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--el-border-color-lighter);
+}
 
 .process-step { padding-bottom: 8px; }
 .process-content { margin: 8px 0; color: var(--el-text-color-primary); }

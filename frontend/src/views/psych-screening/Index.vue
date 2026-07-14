@@ -21,15 +21,15 @@
       <div class="kpi-card kpi-total">
         <div class="kpi-icon"><el-icon :size="28"><Document /></el-icon></div>
         <div class="kpi-body">
-          <div class="kpi-value">{{ dashData?.overview?.total_surveys || 0 }}</div>
+          <div class="kpi-value">{{ dashData?.survey_stats?.total || 0 }}</div>
           <div class="kpi-label">筛查总人次</div>
         </div>
-        <div class="kpi-detail">MSSMHS {{ dashData?.overview?.mssmhs_count || 0 }} · PCE {{ dashData?.overview?.pce_count || 0 }}</div>
+        <div class="kpi-detail">MSSMHS {{ dashData?.survey_stats?.mssmhs_count || 0 }} · PCE {{ dashData?.survey_stats?.pce_count || 0 }}</div>
       </div>
       <div class="kpi-card kpi-low">
         <div class="kpi-icon"><el-icon :size="28"><CircleCheck /></el-icon></div>
         <div class="kpi-body">
-          <div class="kpi-value">{{ dashData?.overview?.low_risk_count || 0 }}</div>
+          <div class="kpi-value">{{ dashData?.risk_distribution?.low || 0 }}</div>
           <div class="kpi-label">低风险</div>
         </div>
         <div class="kpi-detail">心理健康状态良好</div>
@@ -37,7 +37,7 @@
       <div class="kpi-card kpi-medium">
         <div class="kpi-icon"><el-icon :size="28"><WarningFilled /></el-icon></div>
         <div class="kpi-body">
-          <div class="kpi-value">{{ dashData?.overview?.medium_risk_count || 0 }}</div>
+          <div class="kpi-value">{{ dashData?.risk_distribution?.medium || 0 }}</div>
           <div class="kpi-label">中风险</div>
         </div>
         <div class="kpi-detail">需班主任持续关注</div>
@@ -45,7 +45,7 @@
       <div class="kpi-card kpi-high">
         <div class="kpi-icon"><el-icon :size="28"><CircleCloseFilled /></el-icon></div>
         <div class="kpi-body">
-          <div class="kpi-value">{{ dashData?.overview?.high_risk_count || 0 }}</div>
+          <div class="kpi-value">{{ dashData?.risk_distribution?.high || 0 }}</div>
           <div class="kpi-label">高风险</div>
         </div>
         <div class="kpi-detail">需立即启动干预</div>
@@ -97,19 +97,19 @@
       </div>
       <div class="strip-cards">
         <div class="strip-card">
-          <span class="sc-val">{{ dashData?.intervention_summary?.total || 0 }}</span>
+          <span class="sc-val">{{ dashData?.intervention_stats?.total || 0 }}</span>
           <span class="sc-lbl">干预总数</span>
         </div>
         <div class="strip-card pending">
-          <span class="sc-val">{{ dashData?.intervention_summary?.pending || 0 }}</span>
-          <span class="sc-lbl">待处理</span>
+          <span class="sc-val">{{ (dashData?.intervention_stats?.total || 0) - (dashData?.intervention_stats?.completed || 0) }}</span>
+          <span class="sc-lbl">未完成</span>
         </div>
         <div class="strip-card progress">
-          <span class="sc-val">{{ dashData?.intervention_summary?.in_progress || 0 }}</span>
+          <span class="sc-val">{{ dashData?.intervention_stats?.tracking || 0 }}</span>
           <span class="sc-lbl">进行中</span>
         </div>
         <div class="strip-card done">
-          <span class="sc-val">{{ dashData?.intervention_summary?.completed || 0 }}</span>
+          <span class="sc-val">{{ dashData?.intervention_stats?.completed || 0 }}</span>
           <span class="sc-lbl">已完成</span>
         </div>
       </div>
@@ -256,7 +256,12 @@ function renderPie() {
   if (pieInstance) pieInstance.dispose()
   pieInstance = echarts.init(pieRef.value, 'dark')
 
-  const data = dashData.value?.risk_distribution || []
+  const rd = dashData.value?.risk_distribution
+  const data = rd ? [
+    { name: '低风险', value: rd.low || 0 },
+    { name: '中风险', value: rd.medium || 0 },
+    { name: '高风险', value: rd.high || 0 },
+  ] : []
   pieInstance.setOption({
     tooltip: {
       trigger: 'item',

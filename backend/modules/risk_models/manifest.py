@@ -8,6 +8,8 @@ MODULE_CATEGORY = "ai"
 MODULE_DEPENDENCIES = ["behavior", "attendance", "evaluation"]
 ENABLED_BY_DEFAULT = False
 
+
 def register(router_prefix="/api/v1/risk_models"):
     from modules.risk_models.routers import router
+
     return router, router_prefix

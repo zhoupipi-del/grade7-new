@@ -13,9 +13,8 @@ DB 分配:
 初始化模式参照 PolicyEngine: init_redis() / get_redis() / close_redis()
 """
 
-import os
 import logging
-from typing import Optional
+import os
 
 import redis.asyncio as aioredis
 
@@ -25,10 +24,10 @@ logger = logging.getLogger(__name__)
 #  单例存储
 # ═══════════════════════════════════════════════════════════════
 
-_redis_client: Optional[aioredis.Redis] = None
+_redis_client: aioredis.Redis | None = None
 
 
-def get_redis() -> Optional[aioredis.Redis]:
+def get_redis() -> aioredis.Redis | None:
     """获取全局 Redis 客户端实例 (可能为 None — 降级模式)"""
     return _redis_client
 
@@ -42,6 +41,7 @@ def set_redis(client: aioredis.Redis):
 # ═══════════════════════════════════════════════════════════════
 #  生命周期管理
 # ═══════════════════════════════════════════════════════════════
+
 
 async def init_redis() -> aioredis.Redis:
     """
@@ -69,8 +69,8 @@ async def init_redis() -> aioredis.Redis:
 
     client = aioredis.from_url(
         url,
-        decode_responses=True,      # 自动解码为 str (pub/sub 消息体为 JSON 字符串)
-        max_connections=30,   # 4 频道 pubsub 独占 + 常规缓存读写
+        decode_responses=True,  # 自动解码为 str (pub/sub 消息体为 JSON 字符串)
+        max_connections=30,  # 4 频道 pubsub 独占 + 常规缓存读写
         socket_keepalive=True,
         socket_connect_timeout=5,
         retry_on_timeout=True,
@@ -80,10 +80,7 @@ async def init_redis() -> aioredis.Redis:
     await client.ping()
     _redis_client = client
 
-    logger.info(
-        f"Redis 客户端已初始化: {host}:{port}/{db} "
-        f"(auth={'on' if password else 'off'})"
-    )
+    logger.info(f"Redis 客户端已初始化: {host}:{port}/{db} (auth={'on' if password else 'off'})")
     return client
 
 

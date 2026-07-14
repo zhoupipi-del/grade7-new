@@ -22,27 +22,25 @@
 
 import argparse
 import json
-import random
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
 
 # ═══════════════════════════════════════════════════════════
 # 新系统满分值映射（来自 grades/models.py GradeSubject）
 # ═══════════════════════════════════════════════════════════
 
 NEW_FULL_SCORES = {
-    "chinese": 120,    # 语文
-    "math": 120,       # 数学
-    "english": 120,    # 英语
-    "physics": 100,    # 物理
+    "chinese": 120,  # 语文
+    "math": 120,  # 数学
+    "english": 120,  # 英语
+    "physics": 100,  # 物理
     "chemistry": 100,  # 化学
-    "biology": 100,    # 生物
-    "politics": 100,   # 政治/道法
-    "history": 100,    # 历史
+    "biology": 100,  # 生物
+    "politics": 100,  # 政治/道法
+    "history": 100,  # 历史
     "geography": 100,  # 地理
-    "pe": 60,          # 体育
+    "pe": 60,  # 体育
 }
 
 # 旧系统科目名 → 新系统标准科目名映射
@@ -69,9 +67,14 @@ def connect_mysql(host: str, port: int, user: str, password: str, database: str)
     """连接 MySQL 旧库"""
     try:
         import pymysql
+
         conn = pymysql.connect(
-            host=host, port=port, user=user, password=password,
-            database=database, charset="utf8mb4",
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            charset="utf8mb4",
         )
         return conn
     except ImportError:
@@ -85,6 +88,7 @@ def connect_mysql(host: str, port: int, user: str, password: str, database: str)
 def connect_sqlite(filepath: str):
     """连接 SQLite 旧库"""
     import sqlite3
+
     try:
         conn = sqlite3.connect(filepath)
         return conn
@@ -101,7 +105,8 @@ def discover_grade_tables(cursor) -> list[str]:
     cursor.execute("SHOW TABLES")
     tables = [row[0] for row in cursor.fetchall()]
     candidates = [
-        t for t in tables
+        t
+        for t in tables
         if any(kw in t.lower() for kw in ("grade", "score", "exam", "test", "成绩", "考试"))
     ]
     return candidates
@@ -145,7 +150,7 @@ def detect_score_columns(columns: list[str]) -> dict[str, str]:
     return detected
 
 
-def analyze_score_range(values: list[Optional[float]], subject: str) -> dict:
+def analyze_score_range(values: list[float | None], subject: str) -> dict:
     """
     分析一门科目的分数范围，推断满分制。
     """
@@ -176,15 +181,11 @@ def analyze_score_range(values: list[Optional[float]], subject: str) -> dict:
         "inferred_full_score": inferred,
         "expected_full_score": expected,
         "mismatch": mismatch,
-        "mismatch_detail": (
-            f"旧库满分≈{inferred}, 新系统满分={expected}" if mismatch else None
-        ),
+        "mismatch_detail": (f"旧库满分≈{inferred}, 新系统满分={expected}" if mismatch else None),
     }
 
 
-def analyze_subject_mapping(
-    sample: list[dict], score_columns: dict[str, str]
-) -> list[dict]:
+def analyze_subject_mapping(sample: list[dict], score_columns: dict[str, str]) -> list[dict]:
     """
     对每门检测到的科目，抽样分析分数范围和不一致项。
     """
@@ -200,11 +201,13 @@ def analyze_subject_mapping(
                 continue
 
         analysis = analyze_score_range(values, std_code)
-        results.append({
-            "column_name": col,
-            "subject_code": std_code,
-            "analysis": analysis,
-        })
+        results.append(
+            {
+                "column_name": col,
+                "subject_code": std_code,
+                "analysis": analysis,
+            }
+        )
     return results
 
 
@@ -221,41 +224,60 @@ def detect_inconsistencies(sample: list[dict], score_columns: dict[str, str]) ->
         for col, std_code in score_columns.items():
             val = row.get(col)
             if val is None or val == "" or val == "None":
-                row_issues.append({
-                    "column": col, "value": val, "issue": "NULL 或空值",
-                })
+                row_issues.append(
+                    {
+                        "column": col,
+                        "value": val,
+                        "issue": "NULL 或空值",
+                    }
+                )
                 continue
             try:
                 val_f = float(val)
                 expected = NEW_FULL_SCORES.get(std_code)
                 if expected and val_f > expected * 1.1:
-                    row_issues.append({
-                        "column": col, "value": val_f,
-                        "issue": f"分数 {val_f} 远超满分 {expected}",
-                    })
+                    row_issues.append(
+                        {
+                            "column": col,
+                            "value": val_f,
+                            "issue": f"分数 {val_f} 远超满分 {expected}",
+                        }
+                    )
                 if val_f < 0:
-                    row_issues.append({
-                        "column": col, "value": val_f, "issue": "负分异常",
-                    })
+                    row_issues.append(
+                        {
+                            "column": col,
+                            "value": val_f,
+                            "issue": "负分异常",
+                        }
+                    )
             except (ValueError, TypeError):
-                row_issues.append({
-                    "column": col, "value": val,
-                    "issue": "无法解析为数字",
-                })
+                row_issues.append(
+                    {
+                        "column": col,
+                        "value": val,
+                        "issue": "无法解析为数字",
+                    }
+                )
 
         if row_issues:
-            issues.append({
-                "row_index": i,
-                "row_id": row.get("id"),  # type: ignore
-                "issues": row_issues,
-            })
+            issues.append(
+                {
+                    "row_index": i,
+                    "row_id": row.get("id"),  # type: ignore
+                    "issues": row_issues,
+                }
+            )
 
     return issues
 
 
 def generate_report(
-    table: str, sample: list[dict], score_columns: dict[str, str],
-    subject_analysis: list[dict], inconsistencies: list[dict],
+    table: str,
+    sample: list[dict],
+    score_columns: dict[str, str],
+    subject_analysis: list[dict],
+    inconsistencies: list[dict],
 ) -> dict:
     """生成 JSON 格式差异报告"""
     return {
@@ -270,28 +292,22 @@ def generate_report(
             "all_columns": list(sample[0].keys()) if sample else [],
             "detected_score_columns": score_columns,
             "undetected_columns": [
-                c for c in (sample[0].keys() if sample else [])
-                if c not in score_columns
+                c for c in (sample[0].keys() if sample else []) if c not in score_columns
             ],
         },
         "full_score_analysis": {
             "new_system_full_scores": NEW_FULL_SCORES,
             "per_subject": subject_analysis,
-            "mismatch_count": sum(
-                1 for a in subject_analysis if a["analysis"]["mismatch"]
-            ),
+            "mismatch_count": sum(1 for a in subject_analysis if a["analysis"]["mismatch"]),
             "mismatch_subjects": [
-                a["subject_code"] for a in subject_analysis
-                if a["analysis"]["mismatch"]
+                a["subject_code"] for a in subject_analysis if a["analysis"]["mismatch"]
             ],
         },
         "data_quality": {
             "total_issues": len(inconsistencies),
             "issue_rows": inconsistencies,
         },
-        "recommendations": _generate_recommendations(
-            subject_analysis, inconsistencies, sample
-        ),
+        "recommendations": _generate_recommendations(subject_analysis, inconsistencies, sample),
     }
 
 
@@ -315,11 +331,11 @@ def _generate_recommendations(
 
     if inconsistencies:
         null_count = sum(
-            1 for inc in inconsistencies
-            for iss in inc["issues"] if "NULL" in str(iss["issue"])
+            1 for inc in inconsistencies for iss in inc["issues"] if "NULL" in str(iss["issue"])
         )
         outlier_count = sum(
-            1 for inc in inconsistencies
+            1
+            for inc in inconsistencies
             for iss in inc["issues"]
             if "远超满分" in str(iss["issue"]) or "负分" in str(iss["issue"])
         )
@@ -330,8 +346,7 @@ def _generate_recommendations(
             )
         if outlier_count > 0:
             recs.append(
-                f"[异常分数] 发现 {outlier_count} 个异常分数值, "
-                f"建议: 人工复核原始 Excel 后再导入"
+                f"[异常分数] 发现 {outlier_count} 个异常分数值, 建议: 人工复核原始 Excel 后再导入"
             )
 
     dirty_ratio = len(inconsistencies) / len(sample) if sample else 0
@@ -343,14 +358,10 @@ def _generate_recommendations(
         )
     elif dirty_ratio > 0.1:
         recs.append(
-            f"[建议清洗] 脏数据占比 {dirty_ratio:.0%}, "
-            f"建议先经 data_adapter 清洗管道处理后再导入"
+            f"[建议清洗] 脏数据占比 {dirty_ratio:.0%}, 建议先经 data_adapter 清洗管道处理后再导入"
         )
     else:
-        recs.append(
-            f"[数据质量良好] 脏数据占比 {dirty_ratio:.0%}, "
-            f"可考虑批量直导入"
-        )
+        recs.append(f"[数据质量良好] 脏数据占比 {dirty_ratio:.0%}, 可考虑批量直导入")
 
     return recs
 
@@ -423,18 +434,12 @@ def main():
 
     print(f"\n{'=' * 60}")
     print(f"  报告已保存: {output_path.absolute()}")
-    print(f"  建议在导入前审阅报告中的 recommendations 部分")
+    print("  建议在导入前审阅报告中的 recommendations 部分")
     print(f"{'=' * 60}")
 
     # 5. 汇总建议
-    total_mismatches = sum(
-        r["full_score_analysis"]["mismatch_count"]
-        for r in all_reports.values()
-    )
-    total_issues = sum(
-        r["data_quality"]["total_issues"]
-        for r in all_reports.values()
-    )
+    total_mismatches = sum(r["full_score_analysis"]["mismatch_count"] for r in all_reports.values())
+    total_issues = sum(r["data_quality"]["total_issues"] for r in all_reports.values())
 
     if total_mismatches > 0:
         print(f"\n⚠️  警告: {total_mismatches} 门科目存在满分制不匹配!")

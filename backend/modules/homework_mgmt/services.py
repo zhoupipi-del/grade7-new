@@ -8,27 +8,35 @@ homework_mgmt/services.py — 作业管理业务逻辑
   4. 统计看板
 """
 
-from sqlalchemy import select, func, and_, update, case
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from typing import Optional, List, Tuple, Dict, Any
-from datetime import datetime, timedelta
 import logging
 
-from core.models import get_local_now, User, Student, Class
+from core.event_bus import EventBus
+from core.models import Class, Student, User, get_local_now
 from modules.grades.models import GradeSubject
+from sqlalchemy import and_, case, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .models import (
-    HwAssignment, HwSubmission, HwGrading,
-    ASSIGNMENT_DRAFT, ASSIGNMENT_PUBLISHED, ASSIGNMENT_CLOSED,
-    SUBMISSION_PENDING, SUBMISSION_SUBMITTED, SUBMISSION_LATE, SUBMISSION_GRADED, SUBMISSION_MISSING,
-    HW_DAILY, HW_WEEKLY, HW_UNIT_REVIEW, HW_EXAM_PREP,
-    GRADE_EXCELLENT, GRADE_GOOD, GRADE_FAIR, GRADE_NEEDS_IMPROVEMENT,
+    ASSIGNMENT_CLOSED,
+    ASSIGNMENT_PUBLISHED,
+    GRADE_EXCELLENT,
+    GRADE_FAIR,
+    GRADE_GOOD,
+    GRADE_NEEDS_IMPROVEMENT,
+    SUBMISSION_GRADED,
+    SUBMISSION_LATE,
+    SUBMISSION_MISSING,
+    SUBMISSION_PENDING,
+    SUBMISSION_SUBMITTED,
+    HwAssignment,
+    HwGrading,
+    HwSubmission,
 )
 from .schemas import (
-    AssignmentCreate, AssignmentUpdate, AssignmentResponse,
-    SubmissionCreate, SubmissionResponse,
-    GradingCreate, GradingResponse,
-    DashboardResponse,
+    AssignmentCreate,
+    AssignmentUpdate,
+    GradingCreate,
+    SubmissionCreate,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +45,7 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────
 # 辅助函数
 # ──────────────────────────────────────────────
+
 
 def _calculate_grade(percentage: float) -> str:
     """根据得分率计算等级"""
@@ -50,27 +59,23 @@ def _calculate_grade(percentage: float) -> str:
         return GRADE_NEEDS_IMPROVEMENT
 
 
-async def _get_teacher_names_batch(db: AsyncSession, user_ids: List[int]) -> Dict[int, str]:
+async def _get_teacher_names_batch(db: AsyncSession, user_ids: list[int]) -> dict[int, str]:
     """批量获取教师姓名"""
     if not user_ids:
         return {}
-    result = await db.execute(
-        select(User.id, User.display_name).where(User.id.in_(user_ids))
-    )
+    result = await db.execute(select(User.id, User.display_name).where(User.id.in_(user_ids)))
     return {row[0]: row[1] for row in result.all()}
 
 
-async def _get_student_names_batch(db: AsyncSession, student_ids: List[int]) -> Dict[int, str]:
+async def _get_student_names_batch(db: AsyncSession, student_ids: list[int]) -> dict[int, str]:
     """批量获取学生姓名"""
     if not student_ids:
         return {}
-    result = await db.execute(
-        select(Student.id, Student.name).where(Student.id.in_(student_ids))
-    )
+    result = await db.execute(select(Student.id, Student.name).where(Student.id.in_(student_ids)))
     return {row[0]: row[1] for row in result.all()}
 
 
-async def _get_subject_names_batch(db: AsyncSession, subject_ids: List[int]) -> Dict[int, str]:
+async def _get_subject_names_batch(db: AsyncSession, subject_ids: list[int]) -> dict[int, str]:
     """批量获取科目名"""
     if not subject_ids:
         return {}
@@ -80,17 +85,17 @@ async def _get_subject_names_batch(db: AsyncSession, subject_ids: List[int]) -> 
     return {row[0]: row[1] for row in result.all()}
 
 
-async def _get_class_names_batch(db: AsyncSession, class_ids: List[int]) -> Dict[int, str]:
+async def _get_class_names_batch(db: AsyncSession, class_ids: list[int]) -> dict[int, str]:
     """批量获取班级名"""
     if not class_ids:
         return {}
-    result = await db.execute(
-        select(Class.id, Class.name).where(Class.id.in_(class_ids))
-    )
+    result = await db.execute(select(Class.id, Class.name).where(Class.id.in_(class_ids)))
     return {row[0]: row[1] for row in result.all()}
 
 
-async def _enrich_assignment(db: AsyncSession, a: HwAssignment, submission_stats: Optional[dict] = None) -> dict:
+async def _enrich_assignment(
+    db: AsyncSession, a: HwAssignment, submission_stats: dict | None = None
+) -> dict:
     """将 ORM 对象转换为带关联名称的 dict"""
     teacher_map = await _get_teacher_names_batch(db, [a.teacher_id])
     subject_map = await _get_subject_names_batch(db, [a.subject_id])
@@ -127,8 +132,12 @@ async def _enrich_assignment(db: AsyncSession, a: HwAssignment, submission_stats
 # 作业 CRUD
 # ──────────────────────────────────────────────
 
+
 async def create_assignment(
-    db: AsyncSession, school_id: int, teacher_id: int, data: AssignmentCreate,
+    db: AsyncSession,
+    school_id: int,
+    teacher_id: int,
+    data: AssignmentCreate,
 ) -> HwAssignment:
     """创建作业"""
     assignment = HwAssignment(
@@ -154,13 +163,15 @@ async def create_assignment(
 
 
 async def list_assignments(
-    db: AsyncSession, school_id: int,
-    teacher_id: Optional[int] = None,
-    class_id: Optional[int] = None,
-    subject_id: Optional[int] = None,
-    status: Optional[str] = None,
-    page: int = 1, page_size: int = 20,
-) -> Tuple[List[dict], int]:
+    db: AsyncSession,
+    school_id: int,
+    teacher_id: int | None = None,
+    class_id: int | None = None,
+    subject_id: int | None = None,
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict], int]:
     """列出作业"""
     conditions = [HwAssignment.school_id == school_id]
     if teacher_id:
@@ -175,9 +186,7 @@ async def list_assignments(
     where_clause = and_(*conditions)
 
     # 总数
-    count_result = await db.execute(
-        select(func.count(HwAssignment.id)).where(where_clause)
-    )
+    count_result = await db.execute(select(func.count(HwAssignment.id)).where(where_clause))
     total = count_result.scalar() or 0
 
     # 分页查询
@@ -199,12 +208,16 @@ async def list_assignments(
     return items, total
 
 
-async def _get_assignment_submission_stats(db: AsyncSession, school_id: int, assignment_id: int) -> dict:
+async def _get_assignment_submission_stats(
+    db: AsyncSession, school_id: int, assignment_id: int
+) -> dict:
     """获取单个作业的提交统计"""
     result = await db.execute(
         select(
             func.count(HwSubmission.id).label("submission_count"),
-            func.sum(case((HwSubmission.status == SUBMISSION_GRADED, 1), else_=0)).label("graded_count"),
+            func.sum(case((HwSubmission.status == SUBMISSION_GRADED, 1), else_=0)).label(
+                "graded_count"
+            ),
         ).where(
             and_(
                 HwSubmission.school_id == school_id,
@@ -220,7 +233,9 @@ async def _get_assignment_submission_stats(db: AsyncSession, school_id: int, ass
     }
 
 
-async def get_assignment(db: AsyncSession, school_id: int, assignment_id: int) -> Optional[HwAssignment]:
+async def get_assignment(
+    db: AsyncSession, school_id: int, assignment_id: int
+) -> HwAssignment | None:
     """获取单个作业"""
     result = await db.execute(
         select(HwAssignment).where(
@@ -234,8 +249,11 @@ async def get_assignment(db: AsyncSession, school_id: int, assignment_id: int) -
 
 
 async def update_assignment(
-    db: AsyncSession, school_id: int, assignment_id: int, data: AssignmentUpdate,
-) -> Optional[HwAssignment]:
+    db: AsyncSession,
+    school_id: int,
+    assignment_id: int,
+    data: AssignmentUpdate,
+) -> HwAssignment | None:
     """更新作业"""
     assignment = await get_assignment(db, school_id, assignment_id)
     if not assignment:
@@ -250,7 +268,9 @@ async def update_assignment(
     return assignment
 
 
-async def close_assignment(db: AsyncSession, school_id: int, assignment_id: int) -> Optional[HwAssignment]:
+async def close_assignment(
+    db: AsyncSession, school_id: int, assignment_id: int
+) -> HwAssignment | None:
     """关闭作业 — 将未提交的标记为missing"""
     assignment = await get_assignment(db, school_id, assignment_id)
     if not assignment:
@@ -280,10 +300,14 @@ async def close_assignment(db: AsyncSession, school_id: int, assignment_id: int)
 # 学生提交
 # ──────────────────────────────────────────────
 
+
 async def submit_homework(
-    db: AsyncSession, school_id: int, assignment_id: int, student_id: int,
+    db: AsyncSession,
+    school_id: int,
+    assignment_id: int,
+    student_id: int,
     data: SubmissionCreate,
-) -> Optional[HwSubmission]:
+) -> HwSubmission | None:
     """学生提交作业 — 自动判断迟交"""
     assignment = await get_assignment(db, school_id, assignment_id)
     if not assignment:
@@ -328,13 +352,37 @@ async def submit_homework(
 
     await db.commit()
     await db.refresh(submission)
+
+    # ⚡ Wings 3.2 CEP: 迟交作业事件广播 → growth/listeners 接收站
+    if is_late:
+        bus = EventBus()
+        bus.publish(
+            "homework.submission_late",
+            {
+                "school_id": school_id,
+                "student_id": student_id,
+                "assignment_id": assignment_id,
+                "subject_id": assignment.subject_id,
+                "grade_id": assignment.grade_id,
+                "class_id": getattr(submission, "class_id", None),
+                "late_minutes": late_minutes,
+                "title": f"作业迟交: {assignment.title[:40]} (迟{late_minutes}分钟)",
+            },
+        )
+        logger.info(
+            f"[homework] CEP published: student={student_id} "
+            f"assignment={assignment_id} late={late_minutes}min"
+        )
+
     return submission
 
 
 async def list_submissions(
-    db: AsyncSession, school_id: int, assignment_id: int,
-    status: Optional[str] = None,
-) -> Tuple[List[dict], int]:
+    db: AsyncSession,
+    school_id: int,
+    assignment_id: int,
+    status: str | None = None,
+) -> tuple[list[dict], int]:
     """列出作业的所有提交"""
     conditions = [
         HwSubmission.school_id == school_id,
@@ -344,9 +392,7 @@ async def list_submissions(
         conditions.append(HwSubmission.status == status)
 
     result = await db.execute(
-        select(HwSubmission)
-        .where(and_(*conditions))
-        .order_by(HwSubmission.submitted_at.desc())
+        select(HwSubmission).where(and_(*conditions)).order_by(HwSubmission.submitted_at.desc())
     )
     submissions = result.scalars().all()
 
@@ -379,26 +425,31 @@ async def list_submissions(
 
     items = []
     for s in submissions:
-        items.append({
-            "id": s.id,
-            "assignment_id": s.assignment_id,
-            "student_id": s.student_id,
-            "student_name": student_map.get(s.student_id, f"学生{s.student_id}"),
-            "content": s.content,
-            "attachment_url": s.attachment_url,
-            "submitted_at": s.submitted_at,
-            "status": s.status,
-            "late_minutes": s.late_minutes,
-            "created_at": s.created_at,
-            "grading": grading_map.get(s.id),
-        })
+        items.append(
+            {
+                "id": s.id,
+                "assignment_id": s.assignment_id,
+                "student_id": s.student_id,
+                "student_name": student_map.get(s.student_id, f"学生{s.student_id}"),
+                "content": s.content,
+                "attachment_url": s.attachment_url,
+                "submitted_at": s.submitted_at,
+                "status": s.status,
+                "late_minutes": s.late_minutes,
+                "created_at": s.created_at,
+                "grading": grading_map.get(s.id),
+            }
+        )
 
     return items, len(items)
 
 
 async def get_student_submission(
-    db: AsyncSession, school_id: int, assignment_id: int, student_id: int,
-) -> Optional[dict]:
+    db: AsyncSession,
+    school_id: int,
+    assignment_id: int,
+    student_id: int,
+) -> dict | None:
     """获取学生在某作业的提交"""
     result = await db.execute(
         select(HwSubmission).where(
@@ -457,10 +508,14 @@ async def get_student_submission(
 # 教师批改 + 错题标记 → error_funnel
 # ──────────────────────────────────────────────
 
+
 async def grade_submission(
-    db: AsyncSession, school_id: int, submission_id: int,
-    teacher_id: int, data: GradingCreate,
-) -> Optional[dict]:
+    db: AsyncSession,
+    school_id: int,
+    submission_id: int,
+    teacher_id: int,
+    data: GradingCreate,
+) -> dict | None:
     """教师批改提交 — 含错题标记，自动同步到 error_funnel"""
     # 获取提交
     sub_result = await db.execute(
@@ -485,16 +540,18 @@ async def grade_submission(
     error_items_data = []
     if data.error_items:
         for ei in data.error_items:
-            error_items_data.append({
-                "question_no": ei.question_no,
-                "question_content": ei.question_content,
-                "question_type": ei.question_type,
-                "student_answer": ei.student_answer,
-                "correct_answer": ei.correct_answer,
-                "error_type": ei.error_type,
-                "knowledge_point_ids": ei.knowledge_point_ids or [],
-                "difficulty": ei.difficulty,
-            })
+            error_items_data.append(
+                {
+                    "question_no": ei.question_no,
+                    "question_content": ei.question_content,
+                    "question_type": ei.question_type,
+                    "student_answer": ei.student_answer,
+                    "correct_answer": ei.correct_answer,
+                    "error_type": ei.error_type,
+                    "knowledge_point_ids": ei.knowledge_point_ids or [],
+                    "difficulty": ei.difficulty,
+                }
+            )
 
     # 检查是否已有批改
     existing_result = await db.execute(
@@ -543,8 +600,11 @@ async def grade_submission(
     if error_items_data:
         try:
             await _sync_errors_to_funnel(
-                db, school_id, submission.student_id,
-                submission.assignment_id, error_items_data,
+                db,
+                school_id,
+                submission.student_id,
+                submission.assignment_id,
+                error_items_data,
             )
         except Exception as e:
             logger.error(f"同步错题到 error_funnel 失败: {e}")
@@ -569,14 +629,22 @@ async def grade_submission(
 
 
 async def _sync_errors_to_funnel(
-    db: AsyncSession, school_id: int, student_id: int,
-    assignment_id: int, error_items: List[dict],
+    db: AsyncSession,
+    school_id: int,
+    student_id: int,
+    assignment_id: int,
+    error_items: list[dict],
 ) -> None:
     """将批改标记的错题同步到 error_funnel 模块"""
     try:
         from modules.error_funnel.services import ingest_errors_from_homework
+
         await ingest_errors_from_homework(
-            db, school_id, student_id, assignment_id, error_items,
+            db,
+            school_id,
+            student_id,
+            assignment_id,
+            error_items,
         )
     except ImportError:
         logger.warning("error_funnel 模块未安装，跳过错题同步")
@@ -588,10 +656,12 @@ async def _sync_errors_to_funnel(
 # 看板统计
 # ──────────────────────────────────────────────
 
+
 async def get_dashboard(
-    db: AsyncSession, school_id: int,
-    teacher_id: Optional[int] = None,
-    class_id: Optional[int] = None,
+    db: AsyncSession,
+    school_id: int,
+    teacher_id: int | None = None,
+    class_id: int | None = None,
 ) -> dict:
     """作业管理看板统计"""
     conditions = [HwAssignment.school_id == school_id]
@@ -603,9 +673,7 @@ async def get_dashboard(
     where_clause = and_(*conditions)
 
     # 作业总数
-    total_result = await db.execute(
-        select(func.count(HwAssignment.id)).where(where_clause)
-    )
+    total_result = await db.execute(select(func.count(HwAssignment.id)).where(where_clause))
     total_assignments = total_result.scalar() or 0
 
     # 进行中作业
@@ -652,7 +720,9 @@ async def get_dashboard(
         select(
             HwAssignment.homework_type,
             func.count(HwAssignment.id),
-        ).where(where_clause).group_by(HwAssignment.homework_type)
+        )
+        .where(where_clause)
+        .group_by(HwAssignment.homework_type)
     )
     by_type = {row[0]: row[1] for row in type_result.all()}
 
@@ -672,16 +742,19 @@ async def get_dashboard(
     error_hotspots = []
     try:
         from modules.error_funnel.models import ErrorBookItem
+
         error_result = await db.execute(
             select(
                 ErrorBookItem.error_type,
                 func.count(ErrorBookItem.id),
-            ).where(
+            )
+            .where(
                 and_(
                     ErrorBookItem.school_id == school_id,
                     ErrorBookItem.source_type == "homework",
                 )
-            ).group_by(ErrorBookItem.error_type)
+            )
+            .group_by(ErrorBookItem.error_type)
         )
         error_hotspots = [{"error_type": row[0], "count": row[1]} for row in error_result.all()]
     except Exception:

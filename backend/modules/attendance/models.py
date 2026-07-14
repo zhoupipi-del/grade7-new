@@ -4,13 +4,20 @@ modules/attendance/models.py — 考勤数据模型
 继承 SchoolMixin 实现多租户隔离。
 """
 
-from datetime import date, datetime
-from sqlalchemy import (
-    Column, BigInteger, String, Date, DateTime, ForeignKey, Text, Index,
-)
-from sqlalchemy.orm import relationship
+from datetime import date
 
 from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+)
+from sqlalchemy.orm import relationship
 
 
 class AttendanceRecord(Base, SchoolMixin):
@@ -20,6 +27,7 @@ class AttendanceRecord(Base, SchoolMixin):
     每条记录 = 某学生某日的出勤状态。
     status 枚举: present(出勤) / late(迟到) / early(早退) / absent(缺勤) / leave(请假)
     """
+
     __tablename__ = "attendance_records"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -49,6 +57,7 @@ class LeaveRequest(Base, SchoolMixin):
     审批流程: pending → class_approved → grade_approved
     审批通过后自动创建 AttendanceRecord。
     """
+
     __tablename__ = "leave_requests"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -59,10 +68,11 @@ class LeaveRequest(Base, SchoolMixin):
     end_date = Column(Date, nullable=False)
     reason = Column(Text, nullable=True)
     status = Column(
-        String(20), default="pending",
-        comment="pending/class_approved/grade_approved/rejected"
+        String(20), default="pending", comment="pending/class_approved/grade_approved/rejected"
     )
-    submitted_by = Column(BigInteger, ForeignKey("users.id"), nullable=True, comment="申请人（家长）")
+    submitted_by = Column(
+        BigInteger, ForeignKey("users.id"), nullable=True, comment="申请人（家长）"
+    )
     approved_by_class = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     approved_by_grade = Column(BigInteger, ForeignKey("users.id"), nullable=True)
     approved_at_class = Column(DateTime, nullable=True)

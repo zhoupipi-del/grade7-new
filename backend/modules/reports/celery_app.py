@@ -13,6 +13,7 @@ Phase 2A 重构：kombu.Exchange + Queue 显式声明，多队列物理隔离。
 """
 
 import os
+
 from celery import Celery
 from celery.schedules import crontab
 from kombu import Exchange, Queue
@@ -32,9 +33,9 @@ celery_engine = Celery(
     include=[
         "modules.reports.tasks",
         "modules.ai_prescription.tasks",
-        "modules.risk_models.tasks",   # Phase 2A: RDI 异步任务骨架
-        "modules.approval.tasks",       # Phase 2B: 审批超时扫描器
-        "modules.timetable.tasks",      # Wings 3.1: 时空发电机 (Beat 02:00)
+        "modules.risk_models.tasks",  # Phase 2A: RDI 异步任务骨架
+        "modules.approval.tasks",  # Phase 2B: 审批超时扫描器
+        "modules.timetable.tasks",  # Wings 3.1: 时空发电机 (Beat 02:00)
     ],
 )
 
@@ -42,18 +43,18 @@ celery_engine = Celery(
 # Exchange 声明 (direct 类型 — 精确路由，无通配符)
 # ═══════════════════════════════════════════════════════════════
 high_priority_exchange = Exchange("wings3.high_priority", type="direct")
-maintenance_exchange   = Exchange("wings3.maintenance",   type="direct")
-periodic_exchange      = Exchange("wings3.periodic",      type="direct")
-default_exchange       = Exchange("wings3.default",       type="direct")
+maintenance_exchange = Exchange("wings3.maintenance", type="direct")
+periodic_exchange = Exchange("wings3.periodic", type="direct")
+default_exchange = Exchange("wings3.default", type="direct")
 
 # ═══════════════════════════════════════════════════════════════
 # Queue 显式声明
 # ═══════════════════════════════════════════════════════════════
 task_queues = (
     Queue("high_priority", high_priority_exchange, routing_key="high"),
-    Queue("maintenance",   maintenance_exchange,   routing_key="maintenance"),
-    Queue("periodic",      periodic_exchange,      routing_key="periodic"),
-    Queue("celery",        default_exchange,       routing_key="default"),
+    Queue("maintenance", maintenance_exchange, routing_key="maintenance"),
+    Queue("periodic", periodic_exchange, routing_key="periodic"),
+    Queue("celery", default_exchange, routing_key="default"),
 )
 
 celery_engine.conf.update(
@@ -62,29 +63,27 @@ celery_engine.conf.update(
     accept_content=["json"],
     timezone="Asia/Shanghai",
     enable_utc=False,
-    task_time_limit=900,            # 15 分钟强行超时断路器
-    task_soft_time_limit=840,       # 14 分钟软超时（提前 60s 发出 SoftTimeLimitExceeded）
-    worker_prefetch_multiplier=1,   # 公平调度，避免长任务阻塞短任务
-    result_expires=3600,            # 结果 1 小时后自动清理
-    task_acks_late=True,            # 任务完成后才确认，防止 worker 崩溃丢任务
-    task_reject_on_worker_lost=True,# worker 崩溃时自动重新派发
-
+    task_time_limit=900,  # 15 分钟强行超时断路器
+    task_soft_time_limit=840,  # 14 分钟软超时（提前 60s 发出 SoftTimeLimitExceeded）
+    worker_prefetch_multiplier=1,  # 公平调度，避免长任务阻塞短任务
+    result_expires=3600,  # 结果 1 小时后自动清理
+    task_acks_late=True,  # 任务完成后才确认，防止 worker 崩溃丢任务
+    task_reject_on_worker_lost=True,  # worker 崩溃时自动重新派发
     # ── 四队列物理隔离 ──
     task_default_queue="celery",
     task_queues=task_queues,
     task_routes={
         # 🔴 高优先级：AI 处方 (10-30s)
-        "ai_prescription.*":           {"queue": "high_priority"},
+        "ai_prescription.*": {"queue": "high_priority"},
         # 🟡 重资产：PDF 报告 + RDI 风险扫描 (7-15min)
         "generate_class_moral_report": {"queue": "maintenance"},
         "reports.precompute_snapshots": {"queue": "maintenance"},
-        "risk_models.*":               {"queue": "maintenance"},
+        "risk_models.*": {"queue": "maintenance"},
         # 🟢 定时任务：审计报表、数据备份 + 审批超时扫描 + 时空发电机
-        "reports.periodic_*":          {"queue": "periodic"},
-        "approval.*":                  {"queue": "periodic"},  # Phase 2B
-        "timetable.*":                 {"queue": "periodic"},  # Wings 3.1
+        "reports.periodic_*": {"queue": "periodic"},
+        "approval.*": {"queue": "periodic"},  # Phase 2B
+        "timetable.*": {"queue": "periodic"},  # Wings 3.1
     },
-
     # ── Celery Beat 调度 (Phase 2B: RDI 每日全量扫描已激活) ──
     beat_schedule={
         # 每日凌晨 1:00 全量 RDI 风险扫描

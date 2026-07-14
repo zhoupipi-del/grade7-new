@@ -5,24 +5,23 @@ modules/lineage/routers.py — 血缘追踪 API 端点
 """
 
 import logging
-from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from core.routers import get_db, get_current_user, verify_entity_ownership
 from core.models import User
-from modules.lineage.services import LineageService
+from core.routers import get_current_user, get_db, verify_entity_ownership
+from fastapi import APIRouter, Depends, HTTPException, Query
+from modules.evaluation.models import ScoreLog
 from modules.lineage.schemas import (
     CausalChain,
     LineageStatsOut,
-    LineageQuery,
-    ScoreTraceOut,
     MigrationBatchCreate,
-    MigrationBatchUpdate,
     MigrationBatchOut,
+    MigrationBatchUpdate,
     MigrationStatsOut,
+    ScoreTraceOut,
 )
-from modules.evaluation.models import ScoreLog
+from modules.lineage.services import LineageService
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("lineage.routers")
 router = APIRouter()
@@ -41,6 +40,7 @@ async def get_trace_chain(
     chain = await LineageService.get_trace_chain(db, trace_id)
     if not chain:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="因果链不存在")
     return chain
 
@@ -69,7 +69,11 @@ async def get_source_descendants(
     示例: /api/v1/lineage/sources/discipline_record/42
     """
     chains = await LineageService.get_source_descendants(db, source_type, source_id)
-    return {"source_type": source_type, "source_id": source_id, "chains": [c.model_dump() for c in chains]}
+    return {
+        "source_type": source_type,
+        "source_id": source_id,
+        "chains": [c.model_dump() for c in chains],
+    }
 
 
 @router.get("/stats", response_model=LineageStatsOut)
@@ -115,6 +119,7 @@ async def search_lineage(
 # #1193 成绩出生证明
 # ═══════════════════════════════════════════════════════════
 
+
 @router.get("/trace/{score_log_id}", response_model=ScoreTraceOut)
 async def get_score_trace(
     score_log_id: int,
@@ -137,9 +142,7 @@ async def get_score_trace(
     权限控制：多租户隔离 + MS_ADMIN/GRADE_LEADER/CLASS_TEACHER
     """
     # 多租户隔离 — 先查出 ScoreLog 验证 school_id
-    result = await db.execute(
-        select(ScoreLog).where(ScoreLog.id == score_log_id)
-    )
+    result = await db.execute(select(ScoreLog).where(ScoreLog.id == score_log_id))
     score_log = result.scalar_one_or_none()
     await verify_entity_ownership(score_log, current_user, "ScoreLog")
 
@@ -154,6 +157,7 @@ async def get_score_trace(
 # 数据迁移批次追踪
 # ═══════════════════════════════════════════════════════════
 
+
 @router.post("/migration/batches", status_code=201, response_model=MigrationBatchOut)
 async def create_migration_batch(
     body: MigrationBatchCreate,
@@ -166,7 +170,9 @@ async def create_migration_batch(
     后续逐行写入时携带此 batch_id 关联 sync_batch。
     """
     return await LineageService.create_migration_batch(
-        db=db, data=body, school_id=current_user.school_id,
+        db=db,
+        data=body,
+        school_id=current_user.school_id,
         created_by=current_user.id,
     )
 
@@ -214,9 +220,12 @@ async def list_migration_batches(
 ):
     """列出数据迁移批次（分页+筛选）"""
     return await LineageService.list_migration_batches(
-        db=db, school_id=current_user.school_id,
-        page=page, page_size=page_size,
-        target_table=target_table, status=status,
+        db=db,
+        school_id=current_user.school_id,
+        page=page,
+        page_size=page_size,
+        target_table=target_table,
+        status=status,
     )
 
 
@@ -227,5 +236,6 @@ async def get_migration_stats(
 ):
     """数据迁移统计概览"""
     return await LineageService.get_migration_stats(
-        db=db, school_id=current_user.school_id,
+        db=db,
+        school_id=current_user.school_id,
     )

@@ -22,38 +22,49 @@ teacher_mgmt 业务逻辑层
 """
 
 import logging
-from datetime import datetime, date
-from typing import Optional, List
-from sqlalchemy import select, func, desc, and_, delete
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
 
-from core.models import User, Teacher, Class, Grade
+from core.models import Class, Grade, Teacher, User
 from core.services import AuthService
 from modules.teacher_mgmt.models import (
-    TeacherExtension, TeacherSubject, TeacherWorkload, TeacherRoleAssignment,
+    TeacherExtension,
+    TeacherRoleAssignment,
+    TeacherSubject,
+    TeacherWorkload,
 )
 from modules.teacher_mgmt.schemas import (
-    TeacherListItem, TeacherDetailOut, TeacherExtensionOut, TeacherExtensionCreate,
-    TeacherCreate, TeacherCreateOut,
-    SubjectAssignment, SubjectAssignResponse,
-    WorkloadCreate, WorkloadOut, WorkloadStatsOut,
-    TeacherRoleAssignmentCreate, TeacherRoleAssignmentOut,
-    EffectiveRoleOut, EffectiveRolesOut,
-    ROLE_TYPES, SCOPE_TYPES,
+    EffectiveRoleOut,
+    EffectiveRolesOut,
+    SubjectAssignment,
+    SubjectAssignResponse,
+    TeacherCreate,
+    TeacherCreateOut,
+    TeacherDetailOut,
+    TeacherExtensionCreate,
+    TeacherExtensionOut,
+    TeacherListItem,
+    TeacherRoleAssignmentCreate,
+    TeacherRoleAssignmentOut,
+    WorkloadCreate,
+    WorkloadOut,
+    WorkloadStatsOut,
 )
+from sqlalchemy import and_, delete, desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("teacher_mgmt.services")
 
 
 class TeacherService:
-
     # ═══════════════════════════════════════════════════════════
     # 创建教师 (一步到位: User+Teacher+TeacherExtension)
     # ═══════════════════════════════════════════════════════════
 
     @staticmethod
     async def create_teacher(
-        db: AsyncSession, school_id: int, data: TeacherCreate,
+        db: AsyncSession,
+        school_id: int,
+        data: TeacherCreate,
     ) -> TeacherCreateOut:
         """
         创建教师 — 原子事务:
@@ -62,9 +73,7 @@ class TeacherService:
           3. 创建 TeacherExtension (扩展信息)
         """
         # 检查 username 唯一性
-        existing = await db.execute(
-            select(User).where(User.username == data.username)
-        )
+        existing = await db.execute(select(User).where(User.username == data.username))
         if existing.scalar_one_or_none():
             raise ValueError(f"用户名 '{data.username}' 已存在")
 
@@ -137,10 +146,13 @@ class TeacherService:
 
     @staticmethod
     async def list_teachers(
-        db: AsyncSession, school_id: int,
-        page: int = 1, page_size: int = 20,
-        role: Optional[str] = None, is_active: Optional[bool] = None,
-        keyword: Optional[str] = None,
+        db: AsyncSession,
+        school_id: int,
+        page: int = 1,
+        page_size: int = 20,
+        role: str | None = None,
+        is_active: bool | None = None,
+        keyword: str | None = None,
     ) -> dict:
         """查询教师列表（支持筛选：角色/状态/关键词搜索）"""
         conditions = [
@@ -153,9 +165,7 @@ class TeacherService:
         if is_active is not None:
             conditions.append(User.is_active == is_active)
         if keyword:
-            conditions.append(
-                User.display_name.ilike(f"%{keyword}%")
-            )
+            conditions.append(User.display_name.ilike(f"%{keyword}%"))
 
         base = select(User).where(and_(*conditions))
 
@@ -166,9 +176,7 @@ class TeacherService:
 
         # 分页
         result = await db.execute(
-            base.order_by(User.id.asc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+            base.order_by(User.id.asc()).offset((page - 1) * page_size).limit(page_size)
         )
         users = result.scalars().all()
 
@@ -181,9 +189,7 @@ class TeacherService:
 
         if user_ids:
             # Teacher 表
-            t_result = await db.execute(
-                select(Teacher).where(Teacher.user_id.in_(user_ids))
-            )
+            t_result = await db.execute(select(Teacher).where(Teacher.user_id.in_(user_ids)))
             for t in t_result.scalars().all():
                 teachers_map[t.user_id] = t
 
@@ -215,23 +221,25 @@ class TeacherService:
             t = teachers_map.get(u.id)
             e = extensions_map.get(u.id)
             hr = homeroom_map.get(u.id)
-            items.append(TeacherListItem(
-                id=u.id,
-                display_name=u.display_name,
-                username=u.username,
-                role=u.role,
-                phone=u.phone,
-                employee_no=t.employee_no if t else None,
-                subject=t.subject if t else None,
-                title=e.title if e else (t.title if t else None),
-                is_homeroom=(t.is_homeroom if t else False),
-                homeroom_class_id=hr[0] if hr else None,
-                homeroom_class_name=hr[1] if hr else None,
-                subjects_taught=subjects_map.get(u.id, []),
-                max_weekly_hours=e.max_weekly_hours if e else None,
-                is_active=u.is_active,
-                created_at=u.created_at,
-            ))
+            items.append(
+                TeacherListItem(
+                    id=u.id,
+                    display_name=u.display_name,
+                    username=u.username,
+                    role=u.role,
+                    phone=u.phone,
+                    employee_no=t.employee_no if t else None,
+                    subject=t.subject if t else None,
+                    title=e.title if e else (t.title if t else None),
+                    is_homeroom=(t.is_homeroom if t else False),
+                    homeroom_class_id=hr[0] if hr else None,
+                    homeroom_class_name=hr[1] if hr else None,
+                    subjects_taught=subjects_map.get(u.id, []),
+                    max_weekly_hours=e.max_weekly_hours if e else None,
+                    is_active=u.is_active,
+                    created_at=u.created_at,
+                )
+            )
 
         return {"teachers": items, "total": total, "page": page, "page_size": page_size}
 
@@ -241,8 +249,9 @@ class TeacherService:
 
     @staticmethod
     async def get_teacher_detail(
-        db: AsyncSession, user_id: int,
-    ) -> Optional[TeacherDetailOut]:
+        db: AsyncSession,
+        user_id: int,
+    ) -> TeacherDetailOut | None:
         """查询教师详情"""
         user_result = await db.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one_or_none()
@@ -265,8 +274,11 @@ class TeacherService:
         )
         subjects = [
             SubjectAssignment(
-                id=s.id, subject_code=s.subject_code, subject_name=s.subject_name,
-                is_primary=s.is_primary, grade_level=s.grade_level,
+                id=s.id,
+                subject_code=s.subject_code,
+                subject_name=s.subject_name,
+                is_primary=s.is_primary,
+                grade_level=s.grade_level,
             )
             for s in s_result.scalars().all()
         ]
@@ -276,9 +288,7 @@ class TeacherService:
         homeroom_class_name = None
         if teacher and teacher.is_homeroom:
             c_result = await db.execute(
-                select(Class).where(
-                    and_(Class.head_teacher_id == user_id, Class.is_active == True)
-                )
+                select(Class).where(and_(Class.head_teacher_id == user_id, Class.is_active == True))
             )
             cls = c_result.scalar_one_or_none()
             if cls:
@@ -308,14 +318,14 @@ class TeacherService:
 
     @staticmethod
     async def upsert_extension(
-        db: AsyncSession, user_id: int, data: TeacherExtensionCreate,
+        db: AsyncSession,
+        user_id: int,
+        data: TeacherExtensionCreate,
         school_id: int,
     ) -> TeacherExtensionOut:
         """创建或更新教师扩展信息"""
         # 先查 Teacher 记录获取 teacher.id (修复 teacher_id bug)
-        t_result = await db.execute(
-            select(Teacher).where(Teacher.user_id == user_id)
-        )
+        t_result = await db.execute(select(Teacher).where(Teacher.user_id == user_id))
         teacher = t_result.scalar_one_or_none()
 
         result = await db.execute(
@@ -354,7 +364,9 @@ class TeacherService:
 
     @staticmethod
     async def assign_subjects(
-        db: AsyncSession, user_id: int, subjects: List[SubjectAssignment],
+        db: AsyncSession,
+        user_id: int,
+        subjects: list[SubjectAssignment],
         school_id: int,
     ) -> SubjectAssignResponse:
         """分配教师任教学科（先删后插）"""
@@ -388,9 +400,11 @@ class TeacherService:
             teacher_user_id=user_id,
             subjects=[
                 SubjectAssignment(
-                    id=s.id, subject_code=s.subject_code,
+                    id=s.id,
+                    subject_code=s.subject_code,
                     subject_name=s.subject_name,
-                    is_primary=s.is_primary, grade_level=s.grade_level,
+                    is_primary=s.is_primary,
+                    grade_level=s.grade_level,
                 )
                 for s in new_subjects
             ],
@@ -402,7 +416,9 @@ class TeacherService:
 
     @staticmethod
     async def add_workload(
-        db: AsyncSession, user_id: int, data: WorkloadCreate,
+        db: AsyncSession,
+        user_id: int,
+        data: WorkloadCreate,
         school_id: int,
     ) -> WorkloadOut:
         """新增/更新教师工作量记录"""
@@ -419,7 +435,8 @@ class TeacherService:
 
         if not wl:
             wl = TeacherWorkload(
-                school_id=school_id, teacher_user_id=user_id,
+                school_id=school_id,
+                teacher_user_id=user_id,
                 semester=data.semester,
                 weekly_periods=data.weekly_periods,
                 class_count=data.class_count,
@@ -435,9 +452,7 @@ class TeacherService:
 
         # 自动计算综合评分
         wl.total_workload_score = (
-            wl.weekly_periods * 1.0
-            + wl.class_count * 2.0
-            + len(wl.extra_duties or []) * 5.0
+            wl.weekly_periods * 1.0 + wl.class_count * 2.0 + len(wl.extra_duties or []) * 5.0
         )
 
         await db.commit()
@@ -446,7 +461,9 @@ class TeacherService:
 
     @staticmethod
     async def list_workloads(
-        db: AsyncSession, user_id: int, school_id: int,
+        db: AsyncSession,
+        user_id: int,
+        school_id: int,
     ) -> list[WorkloadOut]:
         """查询教师所有学期工作量"""
         result = await db.execute(
@@ -463,8 +480,10 @@ class TeacherService:
 
     @staticmethod
     async def get_workload_stats(
-        db: AsyncSession, user_id: int, school_id: int,
-    ) -> Optional[WorkloadStatsOut]:
+        db: AsyncSession,
+        user_id: int,
+        school_id: int,
+    ) -> WorkloadStatsOut | None:
         """教师工作量统计汇总"""
         workloads = await TeacherService.list_workloads(db, user_id, school_id)
         if not workloads:
@@ -491,8 +510,11 @@ class TeacherService:
 
     @staticmethod
     async def assign_role(
-        db: AsyncSession, school_id: int, user_id: int,
-        data: TeacherRoleAssignmentCreate, assigned_by: int,
+        db: AsyncSession,
+        school_id: int,
+        user_id: int,
+        data: TeacherRoleAssignmentCreate,
+        assigned_by: int,
     ) -> TeacherRoleAssignmentOut:
         """分配角色 — 幂等(uk_role_assignment保障唯一)"""
         # 检查教师存在性
@@ -527,9 +549,11 @@ class TeacherService:
 
     @staticmethod
     async def list_roles(
-        db: AsyncSession, school_id: int, user_id: int,
-        is_active: Optional[bool] = None,
-    ) -> List[TeacherRoleAssignmentOut]:
+        db: AsyncSession,
+        school_id: int,
+        user_id: int,
+        is_active: bool | None = None,
+    ) -> list[TeacherRoleAssignmentOut]:
         """查询教师角色分配列表"""
         conditions = [
             TeacherRoleAssignment.school_id == school_id,
@@ -547,10 +571,12 @@ class TeacherService:
 
     @staticmethod
     async def update_role(
-        db: AsyncSession, school_id: int, assignment_id: int,
-        is_active: Optional[bool] = None,
-        expires_at: Optional[str] = None,
-        notes: Optional[str] = None,
+        db: AsyncSession,
+        school_id: int,
+        assignment_id: int,
+        is_active: bool | None = None,
+        expires_at: str | None = None,
+        notes: str | None = None,
     ) -> TeacherRoleAssignmentOut:
         """更新角色分配 (启用/停用/设过期/备注)"""
         result = await db.execute(
@@ -578,7 +604,9 @@ class TeacherService:
 
     @staticmethod
     async def delete_role(
-        db: AsyncSession, school_id: int, assignment_id: int,
+        db: AsyncSession,
+        school_id: int,
+        assignment_id: int,
     ) -> bool:
         """删除角色分配"""
         result = await db.execute(
@@ -603,8 +631,10 @@ class TeacherService:
 
     @staticmethod
     async def resolve_effective_roles(
-        db: AsyncSession, school_id: int, user_id: int,
-    ) -> Optional[EffectiveRolesOut]:
+        db: AsyncSession,
+        school_id: int,
+        user_id: int,
+    ) -> EffectiveRolesOut | None:
         """
         解析教师有效角色集合 — BOSS 核心需求
 
@@ -643,27 +673,33 @@ class TeacherService:
             if a.expires_at and a.expires_at < now:
                 continue  # 已过期
             scope_name = await TeacherService._resolve_scope_name(
-                db, a.scope_type, a.scope_id,
+                db,
+                a.scope_type,
+                a.scope_id,
             )
-            effective_roles.append(EffectiveRoleOut(
-                role_type=a.role_type,
-                scope_type=a.scope_type,
-                scope_id=a.scope_id,
-                scope_name=scope_name,
-                is_active=a.is_active,
-                assigned_at=a.assigned_at,
-                expires_at=a.expires_at,
-            ))
+            effective_roles.append(
+                EffectiveRoleOut(
+                    role_type=a.role_type,
+                    scope_type=a.scope_type,
+                    scope_id=a.scope_id,
+                    scope_name=scope_name,
+                    is_active=a.is_active,
+                    assigned_at=a.assigned_at,
+                    expires_at=a.expires_at,
+                )
+            )
 
         # 如果没有 overlay 角色, 用 User.role 作为兜底
         if not effective_roles:
-            effective_roles.append(EffectiveRoleOut(
-                role_type="subject_teacher",  # 默认科任教师
-                scope_type="school",
-                scope_id=None,
-                scope_name="全校",
-                is_active=True,
-            ))
+            effective_roles.append(
+                EffectiveRoleOut(
+                    role_type="subject_teacher",  # 默认科任教师
+                    scope_type="school",
+                    scope_id=None,
+                    scope_name="全校",
+                    is_active=True,
+                )
+            )
 
         # ─── 排课引擎供给侧数据 ───
         # 查 TeacherExtension 获取 max_weekly_hours
@@ -679,12 +715,15 @@ class TeacherService:
 
         # 查最近学期工作量
         wl_result = await db.execute(
-            select(TeacherWorkload).where(
+            select(TeacherWorkload)
+            .where(
                 and_(
                     TeacherWorkload.teacher_user_id == user_id,
                     TeacherWorkload.school_id == school_id,
                 )
-            ).order_by(desc(TeacherWorkload.semester)).limit(1)
+            )
+            .order_by(desc(TeacherWorkload.semester))
+            .limit(1)
         )
         latest_workload = wl_result.scalar_one_or_none()
 
@@ -693,44 +732,48 @@ class TeacherService:
             "current_weekly_periods": latest_workload.weekly_periods if latest_workload else 0,
             "current_class_count": latest_workload.class_count if latest_workload else 0,
             "subject_teacher_roles": [
-                r.dict() for r in effective_roles
-                if r.role_type == "subject_teacher"
+                r.dict() for r in effective_roles if r.role_type == "subject_teacher"
             ],
             "available_capacity": None,  # max - current, 排课引擎用
         }
         if workload_profile["max_weekly_hours"] is not None:
             workload_profile["available_capacity"] = (
-                workload_profile["max_weekly_hours"]
-                - workload_profile["current_weekly_periods"]
+                workload_profile["max_weekly_hours"] - workload_profile["current_weekly_periods"]
             )
 
         # ─── 审批流权限切面 ───
         permission_scopes = {
             "can_approve_discipline": any(
-                r.role_type in ("grade_leader", "moral_admin", "ms_admin")
-                for r in effective_roles
+                r.role_type in ("grade_leader", "moral_admin", "ms_admin") for r in effective_roles
             ),
             "can_approve_leave": any(
-                r.role_type in ("grade_leader", "moral_admin", "ms_admin")
-                for r in effective_roles
+                r.role_type in ("grade_leader", "moral_admin", "ms_admin") for r in effective_roles
             ),
-            "visible_grades": [],   # 大盘可看年级
+            "visible_grades": [],  # 大盘可看年级
             "visible_classes": [],  # 大盘可看班级
         }
 
         for r in effective_roles:
             if r.role_type == "grade_leader" and r.scope_type == "grade" and r.scope_id:
-                permission_scopes["visible_grades"].append({
-                    "grade_id": r.scope_id, "grade_name": r.scope_name,
-                })
+                permission_scopes["visible_grades"].append(
+                    {
+                        "grade_id": r.scope_id,
+                        "grade_name": r.scope_name,
+                    }
+                )
             if r.role_type == "homeroom_teacher" and r.scope_type == "class" and r.scope_id:
-                permission_scopes["visible_classes"].append({
-                    "class_id": r.scope_id, "class_name": r.scope_name,
-                })
+                permission_scopes["visible_classes"].append(
+                    {
+                        "class_id": r.scope_id,
+                        "class_name": r.scope_name,
+                    }
+                )
             if r.role_type == "moral_admin" and r.scope_type == "school":
                 # 德育处主任看全校
                 permission_scopes["visible_grades"].append({"grade_id": None, "grade_name": "全校"})
-                permission_scopes["visible_classes"].append({"class_id": None, "class_name": "全校"})
+                permission_scopes["visible_classes"].append(
+                    {"class_id": None, "class_name": "全校"}
+                )
 
         return EffectiveRolesOut(
             teacher_user_id=user_id,
@@ -743,21 +786,19 @@ class TeacherService:
 
     @staticmethod
     async def _resolve_scope_name(
-        db: AsyncSession, scope_type: str, scope_id: Optional[int],
-    ) -> Optional[str]:
+        db: AsyncSession,
+        scope_type: str,
+        scope_id: int | None,
+    ) -> str | None:
         """解析作用域名称 (scope_id → scope_name)"""
         if scope_type == "school":
             return "全校"
         if scope_type == "grade" and scope_id:
-            result = await db.execute(
-                select(Grade).where(Grade.id == scope_id)
-            )
+            result = await db.execute(select(Grade).where(Grade.id == scope_id))
             grade = result.scalar_one_or_none()
             return grade.name if grade else f"年级#{scope_id}"
         if scope_type == "class" and scope_id:
-            result = await db.execute(
-                select(Class).where(Class.id == scope_id)
-            )
+            result = await db.execute(select(Class).where(Class.id == scope_id))
             cls = result.scalar_one_or_none()
             return cls.name if cls else f"班级#{scope_id}"
         if scope_type == "subject_group" and scope_id:

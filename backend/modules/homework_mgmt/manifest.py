@@ -13,4 +13,5 @@ MODULE_MODELS = ["homework_mgmt.models"]
 def register(router_prefix="/api/v1/homework_mgmt"):
     """模块注册入口 — 由 module_loader 调用。返回 (APIRouter, prefix) 元组。"""
     from modules.homework_mgmt.routers import router
+
     return router, router_prefix

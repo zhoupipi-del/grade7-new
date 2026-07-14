@@ -8,19 +8,16 @@
 """
 
 import os
-import json
-from datetime import datetime, date, timedelta
-
-from sqlalchemy import select, func, and_, or_
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import date, datetime, timedelta
 
 from cryptography.fernet import Fernet
-
 from modules.psych_counseling.models import (
-    PsyConsultableSlot,
     PsyAppointment,
+    PsyConsultableSlot,
     PsyConsultRecord,
 )
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ── 加密引擎配置 ──
 # 从环境变量加载 Fernet key; 缺省生成警告级别临时密钥(仅开发环境)
@@ -32,6 +29,7 @@ if not _FERNET_KEY:
     # 开发环境兜底: 使用固定种子生成 key (生产必须手动注入!)
     import base64
     import hashlib
+
     _seed = os.getenv("SECRET_KEY", "wings3-dev-fallback")
     _raw = hashlib.sha256(_seed.encode()).digest()
     _FERNET_KEY = base64.urlsafe_b64encode(_raw)
@@ -66,18 +64,23 @@ async def _check_counselor_role(
 
     # 查 teacher_role_assignments 表
     from modules.teacher_mgmt.models import TeacherRoleAssignment
-    stmt = select(TeacherRoleAssignment).where(
-        TeacherRoleAssignment.user_id == user_id,
-        TeacherRoleAssignment.school_id == school_id,
-        TeacherRoleAssignment.role_type == COUNSELOR_ROLE,
-        TeacherRoleAssignment.is_active == True,
-        and_(
-            or_(
-                TeacherRoleAssignment.expires_at.is_(None),
-                TeacherRoleAssignment.expires_at > datetime.now(),
+
+    stmt = (
+        select(TeacherRoleAssignment)
+        .where(
+            TeacherRoleAssignment.user_id == user_id,
+            TeacherRoleAssignment.school_id == school_id,
+            TeacherRoleAssignment.role_type == COUNSELOR_ROLE,
+            TeacherRoleAssignment.is_active == True,
+            and_(
+                or_(
+                    TeacherRoleAssignment.expires_at.is_(None),
+                    TeacherRoleAssignment.expires_at > datetime.now(),
+                ),
             ),
-        ),
-    ).limit(1)
+        )
+        .limit(1)
+    )
     res = await db.execute(stmt)
     return res.scalar_one_or_none() is not None
 
@@ -85,6 +88,7 @@ async def _check_counselor_role(
 # ─────────────────────────────────────────────────────────
 # 加密/解密内核
 # ─────────────────────────────────────────────────────────
+
 
 def encrypt_clog(plaintext: str) -> str:
     """Fernet 加密咨询日志"""
@@ -112,6 +116,7 @@ def _mask_plaintext(plaintext: str, role: str) -> str:
 # ─────────────────────────────────────────────────────────
 # 1. 时间槽位管理
 # ─────────────────────────────────────────────────────────
+
 
 async def create_slot(
     db: AsyncSession,
@@ -209,6 +214,7 @@ async def delete_slot(db: AsyncSession, school_id: int, slot_id: int) -> None:
 # ─────────────────────────────────────────────────────────
 # 2. 预约申请引擎
 # ─────────────────────────────────────────────────────────
+
 
 async def create_appointment(
     db: AsyncSession,
@@ -342,6 +348,7 @@ async def update_appointment(
 # 3. 咨询记录引擎 (加密写实)
 # ─────────────────────────────────────────────────────────
 
+
 async def create_consult_record(
     db: AsyncSession,
     school_id: int,
@@ -426,7 +433,9 @@ async def get_consult_record(
         can_decrypt = await _check_counselor_role(db, user_id, school_id, user_role)
 
     plaintext = decrypt_clog(record.encrypted_clog)
-    clog_display = _mask_plaintext(plaintext, user_role) if can_decrypt else _mask_plaintext("", "other")
+    clog_display = (
+        _mask_plaintext(plaintext, user_role) if can_decrypt else _mask_plaintext("", "other")
+    )
 
     if can_decrypt:
         # 记录解密审计
@@ -506,9 +515,7 @@ async def get_counselor_stats(
     )
 
     # 总场次
-    total_res = await db.execute(
-        select(func.count(PsyConsultRecord.id)).where(base_cond)
-    )
+    total_res = await db.execute(select(func.count(PsyConsultRecord.id)).where(base_cond))
     total_sessions = total_res.scalar() or 0
 
     # 服务学生数(去重)
@@ -520,7 +527,8 @@ async def get_counselor_stats(
     # 危机数
     crisis_res = await db.execute(
         select(func.count(PsyConsultRecord.id)).where(
-            base_cond, PsyConsultRecord.is_crisis == True,
+            base_cond,
+            PsyConsultRecord.is_crisis == True,
         )
     )
     crisis_count = crisis_res.scalar() or 0
@@ -528,7 +536,8 @@ async def get_counselor_stats(
     # 转介数
     referral_res = await db.execute(
         select(func.count(PsyConsultRecord.id)).where(
-            base_cond, PsyConsultRecord.is_referred == True,
+            base_cond,
+            PsyConsultRecord.is_referred == True,
         )
     )
     referral_count = referral_res.scalar() or 0
@@ -536,7 +545,8 @@ async def get_counselor_stats(
     # 平均时长
     avg_res = await db.execute(
         select(func.avg(PsyConsultRecord.session_duration_min)).where(
-            base_cond, PsyConsultRecord.session_duration_min.isnot(None),
+            base_cond,
+            PsyConsultRecord.session_duration_min.isnot(None),
         )
     )
     avg_duration = avg_res.scalar()
@@ -546,7 +556,9 @@ async def get_counselor_stats(
         select(
             PsyConsultRecord.risk_level,
             func.count(PsyConsultRecord.id),
-        ).where(base_cond).group_by(PsyConsultRecord.risk_level)
+        )
+        .where(base_cond)
+        .group_by(PsyConsultRecord.risk_level)
     )
     risk_dist = {row[0]: row[1] for row in risk_rows.all()}
 
@@ -555,9 +567,12 @@ async def get_counselor_stats(
         select(
             PsyConsultRecord.consult_category,
             func.count(PsyConsultRecord.id),
-        ).where(
-            base_cond, PsyConsultRecord.consult_category.isnot(None),
-        ).group_by(PsyConsultRecord.consult_category)
+        )
+        .where(
+            base_cond,
+            PsyConsultRecord.consult_category.isnot(None),
+        )
+        .group_by(PsyConsultRecord.consult_category)
     )
     cat_dist = {row[0]: row[1] for row in cat_rows.all()}
 
@@ -573,10 +588,12 @@ async def get_counselor_stats(
     # 未来7天待确认
     today = date.today()
     upcoming_res = await db.execute(
-        select(func.count(PsyAppointment.id)).join(
+        select(func.count(PsyAppointment.id))
+        .join(
             PsyConsultableSlot,
             PsyAppointment.slot_id == PsyConsultableSlot.id,
-        ).where(
+        )
+        .where(
             PsyAppointment.school_id == school_id,
             PsyAppointment.status == "confirmed",
             PsyConsultableSlot.date >= today,

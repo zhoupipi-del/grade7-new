@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 tests/test_class_mgmt.py — 班级管理模块单元测试
 
@@ -9,18 +8,19 @@ tests/test_class_mgmt.py — 班级管理模块单元测试
     python -m pytest tests/test_class_mgmt.py -v
 """
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 # ── 测试班级创建 ──
 
-class TestCreateClass:
 
+class TestCreateClass:
     @pytest.mark.asyncio
     async def test_create_class_success(self):
         """成功创建班级"""
-        from modules.class_mgmt.services import ClassMgmtService
         from modules.class_mgmt.schemas import ClassCreate
+        from modules.class_mgmt.services import ClassMgmtService
 
         db = MagicMock()
         grade = MagicMock()
@@ -45,8 +45,8 @@ class TestCreateClass:
     @pytest.mark.asyncio
     async def test_create_class_duplicate_name(self):
         """班级名重复"""
-        from modules.class_mgmt.services import ClassMgmtService
         from modules.class_mgmt.schemas import ClassCreate
+        from modules.class_mgmt.services import ClassMgmtService
 
         db = MagicMock()
         grade = MagicMock()
@@ -67,8 +67,8 @@ class TestCreateClass:
 
 # ── 测试学生分班 ──
 
-class TestAssignStudents:
 
+class TestAssignStudents:
     @pytest.mark.asyncio
     async def test_assign_students_success(self):
         """学生分班成功"""
@@ -83,7 +83,12 @@ class TestAssignStudents:
         db.add = MagicMock()
 
         result = await ClassMgmtService.assign_students(
-            db, 1, 1, [101, 102], operated_by=1, operator_name="管理员",
+            db,
+            1,
+            1,
+            [101, 102],
+            operated_by=1,
+            operator_name="管理员",
         )
 
         assert result["assigned"] == [101, 102]
@@ -107,7 +112,12 @@ class TestAssignStudents:
         db.add = MagicMock()
 
         result = await ClassMgmtService.assign_students(
-            db, 1, 1, [101, 999], operated_by=1, operator_name="管理员",
+            db,
+            1,
+            1,
+            [101, 999],
+            operated_by=1,
+            operator_name="管理员",
         )
 
         assert result["assigned"] == [101]
@@ -117,8 +127,8 @@ class TestAssignStudents:
 
 # ── 测试调班 ──
 
-class TestTransferStudent:
 
+class TestTransferStudent:
     @pytest.mark.asyncio
     async def test_transfer_success(self):
         """调班成功"""
@@ -142,7 +152,12 @@ class TestTransferStudent:
         db.add = MagicMock()
 
         result = await ClassMgmtService.transfer_student(
-            db, 1, 101, 2, operated_by=1, operator_name="管理员",
+            db,
+            1,
+            101,
+            2,
+            operated_by=1,
+            operator_name="管理员",
         )
 
         assert result["student_id"] == 101
@@ -162,14 +177,18 @@ class TestTransferStudent:
 
         with pytest.raises(ValueError, match="学生不存在"):
             await ClassMgmtService.transfer_student(
-                db, 1, 999, 2, operated_by=1,
+                db,
+                1,
+                999,
+                2,
+                operated_by=1,
             )
 
 
 # ── 测试班主任分配 ──
 
-class TestAssignTeacher:
 
+class TestAssignTeacher:
     @pytest.mark.asyncio
     async def test_assign_teacher_success(self):
         """班主任分配成功"""
@@ -187,7 +206,12 @@ class TestAssignTeacher:
         db.add = MagicMock()
 
         result = await ClassMgmtService.assign_head_teacher(
-            db, 1, 1, 101, operated_by=1, operator_name="管理员",
+            db,
+            1,
+            1,
+            101,
+            operated_by=1,
+            operator_name="管理员",
         )
 
         assert result.head_teacher_id == 101
@@ -195,8 +219,8 @@ class TestAssignTeacher:
 
 # ── 测试统计 ──
 
-class TestClassStats:
 
+class TestClassStats:
     @pytest.mark.asyncio
     async def test_get_stats(self):
         """班级统计"""
@@ -228,7 +252,9 @@ class TestClassStats:
         class_list.append((cls_min, "七年级"))
         class_result_mock.__iter__ = MagicMock(return_value=iter(class_list))
 
-        db.execute = AsyncMock(side_effect=[count_mock, student_count_mock, MagicMock(), class_result_mock])
+        db.execute = AsyncMock(
+            side_effect=[count_mock, student_count_mock, MagicMock(), class_result_mock]
+        )
 
         result = await ClassMgmtService.get_stats(db, 1)
 

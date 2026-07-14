@@ -3,19 +3,21 @@ modules/class_mgmt/routers.py — 班级管理 API 路由
 """
 
 import logging
-from typing import Optional, List
-
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import User, UserRole
-from core.routers import get_db, get_current_user, require_role, verify_school_access
+from core.routers import get_current_user, get_db, require_role, verify_school_access
+from fastapi import APIRouter, Depends, HTTPException, Query
 from modules.class_mgmt.schemas import (
-    ClassCreate, ClassUpdate, ClassOut,
-    AssignStudentsRequest, TransferStudentRequest, AssignTeacherRequest,
-    ClassChangeLogOut, ClassStatsOut,
+    AssignStudentsRequest,
+    AssignTeacherRequest,
+    ClassCreate,
+    ClassOut,
+    ClassStatsOut,
+    ClassUpdate,
+    TransferStudentRequest,
 )
 from modules.class_mgmt.services import ClassMgmtService
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["class-mgmt"])
@@ -42,7 +44,7 @@ async def create_class(
 async def list_classes(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    grade_id: Optional[int] = None,
+    grade_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -93,8 +95,12 @@ async def assign_students(
     """学生分班"""
     try:
         result = await ClassMgmtService.assign_students(
-            db, current_user.school_id, class_id,
-            body.student_ids, current_user.id, current_user.display_name,
+            db,
+            current_user.school_id,
+            class_id,
+            body.student_ids,
+            current_user.id,
+            current_user.display_name,
         )
         return result
     except ValueError as e:
@@ -110,9 +116,12 @@ async def transfer_student(
     """学生调班"""
     try:
         result = await ClassMgmtService.transfer_student(
-            db, current_user.school_id,
-            body.student_id, body.target_class_id,
-            current_user.id, current_user.display_name,
+            db,
+            current_user.school_id,
+            body.student_id,
+            body.target_class_id,
+            current_user.id,
+            current_user.display_name,
             body.reason,
         )
         return result
@@ -130,8 +139,12 @@ async def assign_teacher(
     """分配班主任"""
     try:
         await ClassMgmtService.assign_head_teacher(
-            db, current_user.school_id, class_id,
-            body.head_teacher_id, current_user.id, current_user.display_name,
+            db,
+            current_user.school_id,
+            class_id,
+            body.head_teacher_id,
+            current_user.id,
+            current_user.display_name,
         )
         result = await ClassMgmtService.get_class(db, class_id)
         return result

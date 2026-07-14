@@ -12,14 +12,13 @@ Wings 3.1 时空连续体核心富集网关 — TimetableEnricher
 
 import json
 import logging
-from datetime import datetime, time, date
-from typing import Dict, Any, Optional
-
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from datetime import date, datetime, time
+from typing import Any
 
 from core.redis_client import get_redis
-from modules.timetable.models import TimetableSlot, TimetableScheduleInstance
+from modules.timetable.models import TimetableScheduleInstance, TimetableSlot
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +33,8 @@ class TimetableEnricher:
 
     @classmethod
     async def enrich_telemetry_event(
-        cls,
-        school_id: int,
-        class_id: int,
-        occurred_at: datetime,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
+        cls, school_id: int, class_id: int, occurred_at: datetime, db: AsyncSession
+    ) -> dict[str, Any]:
         """
         13路时序流专属升维网关
         输入：学校ID、班级ID、事件绝对时间戳
@@ -62,7 +57,7 @@ class TimetableEnricher:
             "slot_id": None,
             "subject_id": None,
             "teacher_id": None,
-            "context_desc": "课间、午休或非教学时段"
+            "context_desc": "课间、午休或非教学时段",
         }
 
         # 1. 拦截第一层：榨取该校的【物理节次时间大盘】
@@ -92,13 +87,11 @@ class TimetableEnricher:
                 "slot_id": matched_slot["slot_id"],
                 "subject_id": None,
                 "teacher_id": None,
-                "context_desc": f"时空处于：{matched_slot['name']}"
+                "context_desc": f"时空处于：{matched_slot['name']}",
             }
 
         # 3. 拦截第二层：榨取该班级该日期的【日历课表实例】
-        day_schedule = await cls._get_class_schedule_cached(
-            school_id, class_id, target_date, db
-        )
+        day_schedule = await cls._get_class_schedule_cached(school_id, class_id, target_date, db)
 
         # 4. 坐标合拢：提取当前节次的任课老师与学科
         current_lesson = day_schedule.get(str(matched_slot["slot_id"]))
@@ -109,7 +102,7 @@ class TimetableEnricher:
                 "slot_id": matched_slot["slot_id"],
                 "subject_id": None,
                 "teacher_id": None,
-                "context_desc": f"当前第{matched_slot['period_index']}节课，但未排课或遭遇空堂"
+                "context_desc": f"当前第{matched_slot['period_index']}节课，但未排课或遭遇空堂",
             }
 
         return {
@@ -122,13 +115,11 @@ class TimetableEnricher:
                 f"第{matched_slot['period_index']}节课 | "
                 f"学科ID:{current_lesson['subject_id']} | "
                 f"教师ID:{current_lesson['teacher_id']}"
-            )
+            ),
         }
 
     @classmethod
-    async def _get_school_slots_cached(
-        cls, school_id: int, db: AsyncSession
-    ) -> Dict[str, Any]:
+    async def _get_school_slots_cached(cls, school_id: int, db: AsyncSession) -> dict[str, Any]:
         """第一层缓存看守：学校物理作息时间 (永不过期)"""
         redis = get_redis()
         cache_key = f"wings:timetable:slots:{school_id}"
@@ -140,20 +131,19 @@ class TimetableEnricher:
 
         # 缓存未命中（或 Redis 不可用），回源 MySQL
         stmt = select(TimetableSlot).where(
-            TimetableSlot.school_id == school_id,
-            TimetableSlot.is_active == True
+            TimetableSlot.school_id == school_id, TimetableSlot.is_active == True
         )
         result = await db.execute(stmt)
         slots = result.scalars().all()
 
-        slots_map: Dict[str, Any] = {}
+        slots_map: dict[str, Any] = {}
         for s in slots:
             slots_map[str(s.id)] = {
                 "period_index": s.period_index,
                 "slot_type": s.slot_type,
                 "name": s.name,
                 "start": s.start_time.isoformat(),
-                "end": s.end_time.isoformat()
+                "end": s.end_time.isoformat(),
             }
 
         if redis is not None and slots_map:
@@ -169,7 +159,7 @@ class TimetableEnricher:
     @classmethod
     async def _get_class_schedule_cached(
         cls, school_id: int, class_id: int, target_date: date, db: AsyncSession
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """第二层缓存看守：班级日历级实例课表 (24h 过期)"""
         redis = get_redis()
         date_str = target_date.isoformat()
@@ -184,26 +174,22 @@ class TimetableEnricher:
         stmt = select(TimetableScheduleInstance).where(
             TimetableScheduleInstance.school_id == school_id,
             TimetableScheduleInstance.class_id == class_id,
-            TimetableScheduleInstance.date == target_date
+            TimetableScheduleInstance.date == target_date,
         )
         result = await db.execute(stmt)
         instances = result.scalars().all()
 
-        schedule_map: Dict[str, Any] = {}
+        schedule_map: dict[str, Any] = {}
         for inst in instances:
             schedule_map[str(inst.slot_id)] = {
                 "subject_id": inst.subject_id,
-                "teacher_id": inst.teacher_id
+                "teacher_id": inst.teacher_id,
             }
 
         if redis is not None:
             # 即使当天没排课，也缓存一个空 dict，严防黑客利用不存在的日期
             # 恶意轰击穿透到 MySQL
-            await redis.set(
-                cache_key,
-                json.dumps(schedule_map),
-                ex=cls.CACHE_EXPIRATION
-            )
+            await redis.set(cache_key, json.dumps(schedule_map), ex=cls.CACHE_EXPIRATION)
             logger.debug(
                 f"[TimetableEnricher] 课表实例缓存已注入: "
                 f"class_id={class_id}, date={date_str}, "

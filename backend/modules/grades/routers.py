@@ -23,21 +23,29 @@ modules/grades/routers.py — 成绩管理 API 端点（12 个端点）
     GET    /audit-logs            — 审计日志分页 (MS_ADMIN)
 """
 
-from typing import Optional
-
-from fastapi import APIRouter, Depends, Query, HTTPException
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.models import User, UserRole
-from core.routers import get_db, get_current_user, require_role
-from .services import SubjectService, ExamService, ScoreService, AuditService
 from .schemas import (
-    SubjectCreate, SubjectUpdate, SubjectOut, SubjectItem,
-    ExamCreate, ExamUpdate, ExamOut, ExamItem,
-    ScoreUploadRequest, ScoreUploadResult,
-    ExamResultQuery, ExamResultPage, StudentExamResult,
-    AuditLogQuery, AuditLogOut,
+    AuditLogOut,
+    AuditLogQuery,
+    ExamCreate,
+    ExamItem,
+    ExamOut,
+    ExamResultPage,
+    ExamResultQuery,
+    ExamUpdate,
+    ScoreUploadRequest,
+    ScoreUploadResult,
+    StudentExamResult,
+    SubjectCreate,
+    SubjectItem,
+    SubjectOut,
+    SubjectUpdate,
 )
+from .services import AuditService, ExamService, ScoreService, SubjectService
 
 router = APIRouter(tags=["grades"])
 
@@ -45,6 +53,7 @@ router = APIRouter(tags=["grades"])
 # ═══════════════════════════════════════════════════════════════
 # 科目 CRUD (4)
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post(
     "/subjects",
@@ -147,6 +156,7 @@ async def toggle_subject(
 # 考试 CRUD (4)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post(
     "/exams",
     response_model=ExamOut,
@@ -179,9 +189,9 @@ async def create_exam(
     description="获取学校所有考试，可按年级/学期/状态过滤",
 )
 async def list_exams(
-    grade_id: Optional[int] = Query(default=None, description="年级 ID"),
-    semester: Optional[str] = Query(default=None, description="学期标识"),
-    status: Optional[str] = Query(default=None, description="考试状态: draft/published/archived"),
+    grade_id: int | None = Query(default=None, description="年级 ID"),
+    semester: str | None = Query(default=None, description="学期标识"),
+    status: str | None = Query(default=None, description="考试状态: draft/published/archived"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: None = Depends(require_role(UserRole.MS_ADMIN)),
@@ -255,6 +265,7 @@ async def change_exam_status(
 # 成绩管理 (3)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post(
     "/scores/upload",
     response_model=ScoreUploadResult,
@@ -293,9 +304,11 @@ async def upload_scores(
 )
 async def get_exam_results(
     exam_id: int = Query(..., description="考试 ID"),
-    class_id: Optional[int] = Query(default=None, description="班级 ID（可选，按班级过滤）"),
-    student_name: Optional[str] = Query(default=None, description="学生姓名模糊搜索"),
-    sort_by: str = Query(default="total_score_desc", description="排序: total_score_desc / total_score_asc"),
+    class_id: int | None = Query(default=None, description="班级 ID（可选，按班级过滤）"),
+    student_name: str | None = Query(default=None, description="学生姓名模糊搜索"),
+    sort_by: str = Query(
+        default="total_score_desc", description="排序: total_score_desc / total_score_asc"
+    ),
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=50, ge=1, le=200, description="每页条数"),
     db: AsyncSession = Depends(get_db),
@@ -354,15 +367,16 @@ async def get_student_result(
 # 审计日志 (1)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get(
     "/audit-logs",
     summary="审计日志查询",
     description="分页查询成绩变更审计日志，需 MS_ADMIN 权限",
 )
 async def get_audit_logs(
-    exam_id: Optional[int] = Query(default=None, description="按考试 ID 过滤"),
-    student_id: Optional[int] = Query(default=None, description="按学生 ID 过滤"),
-    action: Optional[str] = Query(default=None, description="操作类型: upsert / delete"),
+    exam_id: int | None = Query(default=None, description="按考试 ID 过滤"),
+    student_id: int | None = Query(default=None, description="按学生 ID 过滤"),
+    action: str | None = Query(default=None, description="操作类型: upsert / delete"),
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=50, ge=1, le=200, description="每页条数"),
     db: AsyncSession = Depends(get_db),

@@ -17,23 +17,22 @@ modules/growth/listeners.py - 成长档案 4 路事件接收站
   - commit + close (异常自动 rollback)
 """
 
-import logging
 import hashlib
+import logging
 from datetime import datetime
-from typing import Optional, Any, Dict
-
-from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-from sqlalchemy import select as sa_select
+from typing import Any
 
 from core.event_bus import EventBus
 from core.redis_client import get_redis
-from modules.growth.pipeline import GrowthAggregationPipeline
-from modules.growth.models import GrowthDimension, EventSeverity
 from modules.growth.cep_interceptor import (
-    ComplexEventInterceptor,
     TRIGGER_ATTENDANCE,
     TRIGGER_ERROR_FUNNEL,
+    ComplexEventInterceptor,
 )
+from modules.growth.models import EventSeverity, GrowthDimension
+from modules.growth.pipeline import GrowthAggregationPipeline
+from sqlalchemy import select as sa_select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +45,18 @@ CH_BEHAVIOR_DISCIPLINED = "behavior.disciplined"
 CH_PSYCH_RISK_CHANGED = "psych.risk_changed"
 CH_ATTENDANCE_CONSECUTIVE_ABSENT = "attendance.consecutive_absent"
 
+# ═════ Wings 3.2 新接入频道 ═════
+CH_HOMEWORK_SUBMISSION_LATE = "homework.submission_late"
+CH_TIMETABLE_SCHEDULE_CHANGE = "timetable.schedule_change"
+
 # ═══════════════════════════════════════════════════════════════
 #  Session 工厂 (由 app.py lifespan 注入)
 # ═══════════════════════════════════════════════════════════════
 
-_session_factory: Optional[async_sessionmaker] = None
+_session_factory: async_sessionmaker | None = None
 
 # CEP 复合事件拦截器实例 (在 initialize_growth_events 中初始化)
-_cep_interceptor: Optional[ComplexEventInterceptor] = None
+_cep_interceptor: ComplexEventInterceptor | None = None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -62,7 +65,8 @@ _cep_interceptor: Optional[ComplexEventInterceptor] = None
 
 _DEDUP_TTL = 300  # 5 分钟
 
-async def _try_dedup(event_data: Dict[str, Any]) -> bool:
+
+async def _try_dedup(event_data: dict[str, Any]) -> bool:
     """
     分布式去重: Redis SETNX 锁。
 
@@ -78,12 +82,14 @@ async def _try_dedup(event_data: Dict[str, Any]) -> bool:
         return True  # Redis 不可用 → 放行 (降级模式宁重复不丢失)
 
     # 用关键字段计算唯一指纹 — 不含 occurred_at (各 Worker 独立生成, 微秒不同)
-    fingerprint = "|".join([
-        str(event_data.get("school_id", "")),
-        str(event_data.get("student_id", "")),
-        str(event_data.get("event_type", "")),
-        str(event_data.get("title", "")),
-    ])
+    fingerprint = "|".join(
+        [
+            str(event_data.get("school_id", "")),
+            str(event_data.get("student_id", "")),
+            str(event_data.get("event_type", "")),
+            str(event_data.get("title", "")),
+        ]
+    )
     key = f"growth:dedup:{hashlib.md5(fingerprint.encode()).hexdigest()}"
 
     try:
@@ -98,9 +104,10 @@ async def _try_dedup(event_data: Dict[str, Any]) -> bool:
 #  通用注入器 — 独立 Session 写入时光轴
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _enrich_timetable_context(
     session: AsyncSession,
-    event_data: Dict[str, Any],
+    event_data: dict[str, Any],
 ) -> None:
     """
     Wings 3.1 时空上下文升维中枢 — 在事件注入前注入课表上下文。
@@ -153,17 +160,17 @@ async def _enrich_timetable_context(
             event_data["payload"]["_timetable"] = enriched
         event_data["_timetable_context"] = enriched
         logger.debug(
-                f"[growth-listeners] 时空上下文已升维: "
-                f"student={student_id} class={class_id} "
-                f"in_lesson={enriched.get('in_lesson')} "
-                f"period={enriched.get('period_index')} "
-                f"subject={enriched.get('subject_id')}"
-            )
+            f"[growth-listeners] 时空上下文已升维: "
+            f"student={student_id} class={class_id} "
+            f"in_lesson={enriched.get('in_lesson')} "
+            f"period={enriched.get('period_index')} "
+            f"subject={enriched.get('subject_id')}"
+        )
     except Exception as e:
         logger.debug(f"[growth-listeners] 时空富集跳过 student={student_id}: {e}")
 
 
-async def _enrich_cep_event_with_timetable(event: Dict[str, Any]) -> None:
+async def _enrich_cep_event_with_timetable(event: dict[str, Any]) -> None:
     """
     CEP 专用时空上下文注入 — 为不经过 _inject_event() 的 CEP 事件补充课表信息。
 
@@ -218,7 +225,7 @@ async def _enrich_cep_event_with_timetable(event: Dict[str, Any]) -> None:
         logger.debug(f"[growth-listeners] CEP时空富集跳过: {e}")
 
 
-async def _inject_event(event_data: Dict[str, Any]):
+async def _inject_event(event_data: dict[str, Any]):
     """
     通用事件注入器 — 开启独立 DB Session 写入成长时光轴。
 
@@ -253,8 +260,7 @@ async def _inject_event(event_data: Dict[str, Any]):
         except Exception as e:
             await session.rollback()
             logger.error(
-                f"[growth-listeners] 事件注入失败 "
-                f"type={event_data.get('event_type')}: {e}",
+                f"[growth-listeners] 事件注入失败 type={event_data.get('event_type')}: {e}",
                 exc_info=True,
             )
 
@@ -263,7 +269,8 @@ async def _inject_event(event_data: Dict[str, Any]):
 #  4 路接收站
 # ═══════════════════════════════════════════════════════════════
 
-async def on_error_funnel_critical(event: Dict[str, Any]):
+
+async def on_error_funnel_critical(event: dict[str, Any]):
     """
     接收站 1: 错题断层 critical → 学业维度 CRITICAL
 
@@ -274,22 +281,24 @@ async def on_error_funnel_critical(event: Dict[str, Any]):
       school_id, student_id, knowledge_point,
       consecutive_errors, error_count
     """
-    await _inject_event({
-        "school_id": event.get("school_id"),
-        "student_id": event.get("student_id"),
-        "dimension": GrowthDimension.ACADEMIC.value,
-        "severity": EventSeverity.CRITICAL.value,
-        "event_type": "gap_critical",
-        "title": f"知识断层预警: {event.get('knowledge_point', '未知知识点')}",
-        "occurred_at": datetime.utcnow(),
-        "payload": {
-            "knowledge_point": event.get("knowledge_point"),
-            "consecutive_errors": event.get("consecutive_errors"),
-            "error_count": event.get("error_count"),
-            "gap_level": "critical",
-            "source": "error_funnel",
-        },
-    })
+    await _inject_event(
+        {
+            "school_id": event.get("school_id"),
+            "student_id": event.get("student_id"),
+            "dimension": GrowthDimension.ACADEMIC.value,
+            "severity": EventSeverity.CRITICAL.value,
+            "event_type": "gap_critical",
+            "title": f"知识断层预警: {event.get('knowledge_point', '未知知识点')}",
+            "occurred_at": datetime.utcnow(),
+            "payload": {
+                "knowledge_point": event.get("knowledge_point"),
+                "consecutive_errors": event.get("consecutive_errors"),
+                "error_count": event.get("error_count"),
+                "gap_level": "critical",
+                "source": "error_funnel",
+            },
+        }
+    )
 
     # ── CEP 复合事件拦截: 学业断层入站, 探测考勤窗口是否同时亮着 ──
     if _cep_interceptor:
@@ -298,12 +307,10 @@ async def on_error_funnel_critical(event: Dict[str, Any]):
             await _enrich_cep_event_with_timetable(event)
             await _cep_interceptor.process_event(TRIGGER_ERROR_FUNNEL, event)
         except Exception as e:
-            logger.warning(
-                "[growth-listeners] CEP触发失败(error_funnel), 不影响主流程: %s", e
-            )
+            logger.warning("[growth-listeners] CEP触发失败(error_funnel), 不影响主流程: %s", e)
 
 
-async def on_behavior_disciplined(event: Dict[str, Any]):
+async def on_behavior_disciplined(event: dict[str, Any]):
     """
     接收站 2: 违纪处分 → 行为维度
 
@@ -322,24 +329,26 @@ async def on_behavior_disciplined(event: Dict[str, Any]):
         else EventSeverity.WARNING.value
     )
 
-    await _inject_event({
-        "school_id": event.get("school_id"),
-        "student_id": event.get("student_id"),
-        "dimension": GrowthDimension.BEHAVIOR.value,
-        "severity": severity,
-        "event_type": "discipline_punish",
-        "title": event.get("title", "行为记录"),
-        "occurred_at": datetime.utcnow(),
-        "payload": {
-            "category": event.get("category"),
-            "level": level,
-            "deduction": event.get("deduction"),
-            "source": "behavior",
-        },
-    })
+    await _inject_event(
+        {
+            "school_id": event.get("school_id"),
+            "student_id": event.get("student_id"),
+            "dimension": GrowthDimension.BEHAVIOR.value,
+            "severity": severity,
+            "event_type": "discipline_punish",
+            "title": event.get("title", "行为记录"),
+            "occurred_at": datetime.utcnow(),
+            "payload": {
+                "category": event.get("category"),
+                "level": level,
+                "deduction": event.get("deduction"),
+                "source": "behavior",
+            },
+        }
+    )
 
 
-async def on_psych_risk_changed(event: Dict[str, Any]):
+async def on_psych_risk_changed(event: dict[str, Any]):
     """
     接收站 3: 心理风险等级变更 → 心理维度
 
@@ -373,24 +382,26 @@ async def on_psych_risk_changed(event: Dict[str, Any]):
         EventSeverity.INFO.value,
     )
 
-    await _inject_event({
-        "school_id": event.get("school_id"),
-        "student_id": event.get("student_id"),
-        "dimension": GrowthDimension.PSYCHOLOGY.value,
-        "severity": severity,
-        "event_type": "psych_risk_change",
-        "title": f"心理风险评估更新: {risk_level}",
-        "occurred_at": datetime.utcnow(),
-        "payload": {
-            "previous_level": event.get("previous_level"),
-            "current_level": risk_level,
-            "source": event.get("source", "psych_profiles"),
-            "trigger": event.get("trigger"),
-        },
-    })
+    await _inject_event(
+        {
+            "school_id": event.get("school_id"),
+            "student_id": event.get("student_id"),
+            "dimension": GrowthDimension.PSYCHOLOGY.value,
+            "severity": severity,
+            "event_type": "psych_risk_change",
+            "title": f"心理风险评估更新: {risk_level}",
+            "occurred_at": datetime.utcnow(),
+            "payload": {
+                "previous_level": event.get("previous_level"),
+                "current_level": risk_level,
+                "source": event.get("source", "psych_profiles"),
+                "trigger": event.get("trigger"),
+            },
+        }
+    )
 
 
-async def on_attendance_consecutive_absent(event: Dict[str, Any]):
+async def on_attendance_consecutive_absent(event: dict[str, Any]):
     """
     接收站 4: 连续缺勤 → 考勤维度 CRITICAL
 
@@ -416,21 +427,24 @@ async def on_attendance_consecutive_absent(event: Dict[str, Any]):
 
     async with _session_factory() as session:
         try:
-            from modules.attendance.models import AttendanceRecord
-            from sqlalchemy import select, and_, desc
             from datetime import date, timedelta
+
+            from modules.attendance.models import AttendanceRecord
+            from sqlalchemy import and_, desc, select
 
             today = date.today()
             week_ago = today - timedelta(days=7)
 
             result = await session.execute(
                 select(AttendanceRecord.record_date, AttendanceRecord.status)
-                .where(and_(
-                    AttendanceRecord.school_id == school_id,
-                    AttendanceRecord.student_id == student_id,
-                    AttendanceRecord.record_date >= week_ago,
-                    AttendanceRecord.record_date <= today,
-                ))
+                .where(
+                    and_(
+                        AttendanceRecord.school_id == school_id,
+                        AttendanceRecord.student_id == student_id,
+                        AttendanceRecord.record_date >= week_ago,
+                        AttendanceRecord.record_date <= today,
+                    )
+                )
                 .order_by(desc(AttendanceRecord.record_date))
             )
             records = result.all()
@@ -477,9 +491,7 @@ async def on_attendance_consecutive_absent(event: Dict[str, Any]):
                 # ── CEP 复合事件拦截: 考勤危机入站, 探测学业断层窗口是否同时亮着 ──
                 if _cep_interceptor:
                     try:
-                        await _cep_interceptor.process_event(
-                            TRIGGER_ATTENDANCE, inject_data
-                        )
+                        await _cep_interceptor.process_event(TRIGGER_ATTENDANCE, inject_data)
                     except Exception as e:
                         logger.warning(
                             "[growth-listeners] CEP触发失败(attendance), 不影响主流程: %s", e
@@ -487,15 +499,88 @@ async def on_attendance_consecutive_absent(event: Dict[str, Any]):
         except Exception as e:
             await session.rollback()
             logger.error(
-                f"[growth-listeners] 连续缺勤检测失败 "
-                f"student={student_id}: {e}",
+                f"[growth-listeners] 连续缺勤检测失败 student={student_id}: {e}",
                 exc_info=True,
             )
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Wings 3.2 新接入接收站 — 作业迟交 + 课表变轨
+# ═══════════════════════════════════════════════════════════════
+
+
+async def on_homework_submission_late(event: dict[str, Any]):
+    """
+    接收站 5: 作业迟交 → 学业维度 WARNING
+
+    上游: homework_mgmt/services.py submit_homework()
+    触发条件: submitted_at > assignment.due_date
+
+    事件载荷:
+      school_id, student_id, assignment_id, subject_id,
+      grade_id, class_id, late_minutes, title
+    """
+    await _inject_event(
+        {
+            "school_id": event.get("school_id"),
+            "student_id": event.get("student_id"),
+            "dimension": GrowthDimension.ACADEMIC.value,
+            "severity": EventSeverity.WARNING.value,
+            "event_type": "homework_late",
+            "title": event.get("title", "作业迟交"),
+            "occurred_at": datetime.utcnow(),
+            "payload": {
+                "assignment_id": event.get("assignment_id"),
+                "subject_id": event.get("subject_id"),
+                "late_minutes": event.get("late_minutes"),
+                "source": "homework_mgmt",
+            },
+        }
+    )
+
+
+async def on_timetable_schedule_change(event: dict[str, Any]):
+    """
+    接收站 6: 课表变轨 → 考勤/行为维度 INFO (时空锚点)
+
+    上游: timetable/services.py create_slot() / delete_slot()
+    不直接触发预警，而是作为时空参照系注入时光轴，
+    供后续 CEP 复合事件检测时定位变轨日的课程上下文。
+
+    事件载荷:
+      school_id, slot_id, class_id, course_id, teacher_id,
+      subject_id, day_of_week, slot_number, change_type,
+      has_conflicts, title
+    """
+    await _inject_event(
+        {
+            "school_id": event.get("school_id"),
+            "student_id": 0,  # 课表变轨是班级级事件，非个体
+            "dimension": GrowthDimension.ATTENDANCE.value,
+            "severity": EventSeverity.INFO.value,
+            "event_type": "timetable_change",
+            "title": event.get("title", "课表变动"),
+            "occurred_at": datetime.utcnow(),
+            "payload": {
+                "slot_id": event.get("slot_id"),
+                "class_id": event.get("class_id"),
+                "course_id": event.get("course_id"),
+                "teacher_id": event.get("teacher_id"),
+                "subject_id": event.get("subject_id"),
+                "day_of_week": event.get("day_of_week"),
+                "slot_number": event.get("slot_number"),
+                "change_type": event.get("change_type"),
+                "has_conflicts": event.get("has_conflicts"),
+                "source": "timetable",
+            },
+        }
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
 #  并网函数 — 在 app.py lifespan 中调用
 # ═══════════════════════════════════════════════════════════════
+
 
 async def initialize_growth_events(
     session_factory: async_sessionmaker,
@@ -517,8 +602,10 @@ async def initialize_growth_events(
     await bus.subscribe(CH_BEHAVIOR_DISCIPLINED, on_behavior_disciplined)
     await bus.subscribe(CH_PSYCH_RISK_CHANGED, on_psych_risk_changed)
     await bus.subscribe(CH_ATTENDANCE_CONSECUTIVE_ABSENT, on_attendance_consecutive_absent)
+    await bus.subscribe(CH_HOMEWORK_SUBMISSION_LATE, on_homework_submission_late)
+    await bus.subscribe(CH_TIMETABLE_SCHEDULE_CHANGE, on_timetable_schedule_change)
 
-    logger.info("[growth-listeners] 4 路事件接收站 + CEP 拦截器已并网")
+    logger.info("[growth-listeners] 6 路事件接收站 + CEP 拦截器已并网")
 
 
 async def shutdown_growth_events():

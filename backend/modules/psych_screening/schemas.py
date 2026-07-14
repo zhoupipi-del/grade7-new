@@ -2,10 +2,9 @@
 Psych Screening Pydantic 模型
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import date, datetime
 
+from pydantic import BaseModel, Field
 
 # ============================================================
 # 枚举常量 (与前端对齐)
@@ -43,8 +42,16 @@ EFFECT_RATING_CHOICES = [
 
 # MSSMHS-55 10 维度
 MSSMHS_DIMENSIONS = [
-    "强迫症状", "偏执", "敌对", "人际敏感", "抑郁",
-    "焦虑", "学习压力", "适应不良", "情绪不平衡", "心理不平衡",
+    "强迫症状",
+    "偏执",
+    "敌对",
+    "人际敏感",
+    "抑郁",
+    "焦虑",
+    "学习压力",
+    "适应不良",
+    "情绪不平衡",
+    "心理不平衡",
 ]
 
 
@@ -52,27 +59,31 @@ MSSMHS_DIMENSIONS = [
 # 问卷提交
 # ============================================================
 
+
 class SurveyAnswer(BaseModel):
     """单题答案"""
+
     question_no: int
     score: int = Field(ge=1, le=5)
 
 
 class SurveySubmitRequest(BaseModel):
     """问卷提交请求"""
+
     student_id: int
     survey_type: str = "MSSMHS-55"
-    answers: List[SurveyAnswer]
+    answers: list[SurveyAnswer]
 
 
 class SurveySubmitResponse(BaseModel):
     """问卷提交响应"""
+
     status: str = "ok"
     survey_id: int
     total_score: float
-    risk_level: Optional[str] = None
-    assessment_id: Optional[int] = None  # 自动创建的评估 ID
-    message: Optional[str] = None
+    risk_level: str | None = None
+    assessment_id: int | None = None  # 自动创建的评估 ID
+    message: str | None = None
 
     class Config:
         from_attributes = True
@@ -82,18 +93,20 @@ class SurveySubmitResponse(BaseModel):
 # 问卷记录
 # ============================================================
 
+
 class PsychSurveyOut(BaseModel):
     """问卷记录输出"""
+
     id: int
     student_id: int
-    student_name: Optional[str] = None
-    class_name: Optional[str] = None
-    grade_name: Optional[str] = None
+    student_name: str | None = None
+    class_name: str | None = None
+    grade_name: str | None = None
     survey_type: str
-    total_score: Optional[float] = None
+    total_score: float | None = None
     verify_status: str
-    completed_at: Optional[datetime] = None
-    dimensions: Optional[dict] = None  # 解析后的维度分数
+    completed_at: datetime | None = None
+    dimensions: dict | None = None  # 解析后的维度分数
 
     class Config:
         from_attributes = True
@@ -101,7 +114,8 @@ class PsychSurveyOut(BaseModel):
 
 class PsychSurveyListResponse(BaseModel):
     """问卷列表响应"""
-    surveys: List[PsychSurveyOut]
+
+    surveys: list[PsychSurveyOut]
     total: int
     stats: dict  # {high: n, medium: n, low: n}
 
@@ -110,52 +124,58 @@ class PsychSurveyListResponse(BaseModel):
 # 心理健康评估
 # ============================================================
 
+
 class AssessmentCreateRequest(BaseModel):
     """创建评估请求"""
+
     student_id: int
-    assessment_type: str = Field(..., description="questionnaire/interview/observation/parent_feedback/teacher_feedback")
-    scale_name: Optional[str] = None
-    conclusion: Optional[str] = None
-    recommendations: Optional[str] = None
+    assessment_type: str = Field(
+        ..., description="questionnaire/interview/observation/parent_feedback/teacher_feedback"
+    )
+    scale_name: str | None = None
+    conclusion: str | None = None
+    recommendations: str | None = None
     need_intervention: bool = False
-    intervention_plan: Optional[str] = None
-    risk_level: Optional[str] = "low"
+    intervention_plan: str | None = None
+    risk_level: str | None = "low"
 
 
 class AssessmentUpdateRequest(BaseModel):
     """更新评估请求"""
-    assessment_type: Optional[str] = None
-    scale_name: Optional[str] = None
-    conclusion: Optional[str] = None
-    recommendations: Optional[str] = None
-    need_intervention: Optional[bool] = None
-    intervention_plan: Optional[str] = None
-    risk_level: Optional[str] = None
-    status: Optional[str] = None
+
+    assessment_type: str | None = None
+    scale_name: str | None = None
+    conclusion: str | None = None
+    recommendations: str | None = None
+    need_intervention: bool | None = None
+    intervention_plan: str | None = None
+    risk_level: str | None = None
+    status: str | None = None
 
 
 class AssessmentOut(BaseModel):
     """评估记录输出"""
+
     id: int
     student_id: int
-    student_name: Optional[str] = None
-    class_name: Optional[str] = None
+    student_name: str | None = None
+    class_name: str | None = None
     assessment_type: str
-    assessment_date: Optional[date] = None
-    scale_name: Optional[str] = None
-    total_score: Optional[float] = None
+    assessment_date: date | None = None
+    scale_name: str | None = None
+    total_score: float | None = None
     risk_level: str
-    conclusion: Optional[str] = None
-    recommendations: Optional[str] = None
+    conclusion: str | None = None
+    recommendations: str | None = None
     need_intervention: bool
-    intervention_plan: Optional[str] = None
-    assessed_by: Optional[int] = None
-    assessor_name: Optional[str] = None
+    intervention_plan: str | None = None
+    assessed_by: int | None = None
+    assessor_name: str | None = None
     status: str
-    reviewed_by: Optional[int] = None
-    reviewed_at: Optional[datetime] = None
-    review_comment: Optional[str] = None
-    created_at: Optional[datetime] = None
+    reviewed_by: int | None = None
+    reviewed_at: datetime | None = None
+    review_comment: str | None = None
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -163,17 +183,19 @@ class AssessmentOut(BaseModel):
 
 class AssessmentDetailOut(AssessmentOut):
     """评估详情 (含答题明细+辅助数据)"""
-    answers: Optional[List[dict]] = None
-    intervention_records: Optional[List[dict]] = None
+
+    answers: list[dict] | None = None
+    intervention_records: list[dict] | None = None
     # 辅助数据 (同 Flask 版本的 detail 页)
-    recent_discipline: Optional[List[dict]] = None
-    recent_scores: Optional[List[dict]] = None
-    attendance_summary: Optional[dict] = None
+    recent_discipline: list[dict] | None = None
+    recent_scores: list[dict] | None = None
+    attendance_summary: dict | None = None
 
 
 class AssessmentListResponse(BaseModel):
     """评估列表响应"""
-    assessments: List[AssessmentOut]
+
+    assessments: list[AssessmentOut]
     total: int
     stats: dict  # {total, high, medium, low, need_intervention}
 
@@ -182,93 +204,104 @@ class AssessmentListResponse(BaseModel):
 # 维度分析 (雷达图)
 # ============================================================
 
+
 class DimensionDataResponse(BaseModel):
     """维度聚合数据 (供 ECharts 雷达图)"""
-    indicator: List[str]  # 10 维度名称
+
+    indicator: list[str]  # 10 维度名称
     max_per_dim: int = 30  # 每维度满分
-    average: List[float]   # 各维度均分
-    max: List[float]       # 各维度最高分
-    count: int             # 有效问卷数
-    top_students: List[dict]
+    average: list[float]  # 各维度均分
+    max: list[float]  # 各维度最高分
+    count: int  # 有效问卷数
+    top_students: list[dict]
     risk_distribution: dict  # {high, medium, low}
-    class_comparison: List[dict]
+    class_comparison: list[dict]
 
 
 # ============================================================
 # AI 分析
 # ============================================================
 
+
 class AIAnalysisRequest(BaseModel):
     """AI 分析请求 (可选传班级/年级筛选)"""
-    class_id: Optional[int] = None
-    grade_id: Optional[int] = None
+
+    class_id: int | None = None
+    grade_id: int | None = None
 
 
 class AIAnalysisResponse(BaseModel):
     """AI 分析响应"""
+
     report: str  # Markdown 格式报告
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # ============================================================
 # 同步请求
 # ============================================================
 
+
 class SyncToAssessmentResponse(BaseModel):
     """同步问卷 → 评估响应"""
+
     status: str
     created: int
     updated: int
     total_processed: int
-    message: Optional[str] = None
+    message: str | None = None
 
 
 # ============================================================
 # 干预记录
 # ============================================================
 
+
 class InterventionCreateRequest(BaseModel):
     """创建干预记录"""
+
     student_id: int
-    assessment_id: Optional[int] = None
+    assessment_id: int | None = None
     intervention_type: str = "心理谈话"
-    notes: Optional[str] = None
-    parent_feedback: Optional[str] = None
-    intervention_date: Optional[str] = None  # YYYY-MM-DD
-    follow_up_date: Optional[str] = None      # YYYY-MM-DD
+    notes: str | None = None
+    parent_feedback: str | None = None
+    intervention_date: str | None = None  # YYYY-MM-DD
+    follow_up_date: str | None = None  # YYYY-MM-DD
 
 
 class InterventionFollowupRequest(BaseModel):
     """陪同随访请求"""
-    effect_rating: Optional[str] = None
-    follow_up_notes: Optional[str] = None
-    parent_feedback: Optional[str] = None
-    mh_risk_after: Optional[str] = None
+
+    effect_rating: str | None = None
+    follow_up_notes: str | None = None
+    parent_feedback: str | None = None
+    mh_risk_after: str | None = None
 
 
 class InterventionOut(BaseModel):
     """干预记录输出"""
+
     id: int
     student_id: int
-    student_name: Optional[str] = None
-    class_name: Optional[str] = None
-    teacher_id: Optional[int] = None
-    teacher_name: Optional[str] = None
-    assessment_id: Optional[int] = None
-    mh_risk_before: Optional[str] = None
-    mh_risk_after: Optional[str] = None
+    student_name: str | None = None
+    class_name: str | None = None
+    teacher_id: int | None = None
+    teacher_name: str | None = None
+    assessment_id: int | None = None
+    mh_risk_before: str | None = None
+    mh_risk_after: str | None = None
     intervention_type: str
-    notes: Optional[str] = None
-    parent_feedback: Optional[str] = None
-    effect_rating: Optional[str] = None
-    intervention_date: Optional[date] = None
-    follow_up_date: Optional[date] = None
+    notes: str | None = None
+    parent_feedback: str | None = None
+    effect_rating: str | None = None
+    intervention_date: date | None = None
+    follow_up_date: date | None = None
     follow_up_done: bool
-    follow_up_notes: Optional[str] = None
+    follow_up_notes: str | None = None
     status: str
     is_effective: bool
-    mh_risk_improved: Optional[bool] = None
-    created_at: Optional[datetime] = None
+    mh_risk_improved: bool | None = None
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -276,26 +309,30 @@ class InterventionOut(BaseModel):
 
 class InterventionListResponse(BaseModel):
     """干预记录列表"""
-    records: List[InterventionOut]
+
+    records: list[InterventionOut]
     total: int
     stats: dict
 
 
 class InterventionTimelineResponse(BaseModel):
     """学生干预时间线"""
+
     student_id: int
     student_name: str
-    records: List[InterventionOut]
-    risk_trend: List[dict]  # ECharts 数据
-    latest_assessment: Optional[AssessmentOut] = None
+    records: list[InterventionOut]
+    risk_trend: list[dict]  # ECharts 数据
+    latest_assessment: AssessmentOut | None = None
 
 
 # ============================================================
 # 问题库
 # ============================================================
 
+
 class QuestionOut(BaseModel):
     """问题条目"""
+
     id: int
     scale_name: str
     dimension: str
@@ -311,8 +348,9 @@ class QuestionOut(BaseModel):
 
 class QuestionListResponse(BaseModel):
     """问题库列表"""
-    questions: List[QuestionOut]
-    scale_names: List[str]
+
+    questions: list[QuestionOut]
+    scale_names: list[str]
     total: int
 
 
@@ -320,19 +358,22 @@ class QuestionListResponse(BaseModel):
 # 学生搜索
 # ============================================================
 
+
 class StudentSearchItem(BaseModel):
     """学生搜索结果"""
+
     id: int
     name: str
-    class_name: Optional[str] = None
-    risk_level: Optional[str] = None
-    total_score: Optional[float] = None
-    assessment_id: Optional[int] = None
+    class_name: str | None = None
+    risk_level: str | None = None
+    total_score: float | None = None
+    assessment_id: int | None = None
 
 
 class StudentSearchResponse(BaseModel):
     """学生搜索响应"""
-    students: List[StudentSearchItem]
+
+    students: list[StudentSearchItem]
     total: int
 
 
@@ -340,10 +381,12 @@ class StudentSearchResponse(BaseModel):
 # 统计仪表盘
 # ============================================================
 
+
 class PsychDashboardResponse(BaseModel):
     """心理筛查仪表盘"""
-    survey_stats: dict       # {total, mssmhs_count, pce_count}
+
+    survey_stats: dict  # {total, mssmhs_count, pce_count}
     risk_distribution: dict  # {high, medium, low}
-    assessment_stats: dict   # {total, by_type, need_intervention}
-    intervention_stats: dict # {total, tracking, completed, effective}
-    dimension_alerts: List[dict]  # 维度预警 (均分 > 15)
+    assessment_stats: dict  # {total, by_type, need_intervention}
+    intervention_stats: dict  # {total, tracking, completed, effective}
+    dimension_alerts: list[dict]  # 维度预警 (均分 > 15)

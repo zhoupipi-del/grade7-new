@@ -23,35 +23,33 @@ modules/approval/routers.py — 多租户动态审批链 API 端点
 
 import logging
 from datetime import timedelta
-from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, and_
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
-
+from core.models import School, Student, User, UserRole
 from core.routers import get_current_user, get_db
-from core.models import User, UserRole, Student, School
-
-from .schemas import (
-    TenantApprovalChainCreate,
-    TenantApprovalChainUpdate,
-    TenantApprovalChainResponse,
-    TenantApprovalChainListResponse,
-    ChainActivateResponse,
-    ApprovalRuntimeNode,
-    ApprovalTicketResponse,
-    PendingCountResponse,
-    ApprovalRequestResponse,
-    ApprovalRequestListResponse,
-    ApproveRequestInput,
-    RejectRequestInput,
-    UrgeResponse,
-)
-from .services import ApprovalChainService, get_local_now, ROLE_LABELS
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 # ApprovalRequest 定义在 evaluation/models.py 中
 from modules.evaluation.models import ApprovalRequest
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
+
+from .schemas import (
+    ApprovalRequestListResponse,
+    ApprovalRequestResponse,
+    ApprovalRuntimeNode,
+    ApprovalTicketResponse,
+    ApproveRequestInput,
+    ChainActivateResponse,
+    PendingCountResponse,
+    RejectRequestInput,
+    TenantApprovalChainCreate,
+    TenantApprovalChainListResponse,
+    TenantApprovalChainResponse,
+    TenantApprovalChainUpdate,
+    UrgeResponse,
+)
+from .services import ApprovalChainService, get_local_now
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +59,7 @@ router = APIRouter(tags=["approval"])
 # ═══════════════════════════════════════════════════════════════
 # 依赖: 角色校验
 # ═══════════════════════════════════════════════════════════════
+
 
 def _require_admin(user: User = Depends(get_current_user)):
     """仅 ms_admin 可管理审批链"""
@@ -81,10 +80,11 @@ def _require_staff(user: User = Depends(get_current_user)):
 # 辅助函数: chain_config 快照 → 前端 ApprovalNode 映射
 # ═══════════════════════════════════════════════════════════════
 
+
 def _map_chain_nodes(
     chain_config: dict,
     current_step: int,
-) -> List[ApprovalRuntimeNode]:
+) -> list[ApprovalRuntimeNode]:
     """
     将后端 chain_config.nodes 转换为前端 ApprovalNode[] 格式。
 
@@ -114,14 +114,16 @@ def _map_chain_nodes(
         approved_at = n.get("approved_at") or n.get("auto_approved_at")
         update_time = approved_at if approved_at else None
 
-        result.append(ApprovalRuntimeNode(
-            node_id=str(node_index),
-            node_name=n.get("label", n.get("node_name", "审批节点")),
-            assignee_role=n.get("role", ""),
-            assignee_name=None,
-            status=frontend_status,
-            update_time=update_time,
-        ))
+        result.append(
+            ApprovalRuntimeNode(
+                node_id=str(node_index),
+                node_name=n.get("label", n.get("node_name", "审批节点")),
+                assignee_role=n.get("role", ""),
+                assignee_name=None,
+                status=frontend_status,
+                update_time=update_time,
+            )
+        )
 
     return result
 
@@ -156,9 +158,10 @@ def _calculate_deadline(created_at, chain_config: dict) -> str:
 # 1. 审批链模板 CRUD (/chains)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/chains", response_model=TenantApprovalChainListResponse)
 async def list_chains(
-    business_type: Optional[str] = Query(default=None, description="按业务类型筛选"),
+    business_type: str | None = Query(default=None, description="按业务类型筛选"),
     active_only: bool = Query(default=False, description="仅显示活跃链"),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
@@ -257,6 +260,7 @@ async def deactivate_chain(
 # 2. 待审批计数 (/pending-count)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/pending-count", response_model=PendingCountResponse)
 async def get_pending_count(
     user: User = Depends(get_current_user),
@@ -277,7 +281,8 @@ async def get_pending_count(
 # 3. 动态链工单视图 (/tickets)
 # ═══════════════════════════════════════════════════════════════
 
-@router.get("/tickets", response_model=List[ApprovalTicketResponse])
+
+@router.get("/tickets", response_model=list[ApprovalTicketResponse])
 async def get_tickets(
     type: str = Query(default="todo", description="todo=待审批, done=已完成"),
     user: User = Depends(get_current_user),
@@ -321,16 +326,18 @@ async def get_tickets(
         nodes = _map_chain_nodes(chain, ar.current_step or 0)
         title = _build_ticket_title(ar.event_type, student_name or "未知学生")
 
-        tickets.append(ApprovalTicketResponse(
-            ticket_id=str(ar.id),
-            title=title,
-            applicant_name="系统提交",
-            tenant_school=school_name or "本校",
-            created_at=ar.created_at.isoformat() if ar.created_at else "",
-            deadline_at=_calculate_deadline(ar.created_at, chain),
-            current_node_index=ar.current_step or 0,
-            chain_config=nodes,
-        ))
+        tickets.append(
+            ApprovalTicketResponse(
+                ticket_id=str(ar.id),
+                title=title,
+                applicant_name="系统提交",
+                tenant_school=school_name or "本校",
+                created_at=ar.created_at.isoformat() if ar.created_at else "",
+                deadline_at=_calculate_deadline(ar.created_at, chain),
+                current_node_index=ar.current_step or 0,
+                chain_config=nodes,
+            )
+        )
 
     return tickets
 
@@ -364,7 +371,10 @@ async def urge_ticket_node(
     # 记录催办日志（后续可对接通知模块）
     logger.info(
         "[URGE] 催办 | ticket=%s node=%s school=%s user=%s",
-        ticket_id, node_id, user.school_id, user.id,
+        ticket_id,
+        node_id,
+        user.school_id,
+        user.id,
     )
 
     return UrgeResponse(
@@ -378,9 +388,10 @@ async def urge_ticket_node(
 # 4. 审批请求 CRUD (/requests)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/requests", response_model=ApprovalRequestListResponse)
 async def list_requests(
-    status: Optional[str] = Query(default=None, description="按状态筛选"),
+    status: str | None = Query(default=None, description="按状态筛选"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
@@ -526,13 +537,13 @@ async def approve_request(
         else:
             logger.info(
                 "[APPROVE] 工单 #%s 节点 %s 通过 → 推进到 %s",
-                req_id, current_step, ar.current_step,
+                req_id,
+                current_step,
+                ar.current_step,
             )
     else:
         # 并行：检查是否全部通过
-        all_approved = all(
-            n.get("status") in ("approved", "auto_approved") for n in nodes
-        )
+        all_approved = all(n.get("status") in ("approved", "auto_approved") for n in nodes)
         if all_approved:
             ar.current_status = "approved"
             ar.completed_at = now
@@ -601,7 +612,10 @@ async def reject_request(
 
     logger.info(
         "[REJECT] 工单 #%s 被驳回 | node=%s user=%s comment=%s",
-        req_id, current_step, user.id, data.comment[:100],
+        req_id,
+        current_step,
+        user.id,
+        data.comment[:100],
     )
 
     await db.commit()

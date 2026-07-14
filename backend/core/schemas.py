@@ -2,10 +2,10 @@
 core/schemas.py — Wings 3.0 核心 Pydantic 数据模型
 """
 
-from typing import Optional, List, Any
-from datetime import datetime, date
-from pydantic import BaseModel, Field
+from datetime import datetime
 from enum import Enum
+
+from pydantic import BaseModel, Field
 
 
 class UserRoleEnum(str, Enum):
@@ -18,6 +18,7 @@ class UserRoleEnum(str, Enum):
 
 
 # ── 认证 ──
+
 
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=2, max_length=50)
@@ -37,11 +38,11 @@ class UserOut(BaseModel):
     display_name: str
     role: UserRoleEnum
     school_id: int
-    school_name: Optional[str] = None
-    school_phase: Optional[str] = "junior"
-    plugin_config: Optional[dict] = None
-    grade_id: Optional[int] = None
-    class_id: Optional[int] = None
+    school_name: str | None = None
+    school_phase: str | None = "junior"
+    plugin_config: dict | None = None
+    grade_id: int | None = None
+    class_id: int | None = None
     is_active: bool
     password_change_required: bool = False
 
@@ -55,13 +56,14 @@ class ChangePasswordRequest(BaseModel):
 
 # ── 学校 ──
 
+
 class SchoolOut(BaseModel):
     id: int
     name: str
-    school_phase: Optional[str] = "junior"
-    plugin_config: Optional[dict] = None
+    school_phase: str | None = "junior"
+    plugin_config: dict | None = None
     is_active: bool
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -72,24 +74,26 @@ class SchoolCreate(BaseModel):
 
 # ── 模块配置 ──
 
+
 class SchoolModuleOut(BaseModel):
     id: int
     school_id: int
     module_code: str
     enabled: bool
-    config: Optional[dict] = None
-    enabled_at: Optional[datetime] = None
-    disabled_at: Optional[datetime] = None
+    config: dict | None = None
+    enabled_at: datetime | None = None
+    disabled_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
 
 class SchoolModuleUpdate(BaseModel):
     enabled: bool
-    config: Optional[dict] = None
+    config: dict | None = None
 
 
 # ── 学生 ──
+
 
 class StudentOut(BaseModel):
     id: int
@@ -98,7 +102,7 @@ class StudentOut(BaseModel):
     school_id: int
     class_id: int
     grade_id: int
-    gender: Optional[str] = None
+    gender: str | None = None
     is_active: bool
 
     model_config = {"from_attributes": True}
@@ -106,36 +110,39 @@ class StudentOut(BaseModel):
 
 class StudentBrief(BaseModel):
     """列表用轻量学生视图"""
+
     id: int
     name: str
     student_no: str
     class_id: int
     grade_id: int
-    gender: Optional[str] = None
+    gender: str | None = None
     is_active: bool
-    class_name: Optional[str] = None
-    grade_name: Optional[str] = None
+    class_name: str | None = None
+    grade_name: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 # ── 班级 ──
 
+
 class ClassOut(BaseModel):
     id: int
     name: str
     school_id: int
     grade_id: int
-    head_teacher_id: Optional[int] = None
+    head_teacher_id: int | None = None
     student_count: int
     is_active: bool
-    grade_name: Optional[str] = None
-    head_teacher_name: Optional[str] = None
+    grade_name: str | None = None
+    head_teacher_name: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 # ── 年级 ──
+
 
 class GradeOut(BaseModel):
     id: int
@@ -149,6 +156,7 @@ class GradeOut(BaseModel):
 
 # ── 分页 ──
 
+
 class PaginatedResponse(BaseModel):
     items: list
     total: int
@@ -159,6 +167,7 @@ class PaginatedResponse(BaseModel):
 
 # ── 通用 ──
 
+
 class MessageResponse(BaseModel):
     message: str
-    detail: Optional[str] = None
+    detail: str | None = None

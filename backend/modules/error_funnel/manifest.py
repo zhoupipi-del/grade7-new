@@ -13,4 +13,5 @@ MODULE_MODELS = ["error_funnel.models"]
 def register(router_prefix="/api/v1/error_funnel"):
     """模块注册入口 — 由 module_loader 调用。返回 (APIRouter, prefix) 元组。"""
     from modules.error_funnel.routers import router
+
     return router, router_prefix

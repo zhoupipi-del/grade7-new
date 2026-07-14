@@ -21,22 +21,21 @@ Redis pub/sub 频道 wings:notifications:popup。
     interceptor = ComplexEventInterceptor()
     await interceptor.process_event(TRIGGER_ATTENDANCE, event_data)
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-import os
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
+from core.redis_client import get_redis
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-
-from core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +43,8 @@ logger = logging.getLogger(__name__)
 #  常量
 # ═══════════════════════════════════════════════════════════════
 
-WINDOW_TTL = 172_800      # 48 小时 — 滑动时间窗
-COOLDOWN_TTL = 259_200    # 3 天 — 冷却锁
+WINDOW_TTL = 172_800  # 48 小时 — 滑动时间窗
+COOLDOWN_TTL = 259_200  # 3 天 — 冷却锁
 
 CH_NOTIFICATIONS_POPUP = "wings:notifications:popup"
 
@@ -57,6 +56,7 @@ TRIGGER_ERROR_FUNNEL = "error_funnel"
 # ═══════════════════════════════════════════════════════════════
 #  Wings 3.1 时空加权引擎
 # ═══════════════════════════════════════════════════════════════
+
 
 def _compute_timetable_weight(timetable_ctx: dict) -> float:
     """
@@ -112,12 +112,11 @@ def _build_timetable_prompt_section(timetable_ctx: dict, weight: float) -> str:
 #  异步引擎 (独立于 listeners 的 session_factory，避免 Session 争用)
 # ═══════════════════════════════════════════════════════════════
 
-_ASYNC_DB_URL = os.environ.get(
-    "DATABASE_URL",
-    "mysql+aiomysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3",
-)
-_async_engine: Optional[Any] = None
-_AsyncSessionLocal: Optional[async_sessionmaker] = None
+from core.db_utils import require_db_url
+
+_ASYNC_DB_URL = require_db_url()
+_async_engine: Any | None = None
+_AsyncSessionLocal: async_sessionmaker | None = None
 
 
 def _get_async_session_factory() -> async_sessionmaker:
@@ -165,7 +164,7 @@ class ComplexEventInterceptor:
     async def process_event(
         self,
         trigger_source: str,
-        event_data: Dict[str, Any],
+        event_data: dict[str, Any],
     ) -> None:
         """
         事件入站处理 — 状态盖章 → 双向探针扫描 → 冷却锁抢占 → 唤醒V3
@@ -191,7 +190,8 @@ class ComplexEventInterceptor:
             await self.redis.set(window_key, "1", ex=WINDOW_TTL)
             logger.debug(
                 "[CEP] 窗口盖章 | source=%s student=%s",
-                trigger_source, student_id,
+                trigger_source,
+                student_id,
             )
         except Exception as e:
             logger.warning("[CEP] 窗口盖章失败, 跳过: %s", e)
@@ -199,9 +199,7 @@ class ComplexEventInterceptor:
 
         # ── Step 1b: 双向探针 — 检查对侧窗口是否已点亮 ──
         opposite_source = (
-            TRIGGER_ERROR_FUNNEL
-            if trigger_source == TRIGGER_ATTENDANCE
-            else TRIGGER_ATTENDANCE
+            TRIGGER_ERROR_FUNNEL if trigger_source == TRIGGER_ATTENDANCE else TRIGGER_ATTENDANCE
         )
         opposite_key = f"wings:cep:window:{opposite_source}:{student_id}"
 
@@ -214,21 +212,28 @@ class ComplexEventInterceptor:
         if not opposite_exists:
             logger.debug(
                 "[CEP] 单侧事件, 未交汇 | student=%s trigger=%s opposite=%s (未点亮)",
-                student_id, trigger_source, opposite_source,
+                student_id,
+                trigger_source,
+                opposite_source,
             )
             return
 
         # ── 交汇沸点! 双向窗口都亮了 ──
         logger.info(
             "[CEP] 复合沸点交汇! student=%s | %s x %s",
-            student_id, trigger_source, opposite_source,
+            student_id,
+            trigger_source,
+            opposite_source,
         )
 
         # ── Step 1c: 冷却锁抢占 — SETNX 3天 TTL ──
         cooldown_key = f"wings:cep:lock:composite:{student_id}"
         try:
             acquired = await self.redis.set(
-                cooldown_key, "1", ex=COOLDOWN_TTL, nx=True,
+                cooldown_key,
+                "1",
+                ex=COOLDOWN_TTL,
+                nx=True,
             )
         except Exception as e:
             logger.warning("[CEP] 冷却锁异常: %s", e)
@@ -253,11 +258,19 @@ class ComplexEventInterceptor:
             "cooldown_key": cooldown_key,
             "triggered_at": datetime.utcnow().isoformat(),
             "trigger_event": {
-                k: v for k, v in event_data.items()
-                if k in (
-                    "knowledge_point", "consecutive_errors", "error_count",
-                    "absent_count", "absent_dates", "class_id", "level",
-                    "category", "deduction",
+                k: v
+                for k, v in event_data.items()
+                if k
+                in (
+                    "knowledge_point",
+                    "consecutive_errors",
+                    "error_count",
+                    "absent_count",
+                    "absent_dates",
+                    "class_id",
+                    "level",
+                    "category",
+                    "deduction",
                 )
             },
             # ⚡ Wings 3.1 时空连续体: 课表上下文 + 加权系数
@@ -268,7 +281,9 @@ class ComplexEventInterceptor:
         # 后台异步执行 — 不阻塞 listener 事件循环
         asyncio.create_task(
             self._execute_active_intervention(
-                student_id, school_id, trigger_meta,
+                student_id,
+                school_id,
+                trigger_meta,
             )
         )
         logger.info(
@@ -284,7 +299,7 @@ class ComplexEventInterceptor:
         self,
         student_id: int,
         school_id: int,
-        trigger_meta: Dict[str, Any],
+        trigger_meta: dict[str, Any],
     ) -> None:
         """
         V3 主动干预执行器 — 13路上下文 → DeepSeek → 持久化 → 广播
@@ -295,7 +310,8 @@ class ComplexEventInterceptor:
         t0 = datetime.utcnow()
         logger.info(
             "[CEP-V3] 干预启动 | student=%s school=%s",
-            student_id, school_id,
+            student_id,
+            school_id,
         )
 
         try:
@@ -323,7 +339,10 @@ class ComplexEventInterceptor:
                 prompt = prompt + "\n\n" + timetable_section
 
             result = await asyncio.to_thread(
-                _call_deepseek, prompt, SYSTEM_PROMPT_STUDENT, 90,
+                _call_deepseek,
+                prompt,
+                SYSTEM_PROMPT_STUDENT,
+                90,
             )
 
             # 解析 LLM 输出
@@ -340,36 +359,47 @@ class ComplexEventInterceptor:
 
             logger.info(
                 "[CEP-V3] DeepSeek 处方生成完成 | student=%s risk=%s",
-                student_id, risk_level,
+                student_id,
+                risk_level,
             )
 
             # ── Step 2c: 持久化 ActiveCompositeAlert ──
             alert_id = await self._persist_alert(
-                student_id, school_id, trigger_meta, full_text, summary,
+                student_id,
+                school_id,
+                trigger_meta,
+                full_text,
+                summary,
             )
 
             # ── Step 2d: 广播弹窗事件到 Redis ──
             await self._broadcast_popup(
-                student_id, school_id, alert_id, summary, trigger_meta,
+                student_id,
+                school_id,
+                alert_id,
+                summary,
+                trigger_meta,
             )
 
             elapsed = (datetime.utcnow() - t0).total_seconds()
             logger.info(
                 "[CEP-V3] 干预完成 | student=%s alert=%s 耗时=%.1fs",
-                student_id, alert_id, elapsed,
+                student_id,
+                alert_id,
+                elapsed,
             )
 
         except Exception as e:
             logger.error(
                 "[CEP-V3] 干预失败 | student=%s: %s",
-                student_id, e, exc_info=True,
+                student_id,
+                e,
+                exc_info=True,
             )
             # 干预失败 → 释放冷却锁，允许下次重试
             if self.redis:
                 try:
-                    await self.redis.delete(
-                        f"wings:cep:lock:composite:{student_id}"
-                    )
+                    await self.redis.delete(f"wings:cep:lock:composite:{student_id}")
                     logger.info(
                         "[CEP-V3] 冷却锁已释放(干预失败,允许重试) | student=%s",
                         student_id,
@@ -382,7 +412,9 @@ class ComplexEventInterceptor:
     # ─────────────────────────────────────────────
 
     async def _build_context(
-        self, student_id: int, school_id: int,
+        self,
+        student_id: int,
+        school_id: int,
     ) -> dict:
         """
         构建学生 13 路黄金上下文 — 委托给 AIPrescriptionAggregator
@@ -394,7 +426,10 @@ class ComplexEventInterceptor:
         factory = _get_async_session_factory()
         async with factory() as db:
             ctx = await AIPrescriptionAggregator.build_student_context(
-                db, student_id=student_id, school_id=school_id, days=30,
+                db,
+                student_id=student_id,
+                school_id=school_id,
+                days=30,
             )
         return ctx
 
@@ -406,10 +441,10 @@ class ComplexEventInterceptor:
         self,
         student_id: int,
         school_id: int,
-        trigger_meta: Dict[str, Any],
+        trigger_meta: dict[str, Any],
         prescription_text: str,
         summary: str,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         持久化 ActiveCompositeAlert 到数据库
 
@@ -444,7 +479,9 @@ class ComplexEventInterceptor:
                     alert_type="CRITICAL_COMPOSITE",
                     title=title[:200],
                     reason_meta=json.dumps(
-                        trigger_meta, ensure_ascii=False, default=str,
+                        trigger_meta,
+                        ensure_ascii=False,
+                        default=str,
                     ),
                     ai_prescription=prescription_text,
                     is_resolved=False,
@@ -454,13 +491,16 @@ class ComplexEventInterceptor:
                 await session.refresh(alert)
                 logger.info(
                     "[CEP-V3] 预警已持久化 | alert_id=%s student=%s",
-                    alert.id, student_id,
+                    alert.id,
+                    student_id,
                 )
                 return alert.id
             except Exception as e:
                 await session.rollback()
                 logger.error(
-                    "[CEP-V3] 持久化失败: %s", e, exc_info=True,
+                    "[CEP-V3] 持久化失败: %s",
+                    e,
+                    exc_info=True,
                 )
                 return None
 
@@ -472,9 +512,9 @@ class ComplexEventInterceptor:
         self,
         student_id: int,
         school_id: int,
-        alert_id: Optional[int],
+        alert_id: int | None,
         summary: str,
-        trigger_meta: Dict[str, Any],
+        trigger_meta: dict[str, Any],
     ) -> None:
         """
         广播弹窗事件到 Redis pub/sub 频道 wings:notifications:popup
@@ -507,7 +547,8 @@ class ComplexEventInterceptor:
             )
             logger.info(
                 "[CEP-V3] 弹窗已广播 | channel=%s student=%s",
-                CH_NOTIFICATIONS_POPUP, student_id,
+                CH_NOTIFICATIONS_POPUP,
+                student_id,
             )
         except Exception as e:
             logger.warning("[CEP-V3] 弹窗广播失败: %s", e)

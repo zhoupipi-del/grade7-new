@@ -32,4 +32,5 @@ MODULE_PHASES = ["junior", "senior", "integrated", "primary"]
 
 def register(router_prefix="/api/v1/psych-profiles"):
     from modules.psych_profiles.routers import router
+
     return router, router_prefix

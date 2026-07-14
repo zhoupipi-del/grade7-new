@@ -13,22 +13,20 @@ Phase 2 (P1): 教师端学情报表
 Phase 3+: 课件管理、分层作业（预留）
 """
 
-from typing import Optional
-
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.models import User, UserRole
-from core.routers import get_db, get_current_user, require_role
-from .services import TranslationService, ReportService
 from .schemas import (
+    BlindSpotItem,
+    MathReportKPI,
+    StudentUsageItem,
     TranslateRequest,
     TranslateResponse,
     TranslationHistoryOut,
-    MathReportKPI,
-    BlindSpotItem,
-    StudentUsageItem,
 )
+from .services import ReportService, TranslationService
 
 router = APIRouter(tags=["teach-math"])
 
@@ -36,6 +34,7 @@ router = APIRouter(tags=["teach-math"])
 # ═══════════════════════════════════════════════════════
 # P0: 审题翻译
 # ═══════════════════════════════════════════════════════
+
 
 @router.post(
     "/translate",
@@ -96,6 +95,7 @@ async def get_translation_history(
 # ═══════════════════════════════════════════════════════
 # P1: 教师端学情报表
 # ═══════════════════════════════════════════════════════
+
 
 @router.get(
     "/report/{class_id}/kpi",
@@ -179,6 +179,7 @@ async def get_class_student_usage(
 # ═══════════════════════════════════════════════════════
 # 访问控制辅助函数
 # ═══════════════════════════════════════════════════════
+
 
 def _check_class_access(user: User, class_id: int) -> None:
     """校验当前用户是否有权访问目标班级数据

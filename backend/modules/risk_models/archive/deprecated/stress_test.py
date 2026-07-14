@@ -17,33 +17,29 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime
-from typing import List, Dict
 
 # 添加项目路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from core.models import Student
 
 # 导入模型和服务
 from modules.risk_models.services import RiskDeviationIndexCalculator
-from core.models import Student
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
 
 # 数据库配置
-DATABASE_URL = "mysql+aiomysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3"
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -55,19 +51,15 @@ async def stress_test_rdi(school_id: int = 1, load_history: bool = False):
     """
     async with AsyncSessionLocal() as db:
         # 1. 获取全校学生 ID 列表
-        students = await db.scalars(
-            select(Student.id).where(
-                Student.school_id == school_id
-            )
-        )
+        students = await db.scalars(select(Student.id).where(Student.school_id == school_id))
         student_ids = students.all()
         total_students = len(student_ids)
 
-        logger.info(f"🚀 开始性能压力测试")
+        logger.info("🚀 开始性能压力测试")
         logger.info(f"   学生总数: {total_students}")
         logger.info(f"   LazyFetch (load_history): {load_history}")
         logger.info(f"   预计 SQL 交互: {'4次' if load_history else '≤3次'}")
-        logger.info(f"=" * 60)
+        logger.info("=" * 60)
 
         # 2. 逐学生计算 RDI
         latencies = []
@@ -83,7 +75,7 @@ async def stress_test_rdi(school_id: int = 1, load_history: bool = False):
                 result = await calculator.calculate_rdi(
                     student_id=student_id,
                     load_history=load_history,  # 🚀 LazyFetch 优化
-                    suppress_low_rdi=True
+                    suppress_low_rdi=True,
                 )
                 elapsed_ms = (time.time() - start_time) * 1000
 
@@ -107,7 +99,7 @@ async def stress_test_rdi(school_id: int = 1, load_history: bool = False):
 
         # 3. 统计性能报告
         logger.info(f"\n{'=' * 60}")
-        logger.info(f"📊 性能压力测试报告")
+        logger.info("📊 性能压力测试报告")
         logger.info(f"{'=' * 60}")
 
         if latencies:
@@ -123,35 +115,37 @@ async def stress_test_rdi(school_id: int = 1, load_history: bool = False):
             logger.info(f"成功计算: {len(latencies)}")
             logger.info(f"失败次数: {errors}")
             logger.info(f"总耗时: {total_elapsed:.2f}ms ({total_elapsed / 1000:.2f}s)")
-            logger.info(f"")
-            logger.info(f"⏱️  延迟统计 (ms):")
+            logger.info("")
+            logger.info("⏱️  延迟统计 (ms):")
             logger.info(f"  平均延迟: {avg_latency:.2f}ms")
             logger.info(f"  中位数 (P50): {p50_latency:.2f}ms")
             logger.info(f"  P95: {p95_latency:.2f}ms")
             logger.info(f"  P99: {p99_latency:.2f}ms")
             logger.info(f"  最小值: {min_latency:.2f}ms")
             logger.info(f"  最大值: {max_latency:.2f}ms")
-            logger.info(f"")
-            logger.info(f"🔍 SQL 交互统计:")
+            logger.info("")
+            logger.info("🔍 SQL 交互统计:")
             if sql_interactions_list:
                 avg_sql = sum(sql_interactions_list) / len(sql_interactions_list)
                 logger.info(f"  平均 SQL 交互: {avg_sql:.2f} 次")
-                logger.info(f"  SQL 交互分布: {dict((x, sql_interactions_list.count(x)) for x in set(sql_interactions_list))}")
-            logger.info(f"")
-            logger.info(f"✅ 性能评估:")
+                logger.info(
+                    f"  SQL 交互分布: {dict((x, sql_interactions_list.count(x)) for x in set(sql_interactions_list))}"
+                )
+            logger.info("")
+            logger.info("✅ 性能评估:")
             if avg_latency < 50:
-                logger.info(f"  评估: 优秀 (平均 <50ms)")
+                logger.info("  评估: 优秀 (平均 <50ms)")
             elif avg_latency < 100:
-                logger.info(f"  评估: 良好 (平均 <100ms)")
+                logger.info("  评估: 良好 (平均 <100ms)")
             elif avg_latency < 200:
-                logger.info(f"  评估: 可接受 (平均 <200ms)")
+                logger.info("  评估: 可接受 (平均 <200ms)")
             else:
-                logger.info(f"  评估: ⚠️  需优化 (平均 ≥200ms)")
-            
+                logger.info("  评估: ⚠️  需优化 (平均 ≥200ms)")
+
             if p99_latency < 150:
-                logger.info(f"  P99 延迟: ✅ 满足 Latency Monitor 要求 (<150ms)")
+                logger.info("  P99 延迟: ✅ 满足 Latency Monitor 要求 (<150ms)")
             else:
-                logger.info(f"  P99 延迟: ⚠️  存在慢查询 (P99 ≥150ms)")
+                logger.info("  P99 延迟: ⚠️  存在慢查询 (P99 ≥150ms)")
 
         logger.info(f"{'=' * 60}")
 
@@ -159,19 +153,19 @@ async def stress_test_rdi(school_id: int = 1, load_history: bool = False):
 async def main():
     """主函数"""
     import argparse
+
     parser = argparse.ArgumentParser(description="RDI 批量计算性能压力测试")
     parser.add_argument("--school-id", type=int, default=1, help="学校ID")
-    parser.add_argument("--load-history", action="store_true", help="加载历史趋势 (LazyFetch=False)")
+    parser.add_argument(
+        "--load-history", action="store_true", help="加载历史趋势 (LazyFetch=False)"
+    )
     parser.add_argument("--sample", type=int, default=0, help="仅测试前 N 名学生 (0=全部)")
     args = parser.parse_args()
 
-    logger.info(f"RDI 性能压力测试启动")
+    logger.info("RDI 性能压力测试启动")
     logger.info(f"参数: school_id={args.school_id}, load_history={args.load_history}")
 
-    await stress_test_rdi(
-        school_id=args.school_id,
-        load_history=args.load_history
-    )
+    await stress_test_rdi(school_id=args.school_id, load_history=args.load_history)
 
 
 if __name__ == "__main__":

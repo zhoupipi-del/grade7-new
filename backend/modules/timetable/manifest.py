@@ -12,4 +12,5 @@ MODULE_PHASES = ["junior", "senior", "primary", "integrated"]
 
 def register(router_prefix="/api/v1/timetable"):
     from modules.timetable.routers import router
+
     return router, router_prefix

@@ -11,23 +11,28 @@ error_funnel/models.py — 错题断层漏斗引擎
   consecutive_errors >= 3 → gap_level=critical → 触发AI处方
 """
 
+from core.models import Base, SchoolMixin, get_local_now
 from sqlalchemy import (
-    Column, BigInteger, String, Integer, Boolean, DateTime, Text, JSON,
-    Index, UniqueConstraint, Numeric,
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
-
-from core.models import Base, get_local_now
-from core.models import SchoolMixin
-
 
 # ──────────────────────────────────────────────
 # 错误类型
 # ──────────────────────────────────────────────
-ERROR_CONCEPTUAL = "conceptual"      # 概念性错误
-ERROR_PROCEDURAL = "procedural"      # 过程性错误
-ERROR_CARELESS = "careless"          # 粗心错误
-ERROR_OMISSION = "omission"          # 遗漏错误
-ERROR_UNKNOWN = "unknown"            # 未知错误
+ERROR_CONCEPTUAL = "conceptual"  # 概念性错误
+ERROR_PROCEDURAL = "procedural"  # 过程性错误
+ERROR_CARELESS = "careless"  # 粗心错误
+ERROR_OMISSION = "omission"  # 遗漏错误
+ERROR_UNKNOWN = "unknown"  # 未知错误
 
 # 来源类型
 SOURCE_HOMEWORK = "homework"
@@ -93,7 +98,11 @@ class ErrorBookItem(Base, SchoolMixin):
     student_answer = Column(Text)
     correct_answer = Column(Text)
 
-    error_type = Column(String(20), nullable=False, comment="错误类型: conceptual/procedural/careless/omission/unknown")
+    error_type = Column(
+        String(20),
+        nullable=False,
+        comment="错误类型: conceptual/procedural/careless/omission/unknown",
+    )
     knowledge_point_ids = Column(JSON, comment="关联知识点ID数组")
     difficulty = Column(String(10), comment="难度: easy/medium/hard")
 
@@ -131,7 +140,9 @@ class KnowledgeGap(Base, SchoolMixin):
     last_error_date = Column(DateTime)
     last_error_source = Column(String(200))
 
-    gap_level = Column(String(20), default=GAP_WATCH, comment="断层等级: none/watch/warning/critical")
+    gap_level = Column(
+        String(20), default=GAP_WATCH, comment="断层等级: none/watch/warning/critical"
+    )
     gap_status = Column(String(20), default=GAP_ACTIVE, comment="状态: active/resolved")
 
     resolved_at = Column(DateTime)
@@ -143,7 +154,9 @@ class KnowledgeGap(Base, SchoolMixin):
     updated_at = Column(DateTime, default=get_local_now, onupdate=get_local_now)
 
     __table_args__ = (
-        UniqueConstraint("school_id", "student_id", "knowledge_point_id", name="uk_kg_school_student_kp"),
+        UniqueConstraint(
+            "school_id", "student_id", "knowledge_point_id", name="uk_kg_school_student_kp"
+        ),
         Index("idx_kg_school_student", "school_id", "student_id"),
         Index("idx_kg_school_subject", "school_id", "subject_id"),
         Index("idx_kg_gap_level", "school_id", "gap_level", "gap_status"),

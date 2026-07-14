@@ -11,4 +11,5 @@ MODULE_DEPENDENCIES = ["behavior", "evaluation"]
 
 def register(router_prefix="/api/v1/dashboard"):
     from modules.dashboard.routers import router
+
     return router, router_prefix

@@ -10,11 +10,18 @@ modules/grades/models.py — 成绩管理模块数据模型
 - GradeAuditLog: 成绩变更审计日志（谁改了什么分）
 """
 
-from sqlalchemy import (
-    Column, BigInteger, String, Text, DateTime, Integer, Boolean,
-    Numeric, Index, UniqueConstraint,
-)
 from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 
 
 class GradeSubject(Base, SchoolMixin):
@@ -35,15 +42,20 @@ class GradeSubject(Base, SchoolMixin):
     code = Column(String(30), nullable=False, comment="科目代码（chinese/math/english...）")
     full_score = Column(Numeric(6, 2), default=100.00, comment="满分值（如 100/120/150）")
     subject_category = Column(
-        String(20), nullable=False, default="mandatory",
+        String(20),
+        nullable=False,
+        default="mandatory",
         comment="科目分类: mandatory(必考:语数英)/preferred(首选:物史)/elective(再选:化生政地)",
     )
     is_scaling_target = Column(
-        Boolean, nullable=False, default=False,
+        Boolean,
+        nullable=False,
+        default=False,
         comment="是否需要等级赋分(仅再选科目为TRUE)",
     )
     scaling_score_range = Column(
-        String(20), nullable=True,
+        String(20),
+        nullable=True,
         comment="赋分分值区间(如 '30-100' 表示再选科目赋分区间)",
     )
     sort_order = Column(Integer, default=0, comment="排序权重")
@@ -101,7 +113,9 @@ class GradeRecord(Base, SchoolMixin):
     updated_at = Column(DateTime, default=get_local_now, onupdate=get_local_now, comment="更新时间")
 
     __table_args__ = (
-        UniqueConstraint("school_id", "exam_id", "student_id", "subject_id", name="uk_grades_record"),
+        UniqueConstraint(
+            "school_id", "exam_id", "student_id", "subject_id", name="uk_grades_record"
+        ),
         Index("idx_grecord_exam_student", "exam_id", "student_id"),
         Index("idx_grecord_student", "student_id"),
     )

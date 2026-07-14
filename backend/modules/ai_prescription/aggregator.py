@@ -17,18 +17,17 @@ V3 升维 (Task #1448 — AIContextHydrator 提示词网关):
   - 第13路 psych_deep: 心理档案+筛查+咨询元数据 (PsyProfile/PsyScreeningRecord/PsyConsultRecord,
            严格排除 encrypted_clog 加密字段)
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
-
-from sqlalchemy import func, select, text
-from sqlalchemy.orm import Session
+from datetime import UTC, datetime, timedelta
 
 from modules.attendance.models import AttendanceRecord
 from modules.behavior.models import DisciplineRecord
 from modules.discipline.models import DisciplineSanction
 from modules.evaluation.models import StudentScore
+from sqlalchemy import func, select, text
 
 logger = logging.getLogger(__name__)
 
@@ -37,16 +36,16 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 
 _DIMENSION_CN_MAP = {
-    "obsessive_compulsive_score":     "强迫症状",
-    "paranoid_score":                 "偏执",
-    "hostility_score":                "敌对",
+    "obsessive_compulsive_score": "强迫症状",
+    "paranoid_score": "偏执",
+    "hostility_score": "敌对",
     "interpersonal_sensitivity_score": "人际敏感",
-    "depression_score":               "抑郁",
-    "anxiety_score":                  "焦虑",
-    "learning_pressure_score":        "学习压力",
-    "maladjustment_score":            "适应不良",
-    "emotional_imbalance_score":      "情绪不平衡",
-    "psychological_imbalance_score":  "心理不平衡",
+    "depression_score": "抑郁",
+    "anxiety_score": "焦虑",
+    "learning_pressure_score": "学习压力",
+    "maladjustment_score": "适应不良",
+    "emotional_imbalance_score": "情绪不平衡",
+    "psychological_imbalance_score": "心理不平衡",
 }
 
 # ─────────────────────────────────────────────
@@ -55,7 +54,7 @@ _DIMENSION_CN_MAP = {
 
 
 def _utcnow():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _days_ago(days: int) -> datetime:
@@ -65,6 +64,7 @@ def _days_ago(days: int) -> datetime:
 # ─────────────────────────────────────────────
 # 学生上下文组装
 # ─────────────────────────────────────────────
+
 
 class AIPrescriptionAggregator:
     """
@@ -111,10 +111,7 @@ class AIPrescriptionAggregator:
         class_name = None
         if student_info["class_id"]:
             clazz_result = await db.execute(
-                text(
-                    "SELECT name FROM classes "
-                    "WHERE id = :class_id AND school_id = :school_id"
-                ),
+                text("SELECT name FROM classes WHERE id = :class_id AND school_id = :school_id"),
                 {"class_id": student_info["class_id"], "school_id": school_id},
             )
             clazz_row = clazz_result.fetchone()
@@ -140,7 +137,8 @@ class AIPrescriptionAggregator:
         }
         att_rate = (
             round(att_stats["present"] / att_stats["total"] * 100, 1)
-            if att_stats["total"] else 100.0
+            if att_stats["total"]
+            else 100.0
         )
 
         # 3. 违纪行为（已核实）
@@ -179,10 +177,12 @@ class AIPrescriptionAggregator:
 
         # 5. 素质评价快照（最新）+ 学业趋势（全学期）
         score_result = await db.execute(
-            select(StudentScore).where(
+            select(StudentScore)
+            .where(
                 StudentScore.student_id == student_id,
                 StudentScore.school_id == school_id,
-            ).order_by(StudentScore.updated_at.desc())
+            )
+            .order_by(StudentScore.updated_at.desc())
         )
         all_scores = score_result.scalars().all()
         score_snapshot = None
@@ -191,7 +191,9 @@ class AIPrescriptionAggregator:
             latest = all_scores[0]
             score_snapshot = {
                 "moral": float(latest.moral_score) if latest.moral_score is not None else None,
-                "academic": float(latest.academic_score) if latest.academic_score is not None else None,
+                "academic": float(latest.academic_score)
+                if latest.academic_score is not None
+                else None,
                 "health": float(latest.health_score) if latest.health_score is not None else None,
                 "art": float(latest.art_score) if latest.art_score is not None else None,
                 "social": float(latest.social_score) if latest.social_score is not None else None,
@@ -201,7 +203,9 @@ class AIPrescriptionAggregator:
             # 学业趋势: 如果有多个学期记录，计算 delta
             if len(all_scores) >= 2:
                 prev = all_scores[1]
-                curr_academic = float(latest.academic_score) if latest.academic_score is not None else 0
+                curr_academic = (
+                    float(latest.academic_score) if latest.academic_score is not None else 0
+                )
                 prev_academic = float(prev.academic_score) if prev.academic_score is not None else 0
                 delta = round(curr_academic - prev_academic, 1)
                 academic_trend = {
@@ -211,20 +215,28 @@ class AIPrescriptionAggregator:
                     "previous_academic": prev_academic,
                     "delta": delta,
                     "direction": "up" if delta > 0 else ("down" if delta < 0 else "stable"),
-                    "current_total": float(latest.total_score) if latest.total_score is not None else None,
-                    "previous_total": float(prev.total_score) if prev.total_score is not None else None,
+                    "current_total": float(latest.total_score)
+                    if latest.total_score is not None
+                    else None,
+                    "previous_total": float(prev.total_score)
+                    if prev.total_score is not None
+                    else None,
                 }
 
         # 6. RDI 风险诊断（最新活跃预警）
         rdi_context = None
         try:
             from modules.risk_models.models import RiskWarning
+
             rw = await db.scalar(
-                select(RiskWarning).where(
+                select(RiskWarning)
+                .where(
                     RiskWarning.student_id == student_id,
                     RiskWarning.school_id == school_id,
                     RiskWarning.status == "active",
-                ).order_by(RiskWarning.warned_at.desc()).limit(1)
+                )
+                .order_by(RiskWarning.warned_at.desc())
+                .limit(1)
             )
             if rw:
                 rdi_context = {
@@ -248,13 +260,17 @@ class AIPrescriptionAggregator:
         psych_profile = None
         try:
             from modules.risk_models.models import PsychSurvey
+
             psych_result = await db.execute(
-                select(PsychSurvey).where(
+                select(PsychSurvey)
+                .where(
                     PsychSurvey.student_id == student_id,
                     PsychSurvey.school_id == school_id,
                     PsychSurvey.is_valid == True,
                     PsychSurvey.verify_status.in_(["VERIFIED", "PENDING", "COMPLETED"]),
-                ).order_by(PsychSurvey.completed_at.desc()).limit(5)
+                )
+                .order_by(PsychSurvey.completed_at.desc())
+                .limit(5)
             )
             # 优先选有 dimension_scores 的记录（MSSMHS-55 > PCE-55）
             psych_surveys = psych_result.scalars().all()
@@ -266,7 +282,9 @@ class AIPrescriptionAggregator:
             if psych_survey is None and psych_surveys:
                 psych_survey = psych_surveys[0]  # fallback: 最新记录
             if psych_survey and psych_survey.dimension_scores:
-                raw_dims = psych_survey.dimension_scores  # JSON dict: {"depression_score": 5.086, ...}
+                raw_dims = (
+                    psych_survey.dimension_scores
+                )  # JSON dict: {"depression_score": 5.086, ...}
                 # 翻译为中文标签 + 标记极端维度
                 dim_items = []
                 max_dim_key = None
@@ -274,11 +292,13 @@ class AIPrescriptionAggregator:
                 for en_key, cn_label in _DIMENSION_CN_MAP.items():
                     val = raw_dims.get(en_key)
                     if val is not None:
-                        dim_items.append({
-                            "dimension": en_key,
-                            "label": cn_label,
-                            "score": round(float(val), 2),
-                        })
+                        dim_items.append(
+                            {
+                                "dimension": en_key,
+                                "label": cn_label,
+                                "score": round(float(val), 2),
+                            }
+                        )
                         if abs(float(val)) > abs(max_dim_value):
                             max_dim_key = en_key
                             max_dim_value = float(val)
@@ -295,8 +315,12 @@ class AIPrescriptionAggregator:
 
                 psych_profile = {
                     "survey_type": psych_survey.survey_type,
-                    "total_score": float(psych_survey.total_score) if psych_survey.total_score else None,
-                    "completed_at": psych_survey.completed_at.isoformat() if psych_survey.completed_at else None,
+                    "total_score": float(psych_survey.total_score)
+                    if psych_survey.total_score
+                    else None,
+                    "completed_at": psych_survey.completed_at.isoformat()
+                    if psych_survey.completed_at
+                    else None,
                     "dimensions": dim_items,
                     "extreme_dimension": max_dim_key,
                     "extreme_dimension_cn": _DIMENSION_CN_MAP.get(max_dim_key, ""),
@@ -310,63 +334,83 @@ class AIPrescriptionAggregator:
         try:
             # 8a. 违纪事件 (最近30天)
             timeline_behaviors = await db.execute(
-                select(DisciplineRecord).where(
+                select(DisciplineRecord)
+                .where(
                     DisciplineRecord.student_id == student_id,
                     DisciplineRecord.school_id == school_id,
                     DisciplineRecord.verify_status == "VERIFIED",
                     DisciplineRecord.incident_date >= since.date(),
-                ).order_by(DisciplineRecord.incident_date.desc()).limit(10)
+                )
+                .order_by(DisciplineRecord.incident_date.desc())
+                .limit(10)
             )
             for rec in timeline_behaviors.scalars().all():
-                timeline.append({
-                    "date": rec.incident_date.isoformat() if rec.incident_date else None,
-                    "event_type": "discipline",
-                    "summary": f"{rec.category or '违纪'}: {rec.description[:60] if rec.description else ''}",
-                    "severity": rec.severity if rec.severity else None,
-                })
+                timeline.append(
+                    {
+                        "date": rec.incident_date.isoformat() if rec.incident_date else None,
+                        "event_type": "discipline",
+                        "summary": f"{rec.category or '违纪'}: {rec.description[:60] if rec.description else ''}",
+                        "severity": rec.severity if rec.severity else None,
+                    }
+                )
 
             # 8b. 学业变化 (学期分对比)
             if all_scores and len(all_scores) >= 2:
                 for i, score_rec in enumerate(all_scores[:2]):  # 最近2条
-                    timeline.append({
-                        "date": score_rec.updated_at.isoformat() if score_rec.updated_at else None,
-                        "event_type": "academic_snapshot",
-                        "summary": f"素质评价快照: 总分={float(score_rec.total_score) if score_rec.total_score else 0}",
-                        "semester": score_rec.semester,
-                    })
+                    timeline.append(
+                        {
+                            "date": score_rec.updated_at.isoformat()
+                            if score_rec.updated_at
+                            else None,
+                            "event_type": "academic_snapshot",
+                            "summary": f"素质评价快照: 总分={float(score_rec.total_score) if score_rec.total_score else 0}",
+                            "semester": score_rec.semester,
+                        }
+                    )
 
             # 8c. 心理问卷完成事件
             from modules.risk_models.models import PsychSurvey as _PS
+
             psych_timeline = await db.execute(
-                select(_PS).where(
+                select(_PS)
+                .where(
                     _PS.student_id == student_id,
                     _PS.school_id == school_id,
                     _PS.is_valid == True,
-                ).order_by(_PS.completed_at.desc()).limit(5)
+                )
+                .order_by(_PS.completed_at.desc())
+                .limit(5)
             )
             for ps in psych_timeline.scalars().all():
                 if ps.completed_at:
-                    timeline.append({
-                        "date": ps.completed_at.isoformat(),
-                        "event_type": "psych_survey",
-                        "summary": f"完成心理筛查 ({ps.survey_type})",
-                        "risk_flag": ps.total_score,
-                    })
+                    timeline.append(
+                        {
+                            "date": ps.completed_at.isoformat(),
+                            "event_type": "psych_survey",
+                            "summary": f"完成心理筛查 ({ps.survey_type})",
+                            "risk_flag": ps.total_score,
+                        }
+                    )
 
             # 8d. 处分状态变化
             timeline_sanctions = await db.execute(
-                select(DisciplineSanction).where(
+                select(DisciplineSanction)
+                .where(
                     DisciplineSanction.student_id == student_id,
                     DisciplineSanction.school_id == school_id,
-                ).order_by(DisciplineSanction.created_at.desc()).limit(5)
+                )
+                .order_by(DisciplineSanction.created_at.desc())
+                .limit(5)
             )
             for s in timeline_sanctions.scalars().all():
-                timeline.append({
-                    "date": s.created_at.isoformat() if s.created_at else None,
-                    "event_type": "sanction",
-                    "summary": f"处分 ({s.level}): {s.reason[:40] if s.reason else ''}",
-                    "status": s.status,
-                })
+                timeline.append(
+                    {
+                        "date": s.created_at.isoformat() if s.created_at else None,
+                        "event_type": "sanction",
+                        "summary": f"处分 ({s.level}): {s.reason[:40] if s.reason else ''}",
+                        "status": s.status,
+                    }
+                )
 
             # 按日期排序 (倒序: 最近事件优先)
             timeline.sort(key=lambda x: x.get("date") or "", reverse=True)
@@ -381,11 +425,15 @@ class AIPrescriptionAggregator:
         growth_timeline = None
         try:
             from modules.growth.models import GrowthTimelineEvent
+
             gte_result = await db.execute(
-                select(GrowthTimelineEvent).where(
+                select(GrowthTimelineEvent)
+                .where(
                     GrowthTimelineEvent.student_id == student_id,
                     GrowthTimelineEvent.school_id == school_id,
-                ).order_by(GrowthTimelineEvent.occurred_at.desc()).limit(15)
+                )
+                .order_by(GrowthTimelineEvent.occurred_at.desc())
+                .limit(15)
             )
             gte_list = gte_result.scalars().all()
             growth_timeline = [
@@ -406,22 +454,36 @@ class AIPrescriptionAggregator:
         growth_snapshot = None
         try:
             from modules.growth.models import GrowthPeriodicalSnapshot
+
             gps_result = await db.execute(
-                select(GrowthPeriodicalSnapshot).where(
+                select(GrowthPeriodicalSnapshot)
+                .where(
                     GrowthPeriodicalSnapshot.student_id == student_id,
                     GrowthPeriodicalSnapshot.school_id == school_id,
-                ).order_by(GrowthPeriodicalSnapshot.created_at.desc()).limit(3)
+                )
+                .order_by(GrowthPeriodicalSnapshot.created_at.desc())
+                .limit(3)
             )
             gps_list = gps_result.scalars().all()
             growth_snapshot = [
                 {
                     "snapshot_type": gps.snapshot_type,
                     "period_label": gps.period_label,
-                    "academic_score": round(float(gps.academic_score), 1) if gps.academic_score is not None else None,
-                    "attendance_score": round(float(gps.attendance_score), 1) if gps.attendance_score is not None else None,
-                    "behavior_score": round(float(gps.behavior_score), 1) if gps.behavior_score is not None else None,
-                    "psych_score": round(float(gps.psych_score), 1) if gps.psych_score is not None else None,
-                    "activity_score": round(float(gps.activity_score), 1) if gps.activity_score is not None else None,
+                    "academic_score": round(float(gps.academic_score), 1)
+                    if gps.academic_score is not None
+                    else None,
+                    "attendance_score": round(float(gps.attendance_score), 1)
+                    if gps.attendance_score is not None
+                    else None,
+                    "behavior_score": round(float(gps.behavior_score), 1)
+                    if gps.behavior_score is not None
+                    else None,
+                    "psych_score": round(float(gps.psych_score), 1)
+                    if gps.psych_score is not None
+                    else None,
+                    "activity_score": round(float(gps.activity_score), 1)
+                    if gps.activity_score is not None
+                    else None,
                     "teacher_comment": gps.teacher_comment,
                     "ai_growth_prescription": gps.ai_growth_prescription,
                 }
@@ -433,22 +495,28 @@ class AIPrescriptionAggregator:
         # 11. 作业提交与批改数据 (homework_mgmt — HwSubmission + HwGrading)
         homework_context = None
         try:
-            from modules.homework_mgmt.models import HwSubmission, HwGrading
+            from modules.homework_mgmt.models import HwGrading, HwSubmission
+
             hw_sub_result = await db.execute(
-                select(HwSubmission).where(
+                select(HwSubmission)
+                .where(
                     HwSubmission.student_id == student_id,
                     HwSubmission.school_id == school_id,
-                ).order_by(HwSubmission.created_at.desc()).limit(20)
+                )
+                .order_by(HwSubmission.created_at.desc())
+                .limit(20)
             )
             hw_subs = hw_sub_result.scalars().all()
             if hw_subs:
                 submission_ids = [s.id for s in hw_subs]
                 # 批改数据: 通过 submission_id 两跳关联 student_id
                 hw_grade_result = await db.execute(
-                    select(HwGrading).where(
+                    select(HwGrading)
+                    .where(
                         HwGrading.submission_id.in_(submission_ids),
                         HwGrading.school_id == school_id,
-                    ).order_by(HwGrading.created_at.desc())
+                    )
+                    .order_by(HwGrading.created_at.desc())
                 )
                 grade_map = {g.submission_id: g for g in hw_grade_result.scalars().all()}
 
@@ -466,8 +534,14 @@ class AIPrescriptionAggregator:
                     grade = grade_map.get(sub.id)
                     if grade:
                         item["score"] = float(grade.score) if grade.score is not None else None
-                        item["max_score"] = float(grade.max_score) if grade.max_score is not None else None
-                        item["score_percentage"] = round(float(grade.score_percentage), 1) if grade.score_percentage is not None else None
+                        item["max_score"] = (
+                            float(grade.max_score) if grade.max_score is not None else None
+                        )
+                        item["score_percentage"] = (
+                            round(float(grade.score_percentage), 1)
+                            if grade.score_percentage is not None
+                            else None
+                        )
                         item["grade"] = grade.grade
                         item["error_count"] = grade.error_count
                         item["feedback"] = grade.feedback[:100] if grade.feedback else None
@@ -484,7 +558,9 @@ class AIPrescriptionAggregator:
                         "total_submissions": len(hw_subs),
                         "graded_count": len(grade_map),
                         "late_count": late_count,
-                        "avg_score_pct": round(sum(total_score_pct) / len(total_score_pct), 1) if total_score_pct else None,
+                        "avg_score_pct": round(sum(total_score_pct) / len(total_score_pct), 1)
+                        if total_score_pct
+                        else None,
                         "total_errors": total_errors,
                     },
                 }
@@ -495,26 +571,32 @@ class AIPrescriptionAggregator:
         error_funnel_context = None
         try:
             from modules.error_funnel.models import ErrorBookItem, KnowledgeGap
+
             # 12a. 知识断层 (KnowledgeGap — 优先 critical/warning)
             gap_result = await db.execute(
-                select(KnowledgeGap).where(
+                select(KnowledgeGap)
+                .where(
                     KnowledgeGap.student_id == student_id,
                     KnowledgeGap.school_id == school_id,
                     KnowledgeGap.gap_status == "active",
-                ).order_by(KnowledgeGap.consecutive_errors.desc()).limit(15)
+                )
+                .order_by(KnowledgeGap.consecutive_errors.desc())
+                .limit(15)
             )
             gaps = gap_result.scalars().all()
             gap_items = []
             critical_count = 0
             warning_count = 0
             for g in gaps:
-                gap_items.append({
-                    "knowledge_point": g.knowledge_point_name,
-                    "error_count": g.error_count,
-                    "consecutive_errors": g.consecutive_errors,
-                    "gap_level": g.gap_level,
-                    "ai_prescription": g.ai_prescription[:100] if g.ai_prescription else None,
-                })
+                gap_items.append(
+                    {
+                        "knowledge_point": g.knowledge_point_name,
+                        "error_count": g.error_count,
+                        "consecutive_errors": g.consecutive_errors,
+                        "gap_level": g.gap_level,
+                        "ai_prescription": g.ai_prescription[:100] if g.ai_prescription else None,
+                    }
+                )
                 if g.gap_level == "critical":
                     critical_count += 1
                 elif g.gap_level == "warning":
@@ -522,22 +604,27 @@ class AIPrescriptionAggregator:
 
             # 12b. 最近错题 (ErrorBookItem)
             error_result = await db.execute(
-                select(ErrorBookItem).where(
+                select(ErrorBookItem)
+                .where(
                     ErrorBookItem.student_id == student_id,
                     ErrorBookItem.school_id == school_id,
-                ).order_by(ErrorBookItem.created_at.desc()).limit(10)
+                )
+                .order_by(ErrorBookItem.created_at.desc())
+                .limit(10)
             )
             errors = error_result.scalars().all()
             error_items = []
             unresolved_count = 0
             for e in errors:
-                error_items.append({
-                    "source_type": e.source_type,
-                    "error_type": e.error_type,
-                    "difficulty": e.difficulty,
-                    "question_preview": e.question_content[:80] if e.question_content else None,
-                    "is_resolved": e.is_resolved,
-                })
+                error_items.append(
+                    {
+                        "source_type": e.source_type,
+                        "error_type": e.error_type,
+                        "difficulty": e.difficulty,
+                        "question_preview": e.question_content[:80] if e.question_content else None,
+                        "is_resolved": e.is_resolved,
+                    }
+                )
                 if not e.is_resolved:
                     unresolved_count += 1
 
@@ -559,8 +646,8 @@ class AIPrescriptionAggregator:
         # 严格排除 PsyConsultRecord.encrypted_clog 加密字段
         psych_deep_context = None
         try:
-            from modules.psych_profiles.models import PsyProfile, PsyScreeningRecord
             from modules.psych_counseling.models import PsyConsultRecord
+            from modules.psych_profiles.models import PsyProfile, PsyScreeningRecord
 
             # 13a. 心理综合档案主表 (一学生一档案)
             psy_profile = await db.scalar(
@@ -571,18 +658,24 @@ class AIPrescriptionAggregator:
             )
             # 13b. 最近筛查记录 (量表流水)
             screening_result = await db.execute(
-                select(PsyScreeningRecord).where(
+                select(PsyScreeningRecord)
+                .where(
                     PsyScreeningRecord.student_id == student_id,
                     PsyScreeningRecord.school_id == school_id,
-                ).order_by(PsyScreeningRecord.test_date.desc()).limit(3)
+                )
+                .order_by(PsyScreeningRecord.test_date.desc())
+                .limit(3)
             )
             screenings = screening_result.scalars().all()
             # 13c. 咨询记录元数据 (仅明文字段, encrypted_clog 被严格排除!)
             consult_result = await db.execute(
-                select(PsyConsultRecord).where(
+                select(PsyConsultRecord)
+                .where(
                     PsyConsultRecord.student_id == student_id,
                     PsyConsultRecord.school_id == school_id,
-                ).order_by(PsyConsultRecord.created_at.desc()).limit(5)
+                )
+                .order_by(PsyConsultRecord.created_at.desc())
+                .limit(5)
             )
             consults = consult_result.scalars().all()
 
@@ -595,8 +688,12 @@ class AIPrescriptionAggregator:
                     "total_counseling_count": psy_profile.total_counseling_count or 0,
                     "total_screening_count": psy_profile.total_screening_count or 0,
                     "is_referred": bool(psy_profile.is_referred),
-                    "last_counseling_date": psy_profile.last_counseling_date.isoformat() if psy_profile.last_counseling_date else None,
-                } if psy_profile else None,
+                    "last_counseling_date": psy_profile.last_counseling_date.isoformat()
+                    if psy_profile.last_counseling_date
+                    else None,
+                }
+                if psy_profile
+                else None,
                 "screenings": [
                     {
                         "scale_name": s.scale_name,
@@ -673,9 +770,14 @@ class AIPrescriptionAggregator:
             "考勤=%s条, 违纪=%s条, 处分=%s条, 学期记录=%s, RDI=%s, "
             "心理10维=%s, 时间线=%s条 | "
             "成长事件=%s, 快照=%s, 作业=%s, 错题断层=%s, 心理深度=%s",
-            student_id, att_stats["total"], len(b_list), len(s_list),
-            len(all_scores), "有" if rdi_context else "无",
-            "有" if psych_profile else "无", len(timeline),
+            student_id,
+            att_stats["total"],
+            len(b_list),
+            len(s_list),
+            len(all_scores),
+            "有" if rdi_context else "无",
+            "有" if psych_profile else "无",
+            len(timeline),
             len(growth_timeline) if growth_timeline else 0,
             len(growth_snapshot) if growth_snapshot else 0,
             "有" if homework_context else "无",
@@ -755,9 +857,9 @@ class AIPrescriptionAggregator:
                 "leave": sum(1 for r in att_list if r.status == "leave"),
             }
             total_possible = len(student_ids) * days
-            att_rate = round(
-                att_stats["present"] / total_possible * 100, 1
-            ) if total_possible else 0.0
+            att_rate = (
+                round(att_stats["present"] / total_possible * 100, 1) if total_possible else 0.0
+            )
         else:
             att_stats = {"total_records": 0, "present": 0, "late": 0, "absent": 0, "leave": 0}
             att_rate = 0.0
@@ -784,11 +886,15 @@ class AIPrescriptionAggregator:
 
         # 4. 流动红旗历史（最近3次）
         from modules.red_flag.models import FlagArchiveReport
+
         flag_history = await db.execute(
-            select(FlagArchiveReport).where(
+            select(FlagArchiveReport)
+            .where(
                 FlagArchiveReport.class_id == class_id,
                 FlagArchiveReport.school_id == school_id,
-            ).order_by(FlagArchiveReport.archived_at.desc()).limit(3)
+            )
+            .order_by(FlagArchiveReport.archived_at.desc())
+            .limit(3)
         )
         flag_list = flag_history.scalars().all()
         flag_info = [
@@ -802,13 +908,19 @@ class AIPrescriptionAggregator:
         ]
 
         # 5. 活跃处分人数
-        active_sanctions = await db.scalar(
-            select(func.count()).select_from(DisciplineSanction).where(
-                DisciplineSanction.school_id == school_id,
-                DisciplineSanction.status == "ACTIVE",
-                DisciplineSanction.student_id.in_(student_ids),
+        active_sanctions = (
+            await db.scalar(
+                select(func.count())
+                .select_from(DisciplineSanction)
+                .where(
+                    DisciplineSanction.school_id == school_id,
+                    DisciplineSanction.status == "ACTIVE",
+                    DisciplineSanction.student_id.in_(student_ids),
+                )
             )
-        ) if student_ids else 0
+            if student_ids
+            else 0
+        )
 
         # 6. 素质评价分布（五维平均分）
         if student_ids:
@@ -821,11 +933,21 @@ class AIPrescriptionAggregator:
             )
             score_list = scores.scalars().all()
             if score_list:
-                avg_moral = sum(float(s.moral_score) for s in score_list if s.moral_score is not None) / len(score_list)
-                avg_academic = sum(float(s.academic_score) for s in score_list if s.academic_score is not None) / len(score_list)
-                avg_sports = sum(float(s.health_score) for s in score_list if s.health_score is not None) / len(score_list)
-                avg_arts = sum(float(s.art_score) for s in score_list if s.art_score is not None) / len(score_list)
-                avg_labor = sum(float(s.social_score) for s in score_list if s.social_score is not None) / len(score_list)
+                avg_moral = sum(
+                    float(s.moral_score) for s in score_list if s.moral_score is not None
+                ) / len(score_list)
+                avg_academic = sum(
+                    float(s.academic_score) for s in score_list if s.academic_score is not None
+                ) / len(score_list)
+                avg_sports = sum(
+                    float(s.health_score) for s in score_list if s.health_score is not None
+                ) / len(score_list)
+                avg_arts = sum(
+                    float(s.art_score) for s in score_list if s.art_score is not None
+                ) / len(score_list)
+                avg_labor = sum(
+                    float(s.social_score) for s in score_list if s.social_score is not None
+                ) / len(score_list)
             else:
                 avg_moral = avg_academic = avg_sports = avg_arts = avg_labor = None
         else:
@@ -851,8 +973,7 @@ class AIPrescriptionAggregator:
             "behavior": {
                 "total_incidents": len(b_list),
                 "by_category": behavior_by_cat,
-                "incident_per_student": round(len(b_list) / len(students), 2)
-                if students else 0,
+                "incident_per_student": round(len(b_list) / len(students), 2) if students else 0,
             },
             "red_flag": flag_info,
             "active_sanctions_count": active_sanctions,
@@ -866,9 +987,11 @@ class AIPrescriptionAggregator:
         }
 
         logger.info(
-            "[AI-Aggregator] 班级上下文组装完成：class_id=%s, "
-            "学生=%s人, 违纪=%s条, 活跃处分=%s条",
-            class_id, len(students), len(b_list), active_sanctions
+            "[AI-Aggregator] 班级上下文组装完成：class_id=%s, 学生=%s人, 违纪=%s条, 活跃处分=%s条",
+            class_id,
+            len(students),
+            len(b_list),
+            active_sanctions,
         )
 
         return context

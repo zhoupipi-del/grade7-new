@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 import textwrap
 from pathlib import Path
 
@@ -220,8 +219,7 @@ def _evaluate_quality(translations: list, variables: dict) -> str:
 
     # 检查2：是否有数学表达式
     has_math = any(
-        any(sym in t.get("math_expression", "")
-            for sym in ["=", "+", "-", "×", "÷", "≤", "≥"])
+        any(sym in t.get("math_expression", "") for sym in ["=", "+", "-", "×", "÷", "≤", "≥"])
         for t in translations
     )
     if has_math:

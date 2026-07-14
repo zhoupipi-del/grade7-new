@@ -12,11 +12,20 @@ modules/exam/models.py — 考试管理模块数据模型
 依赖: grades_exams(考试主表), grades_subjects(科目) — 不改现有结构，纯增量
 """
 
-from sqlalchemy import (
-    Column, BigInteger, String, Integer, Boolean,
-    DateTime, Date, Time, Numeric, Index, UniqueConstraint,
-)
 from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Time,
+    UniqueConstraint,
+)
 
 
 class ExamSubject(Base, SchoolMixin):
@@ -26,11 +35,17 @@ class ExamSubject(Base, SchoolMixin):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     exam_id = Column(BigInteger, nullable=False, index=True, comment="考试ID (FK→grades_exams.id)")
-    subject_id = Column(BigInteger, nullable=False, index=True, comment="科目ID (FK→grades_subjects.id)")
+    subject_id = Column(
+        BigInteger, nullable=False, index=True, comment="科目ID (FK→grades_subjects.id)"
+    )
     exam_date = Column(Date, nullable=False, comment="该科目考试日期")
     start_time = Column(Time, nullable=True, comment="开始时间 (如 08:00)")
     end_time = Column(Time, nullable=True, comment="结束时间 (如 09:30)")
-    full_score = Column(Numeric(6, 2), nullable=True, comment="本次考试该科目满分 (NULL则取grades_subjects.full_score)")
+    full_score = Column(
+        Numeric(6, 2),
+        nullable=True,
+        comment="本次考试该科目满分 (NULL则取grades_subjects.full_score)",
+    )
     is_active = Column(Boolean, default=True, comment="是否启用")
     sort_order = Column(Integer, default=0, comment="排序 (按考试日程顺序)")
     created_at = Column(DateTime, default=get_local_now, comment="创建时间")
@@ -56,7 +71,9 @@ class ExamRoom(Base, SchoolMixin):
     floor = Column(Integer, nullable=True, comment="楼层")
     capacity = Column(Integer, nullable=False, default=30, comment="可用座位数")
     room_type = Column(String(20), default="classroom", comment="类型: classroom/hall/lab")
-    class_id = Column(BigInteger, nullable=True, index=True, comment="关联班级ID (教室归属, NULL=公共考场)")
+    class_id = Column(
+        BigInteger, nullable=True, index=True, comment="关联班级ID (教室归属, NULL=公共考场)"
+    )
     is_active = Column(Boolean, default=True, comment="是否启用")
     created_at = Column(DateTime, default=get_local_now, comment="创建时间")
     updated_at = Column(DateTime, default=get_local_now, onupdate=get_local_now, comment="更新时间")
@@ -113,14 +130,27 @@ class ExamSeatAssignment(Base, SchoolMixin):
     student_id = Column(BigInteger, nullable=False, index=True, comment="学生ID")
     room_id = Column(BigInteger, nullable=False, index=True, comment="考场ID")
     seat_number = Column(Integer, nullable=False, comment="座位号 (1~capacity)")
-    arrangement_method = Column(String(20), default="random", comment="编排方式: random/serpentine/manual")
-    is_manual_override = Column(Boolean, default=False, comment="是否人工强改座位 (1=算法重排时跳过)")
+    arrangement_method = Column(
+        String(20), default="random", comment="编排方式: random/serpentine/manual"
+    )
+    is_manual_override = Column(
+        Boolean, default=False, comment="是否人工强改座位 (1=算法重排时跳过)"
+    )
     remark = Column(String(200), nullable=True, comment="备注 (如 骨折/视力障碍/靠门第一排)")
     created_at = Column(DateTime, default=get_local_now, comment="创建时间")
 
     __table_args__ = (
-        UniqueConstraint("school_id", "exam_id", "subject_id", "student_id", name="uk_exam_seat_student"),
-        UniqueConstraint("school_id", "exam_id", "subject_id", "room_id", "seat_number", name="uk_exam_seat_position"),
+        UniqueConstraint(
+            "school_id", "exam_id", "subject_id", "student_id", name="uk_exam_seat_student"
+        ),
+        UniqueConstraint(
+            "school_id",
+            "exam_id",
+            "subject_id",
+            "room_id",
+            "seat_number",
+            name="uk_exam_seat_position",
+        ),
         Index("idx_eseat_student", "student_id"),
         Index("idx_eseat_room", "room_id"),
         Index("idx_eseat_exam_subject", "exam_id", "subject_id"),
@@ -152,7 +182,9 @@ class ExamInvigilator(Base, SchoolMixin):
     updated_at = Column(DateTime, default=get_local_now, onupdate=get_local_now, comment="更新时间")
 
     __table_args__ = (
-        UniqueConstraint("school_id", "exam_id", "subject_id", "room_id", "user_id", name="uk_exam_invigilator"),
+        UniqueConstraint(
+            "school_id", "exam_id", "subject_id", "room_id", "user_id", name="uk_exam_invigilator"
+        ),
         Index("idx_einv_user", "user_id"),
         Index("idx_einv_date_time", "exam_date", "start_time"),
         Index("idx_einv_exam_subject", "exam_id", "subject_id"),
@@ -175,7 +207,12 @@ class ExamScoreEntryWindow(Base, SchoolMixin):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     exam_id = Column(BigInteger, nullable=False, index=True, comment="考试ID")
     subject_id = Column(BigInteger, nullable=False, index=True, comment="科目ID")
-    class_id = Column(BigInteger, nullable=True, index=True, comment="班级ID (NULL=全校该科通开, 非NULL=精确到班级)")
+    class_id = Column(
+        BigInteger,
+        nullable=True,
+        index=True,
+        comment="班级ID (NULL=全校该科通开, 非NULL=精确到班级)",
+    )
     status = Column(String(20), default="pending", comment="状态: pending/open/closed")
     opened_at = Column(DateTime, nullable=True, comment="开放时间")
     closed_at = Column(DateTime, nullable=True, comment="关闭时间")

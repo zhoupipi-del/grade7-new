@@ -5,14 +5,13 @@ PolicyEngine ApprovalRouter — 分层路由串并行审批引擎
 严重违纪 → 串行 AND（班主任→级组长→德育处长）
 重大处分 → 串行 AND + 升级（四级链条，超时自动升级）
 """
-from __future__ import annotations
 
-from typing import Optional
+from __future__ import annotations
 
 import structlog
 
 from .config import ApprovalRoutingConfig, ApprovalRule
-from .models import ApprovalChain, ApprovalNode, ApprovalAction
+from .models import ApprovalAction, ApprovalChain, ApprovalNode
 
 logger = structlog.get_logger("policy_engine.router")
 
@@ -77,7 +76,9 @@ class ApprovalRouter:
         else:
             return self._check_parallel(chain, completed_approvals)
 
-    def get_next_pending_role(self, chain: ApprovalChain, completed_approvals: list[dict]) -> Optional[str]:
+    def get_next_pending_role(
+        self, chain: ApprovalChain, completed_approvals: list[dict]
+    ) -> str | None:
         """获取下一个待审批的角色（串行模式）"""
         completed_roles = {a["role"] for a in completed_approvals}
         for node in chain.nodes:
@@ -94,7 +95,9 @@ class ApprovalRouter:
         for i, rule in enumerate(self.config.rules):
             for et in rule.event_types:
                 self._rule_index[et] = i
-        logger.info("approval.index_built", rules=len(self.config.rules), events=len(self._rule_index))
+        logger.info(
+            "approval.index_built", rules=len(self.config.rules), events=len(self._rule_index)
+        )
 
     # ── / ── / ── / ── / ── / ── / ── / ── / ── / ── / ──
     # 内部：构建审批链

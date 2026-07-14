@@ -13,18 +13,18 @@ Wings 3.0 跨代数据迁移脚本
   - 事务包裹: 单事务内完成或全部回滚
 """
 
-import os
-import sys
-import json
 import hashlib
-import secrets
+import json
 import logging
+import os
+import secrets
+import sys
 from datetime import datetime
 
 # 确保能引入项目根目录模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import create_engine, text, inspect
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
 
@@ -42,21 +42,20 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("migrate")
 
 # ── 配置 ──────────────────────────────────────────────
-OLD_DB_URL = "mysql+pymysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/grade7_new?charset=utf8mb4"
-NEW_DB_URL = os.getenv(
-    "DATABASE_URL",
-    "mysql+pymysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3?charset=utf8mb4",
-)
+from core.db_utils import require_sync_db_url
+
+OLD_DB_URL = require_sync_db_url()  # 指向旧Flask库(grade7_new)
+NEW_DB_URL = require_sync_db_url()  # 指向新Wings3库(wings3)
 
 SCHOOL_ID = 1
 SCHOOL_NAME = "梨江中学"
 
 # 角色映射: 旧系统 varchar → 新系统 enum
 ROLE_MAP = {
-    "ms_admin":      "MS_ADMIN",
-    "grade_leader":  "GRADE_LEADER",
+    "ms_admin": "MS_ADMIN",
+    "grade_leader": "GRADE_LEADER",
     "class_teacher": "CLASS_TEACHER",
-    "parent":        "PARENT",
+    "parent": "PARENT",
 }
 
 old_engine = create_engine(OLD_DB_URL, echo=False)
@@ -100,20 +99,23 @@ def migrate_grades(old_conn, new_conn):
         return 0
 
     for r in rows:
-        new_conn.execute(text("""
+        new_conn.execute(
+            text("""
             INSERT INTO grades (id, school_id, name, sort_order, is_active)
             VALUES (:id, :school_id, :name, :sort_order, :is_active)
             ON DUPLICATE KEY UPDATE
                 name = VALUES(name),
                 sort_order = VALUES(sort_order),
                 is_active = VALUES(is_active)
-        """), {
-            "id": int(r.id),
-            "school_id": SCHOOL_ID,
-            "name": r.name,
-            "sort_order": r.sort_order or 1,
-            "is_active": bool(r.is_active) if r.is_active is not None else True,
-        })
+        """),
+            {
+                "id": int(r.id),
+                "school_id": SCHOOL_ID,
+                "name": r.name,
+                "sort_order": r.sort_order or 1,
+                "is_active": bool(r.is_active) if r.is_active is not None else True,
+            },
+        )
 
     logger.info(f"✅ grades: {len(rows)} 条 → wings3")
     return len(rows)
@@ -121,11 +123,13 @@ def migrate_grades(old_conn, new_conn):
 
 def migrate_users(old_conn, new_conn):
     """迁移用户表（跳过已删除账号）"""
-    rows = old_conn.execute(text("""
+    rows = old_conn.execute(
+        text("""
         SELECT id, username, password_hash, display_name, role, is_active, created_at
         FROM users
         ORDER BY id
-    """)).fetchall()
+    """)
+    ).fetchall()
 
     migrated = 0
     skipped = 0
@@ -147,33 +151,39 @@ def migrate_users(old_conn, new_conn):
 
         if existing:
             # 已存在: 仅更新非敏感字段, 不碰密码
-            new_conn.execute(text("""
+            new_conn.execute(
+                text("""
                 UPDATE users SET
                     display_name = :display_name,
                     role = :role,
                     is_active = :is_active
                 WHERE id = :id
-            """), {
-                "id": int(r.id),
-                "display_name": r.display_name or r.username,
-                "role": new_role,
-                "is_active": is_active,
-            })
+            """),
+                {
+                    "id": int(r.id),
+                    "display_name": r.display_name or r.username,
+                    "role": new_role,
+                    "is_active": is_active,
+                },
+            )
         else:
             # 新用户: 使用 Wings 3.0 格式哈希，标记需强制改密
-            new_conn.execute(text("""
+            new_conn.execute(
+                text("""
                 INSERT INTO users (id, username, password_hash, display_name, role, school_id, is_active, password_change_required, created_at)
                 VALUES (:id, :username, :password_hash, :display_name, :role, :school_id, :is_active, TRUE, :created_at)
-            """), {
-                "id": int(r.id),
-                "username": r.username,
-                "password_hash": wings3_hash_password(DEFAULT_PASSWORD),
-                "display_name": r.display_name or r.username,
-                "role": new_role,
-                "school_id": SCHOOL_ID,
-                "is_active": is_active,
-                "created_at": r.created_at or datetime.now(),
-            })
+            """),
+                {
+                    "id": int(r.id),
+                    "username": r.username,
+                    "password_hash": wings3_hash_password(DEFAULT_PASSWORD),
+                    "display_name": r.display_name or r.username,
+                    "role": new_role,
+                    "school_id": SCHOOL_ID,
+                    "is_active": is_active,
+                    "created_at": r.created_at or datetime.now(),
+                },
+            )
         migrated += 1
 
     logger.info(f"✅ users: {migrated} 条 → wings3 (跳过 {skipped} 个已删除)")
@@ -182,14 +192,17 @@ def migrate_users(old_conn, new_conn):
 
 def migrate_classes(old_conn, new_conn):
     """迁移班级表"""
-    rows = old_conn.execute(text("""
+    rows = old_conn.execute(
+        text("""
         SELECT id, name, grade_id, head_teacher_id, student_count, is_active
         FROM classes
         ORDER BY id
-    """)).fetchall()
+    """)
+    ).fetchall()
 
     for r in rows:
-        new_conn.execute(text("""
+        new_conn.execute(
+            text("""
             INSERT INTO classes (id, school_id, name, grade_id, head_teacher_id, student_count, is_active)
             VALUES (:id, :school_id, :name, :grade_id, :head_teacher_id, :student_count, :is_active)
             ON DUPLICATE KEY UPDATE
@@ -198,15 +211,17 @@ def migrate_classes(old_conn, new_conn):
                 head_teacher_id = VALUES(head_teacher_id),
                 student_count = VALUES(student_count),
                 is_active = VALUES(is_active)
-        """), {
-            "id": int(r.id),
-            "school_id": SCHOOL_ID,
-            "name": r.name,
-            "grade_id": int(r.grade_id),
-            "head_teacher_id": int(r.head_teacher_id) if r.head_teacher_id else None,
-            "student_count": int(r.student_count) if r.student_count else 0,
-            "is_active": bool(r.is_active) if r.is_active is not None else True,
-        })
+        """),
+            {
+                "id": int(r.id),
+                "school_id": SCHOOL_ID,
+                "name": r.name,
+                "grade_id": int(r.grade_id),
+                "head_teacher_id": int(r.head_teacher_id) if r.head_teacher_id else None,
+                "student_count": int(r.student_count) if r.student_count else 0,
+                "is_active": bool(r.is_active) if r.is_active is not None else True,
+            },
+        )
 
     logger.info(f"✅ classes: {len(rows)} 条 → wings3")
     return len(rows)
@@ -233,7 +248,8 @@ def safe_json_tags(tags_value):
 def migrate_students(old_conn, new_conn):
     """迁移学生表 — 核心资产"""
     # 分批读取，避免内存膨胀
-    rows = old_conn.execute(text("""
+    rows = old_conn.execute(
+        text("""
         SELECT id, name, student_no, gender, class_id, grade_id,
                id_card, national_id, ethnicity, birth_date, address,
                parent1_name, parent1_phone, parent1_relation,
@@ -241,14 +257,16 @@ def migrate_students(old_conn, new_conn):
                primary_school, is_active, enrolled_at, tags, created_at
         FROM students
         ORDER BY id
-    """)).fetchall()
+    """)
+    ).fetchall()
 
     success = 0
     errors = 0
 
     for r in rows:
         try:
-            new_conn.execute(text("""
+            new_conn.execute(
+                text("""
                 INSERT INTO students (
                     id, school_id, name, student_no, gender, class_id, grade_id,
                     id_card, nationality, ethnicity, birth_date, address,
@@ -282,31 +300,33 @@ def migrate_students(old_conn, new_conn):
                     is_active = VALUES(is_active),
                     enrolled_at = VALUES(enrolled_at),
                     tags = VALUES(tags)
-            """), {
-                "id": int(r.id),
-                "school_id": SCHOOL_ID,
-                "name": (r.name or "").strip(),
-                "student_no": (r.student_no or "").strip(),
-                "gender": (r.gender or "").strip(),
-                "class_id": int(r.class_id) if r.class_id else None,
-                "grade_id": int(r.grade_id) if r.grade_id else None,
-                "id_card": r.id_card,
-                "nationality": r.national_id,  # ⚠️ 列名差异: old=national_id → new=nationality
-                "ethnicity": r.ethnicity,
-                "birth_date": r.birth_date,
-                "address": r.address,
-                "parent1_name": r.parent1_name,
-                "parent1_phone": r.parent1_phone,
-                "parent1_relation": r.parent1_relation,
-                "parent2_name": r.parent2_name,
-                "parent2_phone": r.parent2_phone,
-                "parent2_relation": r.parent2_relation,
-                "primary_school": r.primary_school,
-                "is_active": bool(r.is_active) if r.is_active is not None else True,
-                "enrolled_at": r.enrolled_at,
-                "tags": safe_json_tags(r.tags),
-                "created_at": r.created_at or datetime.now(),
-            })
+            """),
+                {
+                    "id": int(r.id),
+                    "school_id": SCHOOL_ID,
+                    "name": (r.name or "").strip(),
+                    "student_no": (r.student_no or "").strip(),
+                    "gender": (r.gender or "").strip(),
+                    "class_id": int(r.class_id) if r.class_id else None,
+                    "grade_id": int(r.grade_id) if r.grade_id else None,
+                    "id_card": r.id_card,
+                    "nationality": r.national_id,  # ⚠️ 列名差异: old=national_id → new=nationality
+                    "ethnicity": r.ethnicity,
+                    "birth_date": r.birth_date,
+                    "address": r.address,
+                    "parent1_name": r.parent1_name,
+                    "parent1_phone": r.parent1_phone,
+                    "parent1_relation": r.parent1_relation,
+                    "parent2_name": r.parent2_name,
+                    "parent2_phone": r.parent2_phone,
+                    "parent2_relation": r.parent2_relation,
+                    "primary_school": r.primary_school,
+                    "is_active": bool(r.is_active) if r.is_active is not None else True,
+                    "enrolled_at": r.enrolled_at,
+                    "tags": safe_json_tags(r.tags),
+                    "created_at": r.created_at or datetime.now(),
+                },
+            )
             success += 1
         except Exception as e:
             logger.warning(f"  ⚠️ 学生 [{r.student_no} {r.name}] 导入失败: {e}")
@@ -322,24 +342,28 @@ def verify(conn):
     logger.info("📊 数据校验")
 
     tables = {
-        "grades":   "年级",
-        "classes":  "班级",
-        "users":    "用户",
+        "grades": "年级",
+        "classes": "班级",
+        "users": "用户",
         "students": "学生",
     }
     all_ok = True
     for table, label in tables.items():
-        cnt = conn.execute(text(f"SELECT COUNT(*) FROM {table} WHERE school_id = :sid"),
-                           {"sid": SCHOOL_ID}).scalar()
+        cnt = conn.execute(
+            text(f"SELECT COUNT(*) FROM {table} WHERE school_id = :sid"), {"sid": SCHOOL_ID}
+        ).scalar()
         status = "✅" if cnt > 0 else "❌"
         if cnt == 0:
             all_ok = False
         logger.info(f"  {status} {label}: {cnt} 条")
 
     # 抽样验证
-    sample = conn.execute(text(
-        "SELECT id, name, student_no, gender, class_id FROM students WHERE school_id = :sid LIMIT 3"
-    ), {"sid": SCHOOL_ID}).fetchall()
+    sample = conn.execute(
+        text(
+            "SELECT id, name, student_no, gender, class_id FROM students WHERE school_id = :sid LIMIT 3"
+        ),
+        {"sid": SCHOOL_ID},
+    ).fetchall()
     for s in sample:
         logger.info(f"  抽样: [{s.student_no}] {s.name} ({s.gender}) class_id={s.class_id}")
 
@@ -349,7 +373,7 @@ def verify(conn):
 def main():
     logger.info("=" * 60)
     logger.info("🚀 Wings 3.0 跨代数据迁移启动")
-    logger.info(f"   源: grade7_new → 目标: wings3")
+    logger.info("   源: grade7_new → 目标: wings3")
     logger.info(f"   租户: school_id={SCHOOL_ID} ({SCHOOL_NAME})")
     logger.info("=" * 60)
 
@@ -392,6 +416,7 @@ def main():
     except Exception as e:
         logger.error(f"❌ 未预期错误: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 

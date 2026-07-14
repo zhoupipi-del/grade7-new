@@ -5,8 +5,8 @@ modules/teach_math/models.py — 数学教学辅助模块数据模型
 - TranslationRecord: 审题翻译记录（输入题目 → AI 逐句翻译）
 """
 
-from sqlalchemy import Column, BigInteger, String, Text, DateTime, Integer, Boolean, JSON, Index
 from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Index, Integer, String, Text
 
 
 class MathLesson(Base, SchoolMixin):

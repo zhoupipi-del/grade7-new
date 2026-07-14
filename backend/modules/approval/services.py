@@ -17,11 +17,12 @@ modules/approval/services.py — 多租户动态审批链 业务逻辑层
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Any
 
-from sqlalchemy import select, func, update as sql_update, and_
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from .models import TenantApprovalChain
 from .schemas import TenantApprovalChainCreate, TenantApprovalChainUpdate
@@ -51,7 +52,8 @@ ROLE_LABELS = {
 # 模板 → 快照 转换器 (L3 执行层隔离的核心)
 # ═══════════════════════════════════════════════════════════════
 
-def _template_to_snapshot(template: TenantApprovalChain) -> Dict[str, Any]:
+
+def _template_to_snapshot(template: TenantApprovalChain) -> dict[str, Any]:
     """
     将 TenantApprovalChain 模板转换为 ApprovalRequest.chain_config 快照格式。
 
@@ -130,21 +132,27 @@ def _template_to_snapshot(template: TenantApprovalChain) -> Dict[str, Any]:
 # 审批链解析器 — 同步版 (离线任务/脚本用)
 # ═══════════════════════════════════════════════════════════════
 
+
 def resolve_chain(
     db: Session,
     school_id: int,
     business_type: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     解析审批链（同步）— 查活跃模板 → 转为快照。
 
     返回 None = 该 school 未配置自定义链，调用方应 fallback 到 PolicyEngine / 硬编码。
     """
-    template = db.query(TenantApprovalChain).filter(
-        TenantApprovalChain.school_id == school_id,
-        TenantApprovalChain.business_type == business_type,
-        TenantApprovalChain.is_active == True,  # noqa: E712
-    ).order_by(TenantApprovalChain.version.desc()).first()
+    template = (
+        db.query(TenantApprovalChain)
+        .filter(
+            TenantApprovalChain.school_id == school_id,
+            TenantApprovalChain.business_type == business_type,
+            TenantApprovalChain.is_active == True,  # noqa: E712
+        )
+        .order_by(TenantApprovalChain.version.desc())
+        .first()
+    )
 
     if not template:
         return None
@@ -152,8 +160,12 @@ def resolve_chain(
     snapshot = _template_to_snapshot(template)
     logger.info(
         "[CHAIN] 解析审批链(sync) | school=%s biz=%s chain_id=%s v%s nodes=%s timeout=%sh",
-        school_id, business_type, template.id, template.version,
-        len(snapshot["nodes"]), snapshot["total_timeout_hours"],
+        school_id,
+        business_type,
+        template.id,
+        template.version,
+        len(snapshot["nodes"]),
+        snapshot["total_timeout_hours"],
     )
     return snapshot
 
@@ -162,22 +174,25 @@ def resolve_chain(
 # 审批链解析器 — 异步版 (FastAPI 请求用)
 # ═══════════════════════════════════════════════════════════════
 
+
 async def resolve_chain_async(
     db: AsyncSession,
     school_id: int,
     business_type: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     解析审批链（异步）— 查活跃模板 → 转为快照。
 
     返回 None = 该 school 未配置自定义链，调用方应 fallback。
     """
     result = await db.execute(
-        select(TenantApprovalChain).where(
+        select(TenantApprovalChain)
+        .where(
             TenantApprovalChain.school_id == school_id,
             TenantApprovalChain.business_type == business_type,
             TenantApprovalChain.is_active == True,  # noqa: E712
-        ).order_by(TenantApprovalChain.version.desc())
+        )
+        .order_by(TenantApprovalChain.version.desc())
     )
     template = result.scalars().first()
 
@@ -187,8 +202,12 @@ async def resolve_chain_async(
     snapshot = _template_to_snapshot(template)
     logger.info(
         "[CHAIN] 解析审批链(async) | school=%s biz=%s chain_id=%s v%s nodes=%s timeout=%sh",
-        school_id, business_type, template.id, template.version,
-        len(snapshot["nodes"]), snapshot["total_timeout_hours"],
+        school_id,
+        business_type,
+        template.id,
+        template.version,
+        len(snapshot["nodes"]),
+        snapshot["total_timeout_hours"],
     )
     return snapshot
 
@@ -197,17 +216,17 @@ async def resolve_chain_async(
 # CRUD Service (AsyncSession)
 # ═══════════════════════════════════════════════════════════════
 
-class ApprovalChainService:
 
+class ApprovalChainService:
     @staticmethod
     async def list_chains(
         db: AsyncSession,
         school_id: int,
-        business_type: Optional[str] = None,
+        business_type: str | None = None,
         active_only: bool = False,
         offset: int = 0,
         limit: int = 50,
-    ) -> Tuple[List[TenantApprovalChain], int]:
+    ) -> tuple[list[TenantApprovalChain], int]:
         """列出审批链"""
         conditions = [TenantApprovalChain.school_id == school_id]
         if business_type:
@@ -238,7 +257,7 @@ class ApprovalChainService:
     @staticmethod
     async def get_chain(
         db: AsyncSession, chain_id: int, school_id: int
-    ) -> Optional[TenantApprovalChain]:
+    ) -> TenantApprovalChain | None:
         """获取单个审批链（带 school_id 隔离）"""
         result = await db.execute(
             select(TenantApprovalChain).where(
@@ -253,7 +272,7 @@ class ApprovalChainService:
         db: AsyncSession,
         school_id: int,
         data: TenantApprovalChainCreate,
-        created_by: Optional[int] = None,
+        created_by: int | None = None,
     ) -> TenantApprovalChain:
         """创建审批链（version 自动递增）"""
         # 查找 max version
@@ -281,19 +300,25 @@ class ApprovalChainService:
 
         # 停用旧版本
         await db.execute(
-            sql_update(TenantApprovalChain).where(
+            sql_update(TenantApprovalChain)
+            .where(
                 TenantApprovalChain.school_id == school_id,
                 TenantApprovalChain.business_type == data.business_type,
                 TenantApprovalChain.id != chain.id,
                 TenantApprovalChain.is_active == True,  # noqa: E712
-            ).values(is_active=False)
+            )
+            .values(is_active=False)
         )
 
         await db.commit()
         await db.refresh(chain)
         logger.info(
             "[CHAIN] 创建审批链 | school=%s biz=%s id=%s v=%s name=%s",
-            school_id, data.business_type, chain.id, new_version, data.chain_name,
+            school_id,
+            data.business_type,
+            chain.id,
+            new_version,
+            data.chain_name,
         )
         return chain
 
@@ -303,7 +328,7 @@ class ApprovalChainService:
         chain_id: int,
         school_id: int,
         data: TenantApprovalChainUpdate,
-    ) -> Optional[TenantApprovalChain]:
+    ) -> TenantApprovalChain | None:
         """更新审批链 — 节点变更创建新版本"""
         chain = await ApprovalChainService.get_chain(db, chain_id, school_id)
         if not chain:
@@ -331,7 +356,10 @@ class ApprovalChainService:
             await db.refresh(new_chain)
             logger.info(
                 "[CHAIN] 审批链节点变更→新版本 | school=%s biz=%s old_v=%s new_v=%s",
-                school_id, chain.business_type, chain.version, new_version,
+                school_id,
+                chain.business_type,
+                chain.version,
+                new_version,
             )
             return new_chain
         else:
@@ -351,7 +379,7 @@ class ApprovalChainService:
         db: AsyncSession,
         chain_id: int,
         school_id: int,
-    ) -> Tuple[Optional[TenantApprovalChain], Optional[int]]:
+    ) -> tuple[TenantApprovalChain | None, int | None]:
         """激活审批链 — 停用同 business_type 其他活跃链"""
         chain = await ApprovalChainService.get_chain(db, chain_id, school_id)
         if not chain:
@@ -371,12 +399,14 @@ class ApprovalChainService:
 
         # 停用旧链
         await db.execute(
-            sql_update(TenantApprovalChain).where(
+            sql_update(TenantApprovalChain)
+            .where(
                 TenantApprovalChain.school_id == school_id,
                 TenantApprovalChain.business_type == chain.business_type,
                 TenantApprovalChain.id != chain_id,
                 TenantApprovalChain.is_active == True,  # noqa: E712
-            ).values(is_active=False)
+            )
+            .values(is_active=False)
         )
 
         chain.is_active = True
@@ -384,7 +414,11 @@ class ApprovalChainService:
         await db.refresh(chain)
         logger.info(
             "[CHAIN] 激活审批链 | school=%s biz=%s id=%s v=%s prev=%s",
-            school_id, chain.business_type, chain.id, chain.version, prev_id,
+            school_id,
+            chain.business_type,
+            chain.id,
+            chain.version,
+            prev_id,
         )
         return chain, prev_id
 
@@ -402,7 +436,10 @@ class ApprovalChainService:
         await db.commit()
         logger.info(
             "[CHAIN] 停用审批链 | school=%s id=%s biz=%s v=%s",
-            school_id, chain_id, chain.business_type, chain.version,
+            school_id,
+            chain_id,
+            chain.business_type,
+            chain.version,
         )
         return True
 
@@ -417,14 +454,26 @@ DEFAULT_CHAINS = {
         "description": "班主任或德育干事任一方确认即生效，48h超时自动通过",
         "nodes": [
             {
-                "node_index": 0, "node_name": "班主任审批",
-                "approver_type": "ROLE", "approver_value": "class_teacher",
-                "timeout_config": {"timeout_hours": 24, "action_on_timeout": "auto_approve", "notify_on_timeout": True},
+                "node_index": 0,
+                "node_name": "班主任审批",
+                "approver_type": "ROLE",
+                "approver_value": "class_teacher",
+                "timeout_config": {
+                    "timeout_hours": 24,
+                    "action_on_timeout": "auto_approve",
+                    "notify_on_timeout": True,
+                },
             },
             {
-                "node_index": 1, "node_name": "德育干事审批",
-                "approver_type": "ROLE", "approver_value": "moral_education_staff",
-                "timeout_config": {"timeout_hours": 24, "action_on_timeout": "auto_approve", "notify_on_timeout": True},
+                "node_index": 1,
+                "node_name": "德育干事审批",
+                "approver_type": "ROLE",
+                "approver_value": "moral_education_staff",
+                "timeout_config": {
+                    "timeout_hours": 24,
+                    "action_on_timeout": "auto_approve",
+                    "notify_on_timeout": True,
+                },
             },
         ],
     },
@@ -433,19 +482,37 @@ DEFAULT_CHAINS = {
         "description": "班主任→年级组长→德育处长 串行审批，超时自动通过",
         "nodes": [
             {
-                "node_index": 0, "node_name": "班主任审批",
-                "approver_type": "ROLE", "approver_value": "class_teacher",
-                "timeout_config": {"timeout_hours": 24, "action_on_timeout": "auto_approve", "notify_on_timeout": True},
+                "node_index": 0,
+                "node_name": "班主任审批",
+                "approver_type": "ROLE",
+                "approver_value": "class_teacher",
+                "timeout_config": {
+                    "timeout_hours": 24,
+                    "action_on_timeout": "auto_approve",
+                    "notify_on_timeout": True,
+                },
             },
             {
-                "node_index": 1, "node_name": "年级组长审批",
-                "approver_type": "ROLE", "approver_value": "grade_leader",
-                "timeout_config": {"timeout_hours": 48, "action_on_timeout": "auto_approve", "notify_on_timeout": True},
+                "node_index": 1,
+                "node_name": "年级组长审批",
+                "approver_type": "ROLE",
+                "approver_value": "grade_leader",
+                "timeout_config": {
+                    "timeout_hours": 48,
+                    "action_on_timeout": "auto_approve",
+                    "notify_on_timeout": True,
+                },
             },
             {
-                "node_index": 2, "node_name": "德育处长审批",
-                "approver_type": "ROLE", "approver_value": "dean",
-                "timeout_config": {"timeout_hours": 72, "action_on_timeout": "auto_approve", "notify_on_timeout": True},
+                "node_index": 2,
+                "node_name": "德育处长审批",
+                "approver_type": "ROLE",
+                "approver_value": "dean",
+                "timeout_config": {
+                    "timeout_hours": 72,
+                    "action_on_timeout": "auto_approve",
+                    "notify_on_timeout": True,
+                },
             },
         ],
     },
@@ -454,24 +521,48 @@ DEFAULT_CHAINS = {
         "description": "班主任→年级组长→德育处长→校长 串行审批，超时升级",
         "nodes": [
             {
-                "node_index": 0, "node_name": "班主任审批",
-                "approver_type": "ROLE", "approver_value": "class_teacher",
-                "timeout_config": {"timeout_hours": 12, "action_on_timeout": "escalate", "notify_on_timeout": True},
+                "node_index": 0,
+                "node_name": "班主任审批",
+                "approver_type": "ROLE",
+                "approver_value": "class_teacher",
+                "timeout_config": {
+                    "timeout_hours": 12,
+                    "action_on_timeout": "escalate",
+                    "notify_on_timeout": True,
+                },
             },
             {
-                "node_index": 1, "node_name": "年级组长审批",
-                "approver_type": "ROLE", "approver_value": "grade_leader",
-                "timeout_config": {"timeout_hours": 24, "action_on_timeout": "escalate", "notify_on_timeout": True},
+                "node_index": 1,
+                "node_name": "年级组长审批",
+                "approver_type": "ROLE",
+                "approver_value": "grade_leader",
+                "timeout_config": {
+                    "timeout_hours": 24,
+                    "action_on_timeout": "escalate",
+                    "notify_on_timeout": True,
+                },
             },
             {
-                "node_index": 2, "node_name": "德育处长审批",
-                "approver_type": "ROLE", "approver_value": "dean",
-                "timeout_config": {"timeout_hours": 48, "action_on_timeout": "escalate", "notify_on_timeout": True},
+                "node_index": 2,
+                "node_name": "德育处长审批",
+                "approver_type": "ROLE",
+                "approver_value": "dean",
+                "timeout_config": {
+                    "timeout_hours": 48,
+                    "action_on_timeout": "escalate",
+                    "notify_on_timeout": True,
+                },
             },
             {
-                "node_index": 3, "node_name": "校长审批",
-                "approver_type": "ROLE", "approver_value": "principal",
-                "timeout_config": {"timeout_hours": 72, "action_on_timeout": "escalate", "notify_on_timeout": True},
+                "node_index": 3,
+                "node_name": "校长审批",
+                "approver_type": "ROLE",
+                "approver_value": "principal",
+                "timeout_config": {
+                    "timeout_hours": 72,
+                    "action_on_timeout": "escalate",
+                    "notify_on_timeout": True,
+                },
             },
         ],
     },
@@ -480,14 +571,26 @@ DEFAULT_CHAINS = {
         "description": "班主任+年级组长 并行审批，48h超时升级至德育处",
         "nodes": [
             {
-                "node_index": 0, "node_name": "班主任审批",
-                "approver_type": "ROLE", "approver_value": "class_teacher",
-                "timeout_config": {"timeout_hours": 24, "action_on_timeout": "escalate", "notify_on_timeout": True},
+                "node_index": 0,
+                "node_name": "班主任审批",
+                "approver_type": "ROLE",
+                "approver_value": "class_teacher",
+                "timeout_config": {
+                    "timeout_hours": 24,
+                    "action_on_timeout": "escalate",
+                    "notify_on_timeout": True,
+                },
             },
             {
-                "node_index": 1, "node_name": "年级组长审批",
-                "approver_type": "ROLE", "approver_value": "grade_leader",
-                "timeout_config": {"timeout_hours": 24, "action_on_timeout": "escalate", "notify_on_timeout": True},
+                "node_index": 1,
+                "node_name": "年级组长审批",
+                "approver_type": "ROLE",
+                "approver_value": "grade_leader",
+                "timeout_config": {
+                    "timeout_hours": 24,
+                    "action_on_timeout": "escalate",
+                    "notify_on_timeout": True,
+                },
             },
         ],
     },
@@ -496,9 +599,13 @@ DEFAULT_CHAINS = {
 
 def seed_default_chains(db: Session, school_id: int = 1) -> int:
     """播种默认审批链（同步）— 幂等"""
-    existing = db.query(TenantApprovalChain).filter(
-        TenantApprovalChain.school_id == school_id,
-    ).first()
+    existing = (
+        db.query(TenantApprovalChain)
+        .filter(
+            TenantApprovalChain.school_id == school_id,
+        )
+        .first()
+    )
     if existing:
         logger.info("[CHAIN] 学校 %s 已有审批链，跳过播种", school_id)
         return 0

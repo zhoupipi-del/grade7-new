@@ -13,26 +13,25 @@ RBAC 策略（由 router 层传入 scope 限定）：
 """
 
 from datetime import date, timedelta
-from typing import Optional, List, Dict, Any
 
-from sqlalchemy import select, func, text, bindparam
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from core.models import Student, Class, Grade
+from core.models import Class, Student
 from modules.behavior.models import DisciplineRecord
 from modules.evaluation.models import StudentScore
-from .models import VIOLATION_WEIGHTS, SEVERITY_LABELS, QUADRANT_LABELS
+from sqlalchemy import bindparam, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from .models import QUADRANT_LABELS, SEVERITY_LABELS, VIOLATION_WEIGHTS
 
 # ═══════════════════════════════════════════════════════════════
 # 刀 1：班级万字违纪率晴雨表
 # ═══════════════════════════════════════════════════════════════
 
+
 async def get_class_radar(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
-    class_id: Optional[int] = None,
+    grade_id: int | None = None,
+    class_id: int | None = None,
 ) -> dict:
     """
     万字违纪率公式：
@@ -63,7 +62,7 @@ async def get_class_radar(
     )
 
     # ── 按班级汇总 ──
-    class_map: Dict[int, dict] = {}
+    class_map: dict[int, dict] = {}
     for r in rows:
         cid = r.class_id
         if cid not in class_map:
@@ -77,7 +76,10 @@ async def get_class_radar(
         class_map[cid]["total_violations"] += int(r.cnt)
 
     if not class_map:
-        return {"columns": ["班级名称", "万字违纪率", "正面行为对冲比", "滑窗红线触发数"], "rows": []}
+        return {
+            "columns": ["班级名称", "万字违纪率", "正面行为对冲比", "滑窗红线触发数"],
+            "rows": [],
+        }
 
     # ── 查班级人数 ──
     cids = list(class_map.keys())
@@ -99,7 +101,9 @@ async def get_class_radar(
         select(
             DisciplineRecord.class_id,
             func.count(DisciplineRecord.id),
-        ).where(*alert_conds).group_by(DisciplineRecord.class_id)
+        )
+        .where(*alert_conds)
+        .group_by(DisciplineRecord.class_id)
     )
     alert_map = {r[0]: int(r[1]) for r in alert_rows}
 
@@ -111,7 +115,9 @@ async def get_class_radar(
         select(
             DisciplineRecord.class_id,
             func.count(DisciplineRecord.id),
-        ).where(*resolved_conds).group_by(DisciplineRecord.class_id)
+        )
+        .where(*resolved_conds)
+        .group_by(DisciplineRecord.class_id)
     )
     resolved_map = {r[0]: int(r[1]) for r in resolved_rows}
 
@@ -120,8 +126,7 @@ async def get_class_radar(
     for cid, info in class_map.items():
         sc = info.get("student_count", 0) or 1  # 防除零
         weighted_sum = sum(
-            VIOLATION_WEIGHTS.get(vtype, 1) * cnt
-            for vtype, cnt in info["counts_by_type"].items()
+            VIOLATION_WEIGHTS.get(vtype, 1) * cnt for vtype, cnt in info["counts_by_type"].items()
         )
         violation_rate = round((weighted_sum / sc) * 10000, 2)
 
@@ -129,15 +134,17 @@ async def get_class_radar(
         positive_ratio = round(resolved_map.get(cid, 0) / total_v, 2)
         slide_alerts = alert_map.get(cid, 0)
 
-        result_rows.append({
-            "class_id": cid,
-            "class_name": info["class_name"],
-            "violation_rate": violation_rate,
-            "positive_ratio": positive_ratio,
-            "slide_alerts": slide_alerts,
-            "total_violations": info["total_violations"],
-            "student_count": sc,
-        })
+        result_rows.append(
+            {
+                "class_id": cid,
+                "class_name": info["class_name"],
+                "violation_rate": violation_rate,
+                "positive_ratio": positive_ratio,
+                "slide_alerts": slide_alerts,
+                "total_violations": info["total_violations"],
+                "student_count": sc,
+            }
+        )
 
     # 按万字违纪率降序排（红黑榜）
     result_rows.sort(key=lambda x: x["violation_rate"], reverse=True)
@@ -152,12 +159,13 @@ async def get_class_radar(
 # 刀 2：违纪严重度堆叠收敛趋势
 # ═══════════════════════════════════════════════════════════════
 
+
 async def get_trends(
     db: AsyncSession,
     school_id: int,
     time_frame: str = "30d",
-    grade_id: Optional[int] = None,
-    class_id: Optional[int] = None,
+    grade_id: int | None = None,
+    class_id: int | None = None,
 ) -> dict:
     """
     按日/周聚合违纪频次，按严重度堆叠。
@@ -185,15 +193,18 @@ async def get_trends(
             DisciplineRecord.incident_date,
             DisciplineRecord.type,
             func.count(DisciplineRecord.id),
-        ).where(*conds).group_by(
+        )
+        .where(*conds)
+        .group_by(
             DisciplineRecord.incident_date,
             DisciplineRecord.type,
-        ).order_by(DisciplineRecord.incident_date)
+        )
+        .order_by(DisciplineRecord.incident_date)
     )
 
     # ── Python 侧聚合到时间桶 ──
     # bucket_key -> {severity_group: count}
-    buckets: Dict[str, Dict[str, int]] = {}
+    buckets: dict[str, dict[str, int]] = {}
     for r in rows:
         d = r[0]
         if d is None:
@@ -220,7 +231,10 @@ async def get_trends(
     series = [
         {"name": "轻微违纪", "data": [buckets[k]["轻微违纪"] for k in sorted_keys]},
         {"name": "普通违纪", "data": [buckets[k]["普通违纪"] for k in sorted_keys]},
-        {"name": "严重违纪(滑窗报警)", "data": [buckets[k]["严重违纪(滑窗报警)"] for k in sorted_keys]},
+        {
+            "name": "严重违纪(滑窗报警)",
+            "data": [buckets[k]["严重违纪(滑窗报警)"] for k in sorted_keys],
+        },
     ]
 
     return {"timeline": timeline, "series": series}
@@ -230,11 +244,12 @@ async def get_trends(
 # 刀 3：跨库德育 X 成绩四象限散点图
 # ═══════════════════════════════════════════════════════════════
 
+
 async def get_correlation_scatter(
     db: AsyncSession,
     school_id: int,
-    grade_id: Optional[int] = None,
-    class_id: Optional[int] = None,
+    grade_id: int | None = None,
+    class_id: int | None = None,
     semester: str = "2025-2026-2",
 ) -> dict:
     """
@@ -290,12 +305,14 @@ async def get_correlation_scatter(
         math_score = legacy_scores.get(sid)
         if math_score is None:
             continue  # 旧库无成绩，跳过
-        merged.append({
-            "student_id": sid,
-            "student_name": name,
-            "x_moral_score": round(moral_score, 1),
-            "y_math_score": round(math_score, 1),
-        })
+        merged.append(
+            {
+                "student_id": sid,
+                "student_name": name,
+                "x_moral_score": round(moral_score, 1),
+                "y_math_score": round(math_score, 1),
+            }
+        )
 
     if not merged:
         return {"quadrants": QUADRANT_LABELS, "points": []}

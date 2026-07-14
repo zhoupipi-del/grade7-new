@@ -9,31 +9,31 @@ Data Adapter 路由层
 """
 
 import json
-from typing import Optional
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
 from core.models import User
-from core.routers import get_db, get_current_user
+from core.routers import get_current_user, get_db
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .models import StudentRiskAlert, StudentWeaknessPrescription
-from .services import (
-    process_scores,
-    get_all_templates,
-    serialize_errors,
-    process_and_save_senior_scores_pipeline,
-    calculate_exam_zscore_matrix,
-    execute_rdi_risk_analysis_pipeline,
-)
 from .schemas import (
-    UploadScoresResponse,
+    CleanErrorOut,
+    PreviewResponse,
+    TaskListResponse,
+    TaskOut,
     TemplateListResponse,
     TemplateOut,
     TemplateSubjectOut,
-    PreviewResponse,
-    CleanErrorOut,
-    TaskOut,
-    TaskListResponse,
+    UploadScoresResponse,
+)
+from .services import (
+    calculate_exam_zscore_matrix,
+    execute_rdi_risk_analysis_pipeline,
+    get_all_templates,
+    process_and_save_senior_scores_pipeline,
+    process_scores,
+    serialize_errors,
 )
 
 router = APIRouter(tags=["data-adapter"])
@@ -42,6 +42,7 @@ router = APIRouter(tags=["data-adapter"])
 # ============================================================
 # 健康检查
 # ============================================================
+
 
 @router.get("/health")
 async def health():
@@ -52,6 +53,7 @@ async def health():
 # 模板列表
 # ============================================================
 
+
 @router.get("/templates", response_model=TemplateListResponse)
 async def list_templates(
     current_user: User = Depends(get_current_user),
@@ -61,20 +63,22 @@ async def list_templates(
     template_outs = []
     for t in templates:
         subjects = []
-        for raw_name, standard_name in (
-            t.get("field_mapping", {}).get("subjects", {}).items()
-        ):
-            subjects.append(TemplateSubjectOut(
-                raw_name=raw_name,
-                standard_name=standard_name,
-            ))
-        template_outs.append(TemplateOut(
-            code=t.get("code", ""),
-            name=t.get("name", ""),
-            source_type=t.get("source_type", ""),
-            phase=t.get("phase", ""),
-            subjects=subjects,
-        ))
+        for raw_name, standard_name in t.get("field_mapping", {}).get("subjects", {}).items():
+            subjects.append(
+                TemplateSubjectOut(
+                    raw_name=raw_name,
+                    standard_name=standard_name,
+                )
+            )
+        template_outs.append(
+            TemplateOut(
+                code=t.get("code", ""),
+                name=t.get("name", ""),
+                source_type=t.get("source_type", ""),
+                phase=t.get("phase", ""),
+                subjects=subjects,
+            )
+        )
     return TemplateListResponse(
         templates=template_outs,
         total=len(template_outs),
@@ -85,12 +89,13 @@ async def list_templates(
 # 上传成绩 — 核心端点
 # ============================================================
 
+
 @router.post("/upload-scores", response_model=UploadScoresResponse)
 async def upload_scores(
     file: UploadFile = File(...),
-    template_code: Optional[str] = Form(None),
-    selected_subjects: Optional[str] = Form(None),
-    exam_id: Optional[int] = Form(None, description="关联的大考ID (高中赋分管道必填)"),
+    template_code: str | None = Form(None),
+    selected_subjects: str | None = Form(None),
+    exam_id: int | None = Form(None, description="关联的大考ID (高中赋分管道必填)"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -145,11 +150,10 @@ async def upload_scores(
         CleanErrorOut(
             row=e.get("row", 0) if isinstance(e, dict) else e.row,
             column=e.get("column", "") if isinstance(e, dict) else e.column,
-            raw_value=str(
-                e.get("raw_value", "") if isinstance(e, dict) else e.raw_value
-            )[:100],
+            raw_value=str(e.get("raw_value", "") if isinstance(e, dict) else e.raw_value)[:100],
             error_type=(
-                e.get("error_type", "") if isinstance(e, dict)
+                e.get("error_type", "")
+                if isinstance(e, dict)
                 else (e.error_type.value if hasattr(e.error_type, "value") else str(e.error_type))
             ),
             message=e.get("message", "") if isinstance(e, dict) else e.message,
@@ -167,10 +171,7 @@ async def upload_scores(
         task = ImportTask(
             school_id=current_user.school_id,
             filename=file.filename or "upload.xlsx",
-            status=(
-                "completed" if result.failed_rows == 0
-                else "completed_with_errors"
-            ),
+            status=("completed" if result.failed_rows == 0 else "completed_with_errors"),
             phase=phase,
             template_code=code,
             total_rows=result.total_rows,
@@ -225,6 +226,7 @@ async def upload_scores(
                     from modules.data_adapter.ai_prescription_engine import (
                         run_ai_prescription_pipeline,
                     )
+
                     ai_result = await run_ai_prescription_pipeline(
                         db=db,
                         exam_id=exam_id,
@@ -259,10 +261,7 @@ async def upload_scores(
             message += f" — 已按 {len(parsed_selected)} 人选科映射过滤"
 
     return UploadScoresResponse(
-        status=(
-            "completed" if result.failed_rows == 0
-            else "completed_with_errors"
-        ),
+        status=("completed" if result.failed_rows == 0 else "completed_with_errors"),
         phase=phase,
         template_code=code,
         template_name=template.get("name", ""),
@@ -283,11 +282,12 @@ async def upload_scores(
 # 导入任务列表
 # ============================================================
 
+
 @router.get("/tasks", response_model=TaskListResponse)
 async def list_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    sync_status: Optional[str] = Query(None, description="按数据来源筛选: native/legacy/imported"),
+    sync_status: str | None = Query(None, description="按数据来源筛选: native/legacy/imported"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -330,10 +330,11 @@ async def list_tasks(
 # 预览清洗 (不写库)
 # ============================================================
 
+
 @router.post("/preview", response_model=PreviewResponse)
 async def preview_cleaning(
     file: UploadFile = File(...),
-    template_code: Optional[str] = Form(None),
+    template_code: str | None = Form(None),
     preview_rows: int = Form(5),
     current_user: User = Depends(get_current_user),
 ):
@@ -368,11 +369,10 @@ async def preview_cleaning(
         CleanErrorOut(
             row=e.get("row", 0) if isinstance(e, dict) else e.row,
             column=e.get("column", "") if isinstance(e, dict) else e.column,
-            raw_value=str(
-                e.get("raw_value", "") if isinstance(e, dict) else e.raw_value
-            )[:100],
+            raw_value=str(e.get("raw_value", "") if isinstance(e, dict) else e.raw_value)[:100],
             error_type=(
-                e.get("error_type", "") if isinstance(e, dict)
+                e.get("error_type", "")
+                if isinstance(e, dict)
                 else (e.error_type.value if hasattr(e.error_type, "value") else str(e.error_type))
             ),
             message=e.get("message", "") if isinstance(e, dict) else e.message,
@@ -396,6 +396,7 @@ async def preview_cleaning(
 # ============================================================
 # Z-Score 热力图矩阵 — 全校学科强弱分布大盘
 # ============================================================
+
 
 @router.get("/exams/{exam_id}/zscore-matrix")
 async def get_exam_zscore_heatmap_matrix(
@@ -432,6 +433,7 @@ async def get_exam_zscore_heatmap_matrix(
 # RDI 风险血缘追溯 — 手动触发分析端点
 # ============================================================
 
+
 @router.post("/exams/{exam_id}/rdi-analysis")
 async def trigger_rdi_analysis(
     exam_id: int,
@@ -463,6 +465,7 @@ async def trigger_rdi_analysis(
             from modules.data_adapter.ai_prescription_engine import (
                 run_ai_prescription_pipeline,
             )
+
             ai_result = await run_ai_prescription_pipeline(
                 db=db,
                 exam_id=exam_id,
@@ -491,6 +494,7 @@ async def trigger_rdi_analysis(
 # ============================================================
 # RDI 预警流水盘 — 拉取当前考试的所有活动预警
 # ============================================================
+
 
 @router.get("/exams/{exam_id}/alerts")
 async def get_exam_alerts(
@@ -542,6 +546,7 @@ async def get_exam_alerts(
 # ============================================================
 # AI 弱科处方 — 按预警 ID 拉取关联的 AI 诊断处方
 # ============================================================
+
 
 @router.get("/alerts/{alert_id}/prescriptions")
 async def get_alert_prescriptions(

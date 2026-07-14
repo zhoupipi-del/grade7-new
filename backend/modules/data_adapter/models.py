@@ -11,25 +11,40 @@ Data Adapter 数据模型
 - ScalingRuleSet:               新高考等级赋分规则(A-E五级)
 """
 
-from sqlalchemy import (
-    Column, BigInteger, String, Integer, DateTime, JSON,
-    Float, Boolean, Text, Numeric, Date, UniqueConstraint, Index,
-)
 from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 
 class ImportTask(Base, SchoolMixin):
     """数据导入任务记录"""
+
     __tablename__ = "data_adapter_tasks"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     filename = Column(String(255), nullable=False, comment="上传文件名")
     status = Column(
-        String(30), nullable=False, default="completed",
+        String(30),
+        nullable=False,
+        default="completed",
         comment="pending/processing/completed/completed_with_errors/failed",
     )
     phase = Column(
-        String(20), nullable=False,
+        String(20),
+        nullable=False,
         comment="学段: primary/junior/senior/integrated",
     )
     template_code = Column(String(50), nullable=True, comment="使用的模板代号")
@@ -39,7 +54,9 @@ class ImportTask(Base, SchoolMixin):
     skipped_rows = Column(Integer, default=0, comment="跳过行数(缺考等)")
     errors_summary = Column(JSON, nullable=True, comment="错误摘要(前20条)")
     sync_status = Column(
-        String(20), nullable=False, default="native",
+        String(20),
+        nullable=False,
+        default="native",
         comment="数据来源标记: native(原生)/legacy(旧系统迁移)/imported(批量导入)",
     )
     created_by = Column(BigInteger, nullable=True, comment="创建人 user_id")
@@ -55,6 +72,7 @@ class ExamGradesDetail(Base, SchoolMixin):
     再选科目 (化学/生物/政治/地理) 有 scaled_score;
     必考/首选科目 (语数英/物理/历史) scaled_score = NULL, 仅记录排名.
     """
+
     __tablename__ = "exam_grades_detail"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -62,7 +80,12 @@ class ExamGradesDetail(Base, SchoolMixin):
     student_id = Column(BigInteger, nullable=False, index=True, comment="学生ID")
     admin_class_id = Column(BigInteger, nullable=False, index=True, comment="行政班ID")
     teaching_class_id = Column(BigInteger, nullable=True, comment="教学班ID(选科班, 高中走班启用)")
-    subject_code = Column(String(20), nullable=False, index=True, comment="学科代码: chinese/math/english/physics/history/chemistry/biology/politics/geography")
+    subject_code = Column(
+        String(20),
+        nullable=False,
+        index=True,
+        comment="学科代码: chinese/math/english/physics/history/chemistry/biology/politics/geography",
+    )
     raw_score = Column(Float, nullable=False, default=0.0, comment="原始分")
     scaled_score = Column(Float, nullable=True, comment="赋分(仅再选科目: 化学/生物/政治/地理)")
     is_absent = Column(Boolean, default=False, comment="是否缺考")
@@ -83,6 +106,7 @@ class StudentRiskAlert(Base, SchoolMixin):
       - Layer 2 (Aggregation): 多维聚合层 — Z-Score / 排名 / 赋分等中间体
       - Layer 3 (Source):      异构数据源层 — 原始上传 task_id / 班级 / Excel 快照
     """
+
     __tablename__ = "student_risk_alerts"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -92,7 +116,9 @@ class StudentRiskAlert(Base, SchoolMixin):
     risk_level = Column(String(16), nullable=False, comment="风险等级: red(红灯)/yellow(黄灯)")
     trigger_reason = Column(String(512), nullable=False, comment="核心触发原因摘要")
     lineage_graph = Column(JSON, nullable=False, comment="RDI 跨周期血缘有向图 JSON 结构")
-    status = Column(String(16), nullable=False, default="active", comment="处理状态: active/resolved/ignored")
+    status = Column(
+        String(16), nullable=False, default="active", comment="处理状态: active/resolved/ignored"
+    )
     created_at = Column(DateTime, default=get_local_now)
     updated_at = Column(DateTime, default=get_local_now, onupdate=get_local_now)
 
@@ -105,6 +131,7 @@ class StudentWeaknessPrescription(Base, SchoolMixin):
     保存大模型生成的根源薄弱点诊断报告 + 针对性提升行动处方,
     同时镜像核心指标 (raw_score / scaled_score / z_score) 防止源数据变动后处方失去锚点.
     """
+
     __tablename__ = "student_weakness_prescriptions"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -116,7 +143,9 @@ class StudentWeaknessPrescription(Base, SchoolMixin):
     z_score = Column(Numeric(4, 2), nullable=False, comment="确诊时的核心标尺 Z-Score")
     weakness_analysis = Column(Text, nullable=False, comment="AI 生成的根源薄弱点诊断报告")
     action_prescription = Column(Text, nullable=False, comment="AI 针对性开具的提升行动处方")
-    model_metadata = Column(JSON, nullable=True, comment='大模型版本与代币元数据 {"model":"deepseek-v4","tokens":1240}')
+    model_metadata = Column(
+        JSON, nullable=True, comment='大模型版本与代币元数据 {"model":"deepseek-v4","tokens":1240}'
+    )
     created_at = Column(DateTime, default=get_local_now)
 
 
@@ -136,21 +165,30 @@ class StudentSubjectSelection(Base, SchoolMixin):
     is_active=True 标记当前生效选科组合，
     每学期每学生仅允许1条 active 记录。
     """
+
     __tablename__ = "student_subject_selections"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    student_id = Column(BigInteger, nullable=False, index=True, comment="学生ID(逻辑FK→students.id)")
+    student_id = Column(
+        BigInteger, nullable=False, index=True, comment="学生ID(逻辑FK→students.id)"
+    )
     preferred_subject = Column(String(20), nullable=False, comment="首选科目代码: physics/history")
-    elective_subjects = Column(JSON, nullable=False, comment='再选2科代码数组 ["chemistry","biology"]')
+    elective_subjects = Column(
+        JSON, nullable=False, comment='再选2科代码数组 ["chemistry","biology"]'
+    )
     semester = Column(String(20), nullable=False, comment="生效学期(如 2025-1)")
-    is_active = Column(Boolean, nullable=False, default=True, comment="是否当前生效(每学期每学生仅1条active)")
+    is_active = Column(
+        Boolean, nullable=False, default=True, comment="是否当前生效(每学期每学生仅1条active)"
+    )
     confirmed_at = Column(DateTime, nullable=True, comment="选科确认时间")
     confirmed_by = Column(BigInteger, nullable=True, comment="确认人 user_id")
     created_at = Column(DateTime, default=get_local_now)
     updated_at = Column(DateTime, default=get_local_now, onupdate=get_local_now)
 
     __table_args__ = (
-        UniqueConstraint("school_id", "student_id", "semester", name="uk_student_selection_semester"),
+        UniqueConstraint(
+            "school_id", "student_id", "semester", name="uk_student_selection_semester"
+        ),
         Index("idx_selection_school", "school_id"),
         Index("idx_selection_student", "student_id"),
         Index("idx_selection_active", "school_id", "is_active", "semester"),
@@ -167,11 +205,14 @@ class StudentTeachingClassEnrollment(Base, SchoolMixin):
     teaching_class_id 关联到 classes 表中 class_type='teaching' 的记录。
     Student.class_id 仍指向行政班(class_type='administrative')，本表实现学科维度的走班关联。
     """
+
     __tablename__ = "student_teaching_class_enrollments"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     student_id = Column(BigInteger, nullable=False, comment="学生ID(逻辑FK→students.id)")
-    teaching_class_id = Column(BigInteger, nullable=False, comment="教学班ID(逻辑FK→classes.id, class_type=teaching)")
+    teaching_class_id = Column(
+        BigInteger, nullable=False, comment="教学班ID(逻辑FK→classes.id, class_type=teaching)"
+    )
     subject_code = Column(String(20), nullable=False, comment="该教学班对应的学科代码")
     semester = Column(String(20), nullable=False, comment="学期标识(如 2025-1)")
     is_active = Column(Boolean, nullable=False, default=True, comment="是否当前生效")
@@ -179,7 +220,10 @@ class StudentTeachingClassEnrollment(Base, SchoolMixin):
 
     __table_args__ = (
         UniqueConstraint(
-            "school_id", "student_id", "teaching_class_id", "semester",
+            "school_id",
+            "student_id",
+            "teaching_class_id",
+            "semester",
             name="uk_enrollment_student_class_semester",
         ),
         Index("idx_enrollment_school", "school_id"),
@@ -203,13 +247,20 @@ class ScalingRuleSet(Base, SchoolMixin):
     允许不同省份/年份使用不同规则集，is_active+effective_from 管理生效时间。
     rule_entries 为 JSON 数组，每项含: level/pct_start/pct_end/score_start/score_end
     """
+
     __tablename__ = "scaling_rule_sets"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False, comment="规则集名称(如 '湖南省2025新高考赋分')")
     province_code = Column(String(10), nullable=True, comment="省份代码(如 '43' 湖南)")
-    grade_levels = Column(JSON, nullable=True, comment='适用年级层级数组 ["senior_1","senior_2","senior_3"]')
-    rule_entries = Column(JSON, nullable=False, comment='赋分等级规则数组 [{"level":"A","pct_start":0,"pct_end":15,"score_start":100,"score_end":86},...]')
+    grade_levels = Column(
+        JSON, nullable=True, comment='适用年级层级数组 ["senior_1","senior_2","senior_3"]'
+    )
+    rule_entries = Column(
+        JSON,
+        nullable=False,
+        comment='赋分等级规则数组 [{"level":"A","pct_start":0,"pct_end":15,"score_start":100,"score_end":86},...]',
+    )
     is_active = Column(Boolean, nullable=False, default=True, comment="是否当前生效")
     effective_from = Column(Date, nullable=False, comment="生效起始日期")
     effective_until = Column(Date, nullable=True, comment="生效截止日期(NULL=永久)")

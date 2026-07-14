@@ -9,15 +9,15 @@ PolicyEngine NormalizationPipeline — 5 步无因次评价
   短周期（30天）作为 z-score 分母，捕捉阶段性冲刺
   长周期（学期初）作为 Winsorized 裁剪边界参考，拉平极端个体影响
 """
+
 from __future__ import annotations
 
 import math
-from datetime import date, datetime
-from typing import Optional
+from datetime import datetime
 
 import structlog
 
-from .config import NormalizationConfig, PolicyConfig
+from .config import NormalizationConfig
 from .models import (
     CohortStatistics,
     DESResult,
@@ -45,7 +45,7 @@ class NormalizationPipeline:
         student_id: int,
         raw_vectors: list[RawScoreVector],
         cohort_stats: dict[str, dict[str, CohortStatistics]],
-        previous_snapshot: Optional[ScoreSnapshot] = None,
+        previous_snapshot: ScoreSnapshot | None = None,
     ) -> DESResult:
         """
         计算单学生的 DES（无因次评价总分）。
@@ -59,7 +59,7 @@ class NormalizationPipeline:
           DESResult（含各维度结果 + 增长摘要）
         """
         dim_results: dict[str, DimensionResult] = {}
-        prev_z_scores: Optional[dict[str, float]] = (
+        prev_z_scores: dict[str, float] | None = (
             previous_snapshot.dimension_z_scores if previous_snapshot else None
         )
 
@@ -74,17 +74,15 @@ class NormalizationPipeline:
             dim_cohort = cohort_stats.get(dim_code, {})
 
             # Step 2-4: Z-Score → Winsorized → Softmax
-            z_score = self._step2_dual_modal_zscore(
-                raw_weighted, dim_cohort
-            )
+            z_score = self._step2_dual_modal_zscore(raw_weighted, dim_cohort)
             z_prime = self._step3_winsorize(z_score, dim_cohort)
             # Softmax 需要整个群组都计算完才能做，先存 z_prime
             dim_results[dim_code] = DimensionResult(
                 dimension_code=dim_code,
                 dimension_label=dim_cfg.label,
                 raw_weighted=raw_weighted,
-                z_score=z_prime,          # 暂存 z_prime，后面转 softmax
-                softmax_score=0.0,         # placeholder
+                z_score=z_prime,  # 暂存 z_prime，后面转 softmax
+                softmax_score=0.0,  # placeholder
                 weighted_score=0.0,
                 percentile=0.0,
             )
@@ -120,7 +118,7 @@ class NormalizationPipeline:
         self,
         raw_vectors_by_student: dict[int, list[RawScoreVector]],
         cohort_stats: dict[str, dict[str, CohortStatistics]],
-        previous_snapshots: Optional[dict[int, ScoreSnapshot]] = None,
+        previous_snapshots: dict[int, ScoreSnapshot] | None = None,
     ) -> dict[int, DESResult]:
         """
         批量计算 — 支持 Softmax 跨学生归一化。
@@ -196,7 +194,7 @@ class NormalizationPipeline:
     def _step1_aggregate_raw(
         self,
         raw: RawScoreVector,
-        dim_cfg: DimensionConfig,      # type: ignore[name-defined]
+        dim_cfg: DimensionConfig,  # type: ignore[name-defined]
     ) -> float:
         """
         π_raw(d, s) = Σ_j w_sub(j) × r(s, j)
@@ -309,8 +307,8 @@ class NormalizationPipeline:
     def _step5_final_des(
         self,
         dim_results: dict[str, DimensionResult],
-        previous_z_scores: Optional[dict[str, float]],
-    ) -> tuple[float, Optional[GrowthSummary]]:
+        previous_z_scores: dict[str, float] | None,
+    ) -> tuple[float, GrowthSummary | None]:
         """加权求和 + 增长向量分析"""
         des = 0.0
         for dim_code, r in dim_results.items():
@@ -329,9 +327,11 @@ class NormalizationPipeline:
                     w = self.config.dimensions[dim_code].weight
                     overall_delta += w * delta
 
-            trend: Literal["improving", "stable", "declining"] = (
-                "improving" if overall_delta > 0.1
-                else "declining" if overall_delta < -0.1
+            trend: Literal[improving, stable, declining] = (
+                "improving"
+                if overall_delta > 0.1
+                else "declining"
+                if overall_delta < -0.1
                 else "stable"
             )
             growth = GrowthSummary(

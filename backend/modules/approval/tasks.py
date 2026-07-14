@@ -14,14 +14,12 @@ Celery 异步任务，每 30 分钟扫描审批超时工单，执行自动升级
 
 import asyncio
 import logging
-import os
 import time
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, update as sql_update
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-
 from modules.reports.celery_app import celery_engine
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 logger = logging.getLogger("approval.tasks")
 
@@ -29,10 +27,9 @@ logger = logging.getLogger("approval.tasks")
 # 独立数据库引擎 (避免与 app.py 循环导入)
 # ═══════════════════════════════════════════════════════════════
 
-_DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "mysql+aiomysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/grade7_new",
-)
+from core.db_utils import require_db_url
+
+_DATABASE_URL = require_db_url()
 
 _task_engine = create_async_engine(
     _DATABASE_URL,
@@ -54,12 +51,13 @@ TaskSessionLocal = async_sessionmaker(
 # 超时阈值常量 (小时)
 # ═══════════════════════════════════════════════════════════════
 
-DISCIPLINE_PENDING_TIMEOUT_H = 48      # 处分 PENDING 超时 → 通知德育处
+DISCIPLINE_PENDING_TIMEOUT_H = 48  # 处分 PENDING 超时 → 通知德育处
 DISCIPLINE_GL_APPROVED_TIMEOUT_H = 72  # 处分 GL_APPROVED 超时 → 通知德育处抢办
 
 # ═══════════════════════════════════════════════════════════════
 # A 轨核心逻辑: approval_requests 超时扫描
 # ═══════════════════════════════════════════════════════════════
+
 
 async def _scan_approval_requests_async() -> dict:
     """
@@ -100,9 +98,7 @@ async def _scan_approval_requests_async() -> dict:
         )
         pending_requests = result.scalars().all()
 
-        logger.info(
-            f"[APPROVAL-A] 扫描到 {len(pending_requests)} 条 pending 审批工单"
-        )
+        logger.info(f"[APPROVAL-A] 扫描到 {len(pending_requests)} 条 pending 审批工单")
 
         for ar in pending_requests:
             total_scanned += 1
@@ -113,7 +109,8 @@ async def _scan_approval_requests_async() -> dict:
 
             # 2. 检测超时模式
             has_per_node = bool(
-                nodes and len(nodes) > 0
+                nodes
+                and len(nodes) > 0
                 and "timeout_hours" in nodes[0]
                 and "action_on_timeout" in nodes[0]
             )
@@ -122,8 +119,8 @@ async def _scan_approval_requests_async() -> dict:
             # Phase 3B: Per-node timeout (多租户审批链)
             # ═══════════════════════════════════════════════
             if has_per_node:
-                current_node_idx, current_node, timeout_action = (
-                    _find_per_node_timeout(ar, nodes, now)
+                current_node_idx, current_node, timeout_action = _find_per_node_timeout(
+                    ar, nodes, now
                 )
 
                 if current_node_idx is None:
@@ -131,9 +128,7 @@ async def _scan_approval_requests_async() -> dict:
                         # 所有节点已完成 → 标记完成
                         ar.current_status = "approved"
                         ar.completed_at = now
-                        logger.info(
-                            f"[APPROVAL-A] 工单 id={ar.id} 所有节点已完成 → 标记 approved"
-                        )
+                        logger.info(f"[APPROVAL-A] 工单 id={ar.id} 所有节点已完成 → 标记 approved")
                         continue
                     else:
                         # 尚无节点超时
@@ -144,8 +139,13 @@ async def _scan_approval_requests_async() -> dict:
 
                 # 4. 执行 per-node 超时动作
                 result_counts = _execute_timeout_action(
-                    ar, nodes, current_node_idx, current_node,
-                    timeout_action, now, chain,
+                    ar,
+                    nodes,
+                    current_node_idx,
+                    current_node,
+                    timeout_action,
+                    now,
+                    chain,
                 )
                 auto_approved += result_counts["auto_approved"]
                 escalated += result_counts["escalated"]
@@ -178,15 +178,18 @@ async def _scan_approval_requests_async() -> dict:
                 if current_node_idx is None:
                     ar.current_status = "approved"
                     ar.completed_at = now
-                    logger.info(
-                        f"[APPROVAL-A] 工单 id={ar.id} 所有节点已完成 → 标记 approved"
-                    )
+                    logger.info(f"[APPROVAL-A] 工单 id={ar.id} 所有节点已完成 → 标记 approved")
                     continue
 
                 current_node = nodes[current_node_idx]
                 result_counts = _execute_global_timeout_action(
-                    ar, nodes, current_node_idx, current_node,
-                    escalation_strategy, now, chain,
+                    ar,
+                    nodes,
+                    current_node_idx,
+                    current_node,
+                    escalation_strategy,
+                    now,
+                    chain,
                 )
                 auto_approved += result_counts["auto_approved"]
                 escalated += result_counts["escalated"]
@@ -198,9 +201,7 @@ async def _scan_approval_requests_async() -> dict:
             # 6. 通知 (解耦)
             notify_node = nodes[current_node_idx] if nodes else {}
             notify_strategy = notify_node.get("action_on_timeout", "escalate")
-            await _try_notify_approval_timeout(
-                db, ar, notify_strategy, notify_node
-            )
+            await _try_notify_approval_timeout(db, ar, notify_strategy, notify_node)
 
         await db.commit()
 
@@ -228,8 +229,11 @@ async def _scan_approval_requests_async() -> dict:
 # A 轨辅助函数: Per-node timeout 检测 + 动作执行
 # ═══════════════════════════════════════════════════════════════
 
+
 def _find_per_node_timeout(
-    ar, nodes: list, now: datetime,
+    ar,
+    nodes: list,
+    now: datetime,
 ) -> tuple:
     """
     在 chain_config.nodes 中查找超时节点。
@@ -287,8 +291,13 @@ def _find_per_node_timeout(
 
 
 def _execute_timeout_action(
-    ar, nodes: list, node_idx: int, node: dict,
-    action: str, now: datetime, chain: dict,
+    ar,
+    nodes: list,
+    node_idx: int,
+    node: dict,
+    action: str,
+    now: datetime,
+    chain: dict,
 ) -> dict:
     """
     执行 per-node 超时动作 (Phase 3B)。
@@ -325,17 +334,11 @@ def _execute_timeout_action(
         )
 
         # 检查整链是否完成
-        all_approved = all(
-            n.get("status") in ("approved", "auto_approved")
-            for n in nodes
-        )
+        all_approved = all(n.get("status") in ("approved", "auto_approved") for n in nodes)
         if all_approved:
             ar.current_status = "approved"
             ar.completed_at = now
-            logger.info(
-                f"[APPROVAL-A] 整链完成 | id={ar.id} "
-                f"所有节点已批准 → approved"
-            )
+            logger.info(f"[APPROVAL-A] 整链完成 | id={ar.id} 所有节点已批准 → approved")
         else:
             ar.current_status = "pending"
 
@@ -351,15 +354,12 @@ def _execute_timeout_action(
         result["escalated"] += 1
 
         logger.info(
-            f"[APPROVAL-A] 升级超时 | id={ar.id} "
-            f"node[{node_idx}]={node['role']} action=escalate"
+            f"[APPROVAL-A] 升级超时 | id={ar.id} node[{node_idx}]={node['role']} action=escalate"
         )
 
     else:
         # 未知 action → 默认 escalate
-        logger.warning(
-            f"[APPROVAL-A] 未知 action | id={ar.id} action={action} → 默认 escalate"
-        )
+        logger.warning(f"[APPROVAL-A] 未知 action | id={ar.id} action={action} → 默认 escalate")
         node["status"] = "timeout"
         node["timeout_at"] = now.isoformat()
         ar.current_status = "timeout"
@@ -371,8 +371,13 @@ def _execute_timeout_action(
 
 
 def _execute_global_timeout_action(
-    ar, nodes: list, node_idx: int, node: dict,
-    strategy: str, now: datetime, chain: dict,
+    ar,
+    nodes: list,
+    node_idx: int,
+    node: dict,
+    strategy: str,
+    now: datetime,
+    chain: dict,
 ) -> dict:
     """
     执行 global 超时动作 (兼容旧 PolicyEngine 链)。
@@ -392,10 +397,7 @@ def _execute_global_timeout_action(
             f"node[{node_idx}]={node.get('role')} transition: {old_status} → auto_approved"
         )
 
-        all_approved = all(
-            n.get("status") in ("approved", "auto_approved")
-            for n in nodes
-        )
+        all_approved = all(n.get("status") in ("approved", "auto_approved") for n in nodes)
         if all_approved:
             ar.current_status = "approved"
             ar.completed_at = now
@@ -422,8 +424,7 @@ def _execute_global_timeout_action(
         result["escalated"] += 1
 
         logger.warning(
-            f"[APPROVAL-A] 未知策略(global) | id={ar.id} "
-            f"strategy={strategy} → 默认 escalate"
+            f"[APPROVAL-A] 未知策略(global) | id={ar.id} strategy={strategy} → 默认 escalate"
         )
 
     return result
@@ -432,6 +433,7 @@ def _execute_global_timeout_action(
 # ═══════════════════════════════════════════════════════════════
 # B 轨核心逻辑: discipline_sanctions 超时扫描
 # ═══════════════════════════════════════════════════════════════
+
 
 async def _scan_discipline_sanctions_async() -> dict:
     """
@@ -458,17 +460,17 @@ async def _scan_discipline_sanctions_async() -> dict:
         # 查询所有处于审批中状态的处分
         result = await db.execute(
             select(DisciplineSanction).where(
-                DisciplineSanction.status.in_([
-                    DisciplineStatus.PENDING,
-                    DisciplineStatus.GRADE_LEADER_APPROVED,
-                ])
+                DisciplineSanction.status.in_(
+                    [
+                        DisciplineStatus.PENDING,
+                        DisciplineStatus.GRADE_LEADER_APPROVED,
+                    ]
+                )
             )
         )
         sanctions = result.scalars().all()
 
-        logger.info(
-            f"[APPROVAL-B] 扫描到 {len(sanctions)} 条审批中的处分"
-        )
+        logger.info(f"[APPROVAL-B] 扫描到 {len(sanctions)} 条审批中的处分")
 
         for s in sanctions:
             total_scanned += 1
@@ -483,9 +485,7 @@ async def _scan_discipline_sanctions_async() -> dict:
                         f"student={s.student_id} level={s.level.value} "
                         f"stale={stale_hours:.1f}h → 通知德育处介入"
                     )
-                    await _try_notify_discipline_timeout(
-                        db, s, "pending_timeout", stale_hours
-                    )
+                    await _try_notify_discipline_timeout(db, s, "pending_timeout", stale_hours)
 
             elif s.status == DisciplineStatus.GRADE_LEADER_APPROVED:
                 if stale_hours >= DISCIPLINE_GL_APPROVED_TIMEOUT_H:
@@ -495,9 +495,7 @@ async def _scan_discipline_sanctions_async() -> dict:
                         f"student={s.student_id} level={s.level.value} "
                         f"stale={stale_hours:.1f}h → 通知德育处抢办"
                     )
-                    await _try_notify_discipline_timeout(
-                        db, s, "gl_approved_timeout", stale_hours
-                    )
+                    await _try_notify_discipline_timeout(db, s, "gl_approved_timeout", stale_hours)
 
         await db.commit()
 
@@ -524,9 +522,10 @@ async def _scan_discipline_sanctions_async() -> dict:
 # 通知分发 (解耦 — 失败不影响审批流程)
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _try_notify_approval_timeout(
     db: AsyncSession,
-    ar,                 # ApprovalRequest
+    ar,  # ApprovalRequest
     strategy: str,
     node: dict,
 ) -> None:
@@ -534,14 +533,11 @@ async def _try_notify_approval_timeout(
     try:
         # Phase 3B: 节点可配置不通知
         if node.get("notify_on_timeout") is False:
-            logger.info(
-                f"[APPROVAL-NOTIFY] 节点关闭通知 | ar_id={ar.id} "
-                f"node={node.get('role')}"
-            )
+            logger.info(f"[APPROVAL-NOTIFY] 节点关闭通知 | ar_id={ar.id} node={node.get('role')}")
             return
 
-        from modules.notifications.services import NotificationService
         from core.models import UserRole
+        from modules.notifications.services import NotificationService
 
         role_label = node.get("label", node.get("role", "审批人"))
         event_type = ar.event_type or "未知事件"
@@ -579,28 +575,22 @@ async def _try_notify_approval_timeout(
             entity_id=ar.id,
         )
 
-        logger.info(
-            f"[APPROVAL-NOTIFY] 审批超时通知已发送 | "
-            f"ar_id={ar.id} strategy={strategy}"
-        )
+        logger.info(f"[APPROVAL-NOTIFY] 审批超时通知已发送 | ar_id={ar.id} strategy={strategy}")
 
     except Exception as exc:
-        logger.warning(
-            f"[APPROVAL-NOTIFY] 通知发送失败 (审批流程不受影响) | "
-            f"ar_id={ar.id}: {exc}"
-        )
+        logger.warning(f"[APPROVAL-NOTIFY] 通知发送失败 (审批流程不受影响) | ar_id={ar.id}: {exc}")
 
 
 async def _try_notify_discipline_timeout(
     db: AsyncSession,
-    sanction,          # DisciplineSanction
+    sanction,  # DisciplineSanction
     timeout_type: str,
     stale_hours: float,
 ) -> None:
     """通知处分审批超时事件 (B 轨) — 失败不抛异常"""
     try:
-        from modules.notifications.services import NotificationService
         from core.models import UserRole
+        from modules.notifications.services import NotificationService
 
         level_label = {
             "WARNING": "警告",
@@ -608,7 +598,10 @@ async def _try_notify_discipline_timeout(
             "DEMERIT": "记过",
             "PROBATION": "留校察看",
             "EXPULSION": "开除学籍",
-        }.get(sanction.level.value if hasattr(sanction.level, 'value') else str(sanction.level), str(sanction.level))
+        }.get(
+            sanction.level.value if hasattr(sanction.level, "value") else str(sanction.level),
+            str(sanction.level),
+        )
 
         if timeout_type == "pending_timeout":
             title = "处分审批超时 — 年级组长未审批"
@@ -637,20 +630,19 @@ async def _try_notify_discipline_timeout(
         )
 
         logger.info(
-            f"[APPROVAL-NOTIFY] 处分超时通知已发送 | "
-            f"sanction_id={sanction.id} type={timeout_type}"
+            f"[APPROVAL-NOTIFY] 处分超时通知已发送 | sanction_id={sanction.id} type={timeout_type}"
         )
 
     except Exception as exc:
         logger.warning(
-            f"[APPROVAL-NOTIFY] 通知发送失败 (处分审批不受影响) | "
-            f"sanction_id={sanction.id}: {exc}"
+            f"[APPROVAL-NOTIFY] 通知发送失败 (处分审批不受影响) | sanction_id={sanction.id}: {exc}"
         )
 
 
 # ═══════════════════════════════════════════════════════════════
 # 异步总控: 双轨合并执行
 # ═══════════════════════════════════════════════════════════════
+
 
 async def _check_timeout_approvals_async() -> dict:
     """双轨合并扫描 — 先 A 后 B，各自独立容错"""
@@ -690,6 +682,7 @@ async def _check_timeout_approvals_async() -> dict:
 # ═══════════════════════════════════════════════════════════════
 # Celery 任务包装 (同步入口 → asyncio.run 桥接)
 # ═══════════════════════════════════════════════════════════════
+
 
 @celery_engine.task(
     bind=True,

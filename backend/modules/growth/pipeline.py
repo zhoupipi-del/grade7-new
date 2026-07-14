@@ -17,20 +17,19 @@ BOSS 设计图纸落地：GrowthAggregationPipeline 类。
 
 行为/心理/活动 维度沿用 services.py 成熟逻辑，保持向后兼容。
 """
-import logging
-from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
 
-from sqlalchemy import desc, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+import logging
+from typing import Any
 
 from core.models import Student
 from modules.growth.models import (
+    EventSeverity,
     GrowthDimension,
     GrowthPeriodicalSnapshot,
     GrowthTimelineEvent,
-    EventSeverity,
 )
+from sqlalchemy import desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +76,7 @@ class GrowthAggregationPipeline:
         self,
         student_id: int,
         semester_label: str,
-        school_id: Optional[int] = None,
+        school_id: int | None = None,
         snapshot_type: str = "semester",
     ) -> GrowthPeriodicalSnapshot:
         """
@@ -116,9 +115,7 @@ class GrowthAggregationPipeline:
         violation_count, honor_count, beh_metrics = await self._fetch_behavior_data(
             student_id, school_id
         )
-        psych_score, psych_risk_level = await self._fetch_psychology_data(
-            student_id, school_id
-        )
+        psych_score, psych_risk_level = await self._fetch_psychology_data(student_id, school_id)
         activity_count = await self._fetch_activity_data(student_id)
 
         # ── Step 2: 归一化五维得分 ──
@@ -136,7 +133,7 @@ class GrowthAggregationPipeline:
         activity_score = round(min(100.0, max(0.0, activity_score)), 1)
 
         # ── Step 3: 汇总元数据 ──
-        summary_metrics: Dict[str, Any] = {
+        summary_metrics: dict[str, Any] = {
             "exam_avg": round(exam_avg, 2) if exam_avg else None,
             "gap_critical_ratio": round(gap_critical_ratio, 4),
             "gap_total": gap_metrics.get("total_gaps", 0),
@@ -150,7 +147,7 @@ class GrowthAggregationPipeline:
             "formula": {
                 "alpha": self.alpha,
                 "beta": self.beta,
-                "academic": f"{self.alpha}*{round(exam_avg,2) if exam_avg else 0}+{self.beta}*(1-{round(gap_critical_ratio,4)})*100={academic_score}",
+                "academic": f"{self.alpha}*{round(exam_avg, 2) if exam_avg else 0}+{self.beta}*(1-{round(gap_critical_ratio, 4)})*100={academic_score}",
             },
         }
 
@@ -182,7 +179,7 @@ class GrowthAggregationPipeline:
 
     async def inject_timeline_event(
         self,
-        event_data: Dict[str, Any],
+        event_data: dict[str, Any],
     ) -> GrowthTimelineEvent:
         """
         注入一条成长时光轴事件 — 多态JSON流式写入。
@@ -210,17 +207,13 @@ class GrowthAggregationPipeline:
         dimension = event_data["dimension"]
         valid_dims = {d.value for d in GrowthDimension}
         if dimension not in valid_dims:
-            raise ValueError(
-                f"无效 dimension='{dimension}', 必须为 {valid_dims}"
-            )
+            raise ValueError(f"无效 dimension='{dimension}', 必须为 {valid_dims}")
 
         # 校验 severity 枚举
         severity = event_data.get("severity", EventSeverity.INFO.value)
         valid_severities = {s.value for s in EventSeverity}
         if severity not in valid_severities:
-            raise ValueError(
-                f"无效 severity='{severity}', 必须为 {valid_severities}"
-            )
+            raise ValueError(f"无效 severity='{severity}', 必须为 {valid_severities}")
 
         event = GrowthTimelineEvent(
             school_id=event_data["school_id"],
@@ -324,7 +317,7 @@ class GrowthAggregationPipeline:
     #  数据采集层 — 7路跨模块查询 (异常兜底，单路失败不影响全局)
     # ═══════════════════════════════════════════════════════════════
 
-    async def _resolve_school_id(self, student_id: int) -> Optional[int]:
+    async def _resolve_school_id(self, student_id: int) -> int | None:
         """从 Student ORM 查询 school_id"""
         try:
             result = await self.db.execute(
@@ -337,7 +330,7 @@ class GrowthAggregationPipeline:
 
     async def _fetch_academic_data(
         self, student_id: int, school_id: int
-    ) -> Tuple[float, float, Dict[str, Any]]:
+    ) -> tuple[float, float, dict[str, Any]]:
         """
         学业数据采集 — 考试均分 + 错题断层收敛率
 
@@ -346,7 +339,7 @@ class GrowthAggregationPipeline:
         """
         exam_avg: float = 0.0
         gap_critical_ratio: float = 0.0
-        metrics: Dict[str, Any] = {"total_gaps": 0, "critical_gaps": 0}
+        metrics: dict[str, Any] = {"total_gaps": 0, "critical_gaps": 0}
 
         # ── 1a. 考试均分 ──
         try:
@@ -379,9 +372,7 @@ class GrowthAggregationPipeline:
 
             # 总斷层数
             total_result = await self.db.execute(
-                select(func.count(KnowledgeGap.id)).where(
-                    KnowledgeGap.student_id == student_id
-                )
+                select(func.count(KnowledgeGap.id)).where(KnowledgeGap.student_id == student_id)
             )
             total_gaps = total_result.scalar() or 0
 
@@ -403,7 +394,7 @@ class GrowthAggregationPipeline:
 
     async def _fetch_attendance_data(
         self, student_id: int, school_id: int
-    ) -> Tuple[int, int, Dict[str, Any]]:
+    ) -> tuple[int, int, dict[str, Any]]:
         """
         考勤数据采集 — CRITICAL/WARNING 事件计数
 
@@ -453,7 +444,7 @@ class GrowthAggregationPipeline:
 
     async def _fetch_behavior_data(
         self, student_id: int, school_id: int
-    ) -> Tuple[int, int, Dict[str, Any]]:
+    ) -> tuple[int, int, dict[str, Any]]:
         """
         行为数据采集 — 违纪次数 + 表彰次数
 
@@ -499,7 +490,7 @@ class GrowthAggregationPipeline:
 
     async def _fetch_psychology_data(
         self, student_id: int, school_id: int
-    ) -> Tuple[float, Optional[str]]:
+    ) -> tuple[float, str | None]:
         """
         心理数据采集 — psych_profiles 风险等级映射
 
@@ -508,7 +499,7 @@ class GrowthAggregationPipeline:
         """
         # 默认值: 无心理数据时给 90.0 (略低于满分, 表示"未评估")
         psych_score = 90.0
-        risk_level_str: Optional[str] = None
+        risk_level_str: str | None = None
 
         try:
             from modules.psych_profiles.models import PsychProfile
@@ -525,7 +516,9 @@ class GrowthAggregationPipeline:
             risk_level = result.scalar()
 
             if risk_level:
-                risk_level_str = risk_level.lower() if isinstance(risk_level, str) else str(risk_level).lower()
+                risk_level_str = (
+                    risk_level.lower() if isinstance(risk_level, str) else str(risk_level).lower()
+                )
                 # 双轨风险等级映射 (兼容 green/yellow/orange/red 和 low/medium/high)
                 risk_map = {
                     "green": 100.0,
@@ -578,7 +571,7 @@ class GrowthAggregationPipeline:
         behavior_score: float,
         psych_score: float,
         activity_score: float,
-        summary_metrics: Dict[str, Any],
+        summary_metrics: dict[str, Any],
     ) -> GrowthPeriodicalSnapshot:
         """
         Upsert 快照 — 存在则更新, 不存在则新建。

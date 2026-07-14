@@ -22,26 +22,31 @@ Phase 4 — 家校申诉:
 """
 
 import os
-from typing import Optional
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-
 from core.models import User, UserRole
-from core.routers import get_db, get_current_user, require_role
-from .services import DisciplineService, STATUS_LABELS
+from core.routers import get_current_user, get_db, require_role
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .models import (
-    DisciplineLevel, DisciplineStatus, LEVEL_LABELS, LEVEL_PENALTY_MAP, VETO_LEVELS,
-    AppealStatus, APPEAL_STATUS_LABELS,
+    APPEAL_STATUS_LABELS,
+    LEVEL_LABELS,
+    LEVEL_PENALTY_MAP,
+    VETO_LEVELS,
+    DisciplineStatus,
 )
 from .schemas import (
-    SanctionCreate, SanctionUpdate, SanctionOut,
-    SanctionReview, SanctionRevoke, SanctionStatsOut,
+    AppealReview,
+    AppealWebhookCreate,
     DraftSubmit,
-    AppealWebhookCreate, AppealReview, AppealOut,
+    SanctionCreate,
+    SanctionReview,
+    SanctionRevoke,
+    SanctionUpdate,
 )
+from .services import STATUS_LABELS, DisciplineService
 
 router = APIRouter(tags=["discipline"])
 
@@ -50,20 +55,27 @@ router = APIRouter(tags=["discipline"])
 # CRUD
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post("/sanctions", status_code=201)
 async def create_sanction(
     body: SanctionCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _guard: User = Depends(require_role(
-        UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER,
-    )),
+    _guard: User = Depends(
+        require_role(
+            UserRole.MS_ADMIN,
+            UserRole.GRADE_LEADER,
+            UserRole.CLASS_TEACHER,
+        )
+    ),
 ):
     """班主任提报处分 → PENDING 状态"""
     try:
         sanction = await DisciplineService.create_sanction(
-            db, current_user.school_id,
-            body.model_dump(), current_user.id,
+            db,
+            current_user.school_id,
+            body.model_dump(),
+            current_user.id,
         )
         return _format(sanction)
     except ValueError as e:
@@ -72,13 +84,13 @@ async def create_sanction(
 
 @router.get("/sanctions")
 async def list_sanctions(
-    class_id: Optional[int] = None,
-    grade_id: Optional[int] = None,
-    student_id: Optional[int] = None,
-    level: Optional[str] = None,
-    status: Optional[str] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    class_id: int | None = None,
+    grade_id: int | None = None,
+    student_id: int | None = None,
+    level: str | None = None,
+    status: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -87,16 +99,24 @@ async def list_sanctions(
     """分页查询处分列表"""
     offset = (page - 1) * per_page
     records, total = await DisciplineService.list_sanctions(
-        db, current_user.school_id,
-        class_id=class_id, grade_id=grade_id, student_id=student_id,
-        level=level, status=status,
-        start_date=start_date, end_date=end_date,
-        limit=per_page, offset=offset,
+        db,
+        current_user.school_id,
+        class_id=class_id,
+        grade_id=grade_id,
+        student_id=student_id,
+        level=level,
+        status=status,
+        start_date=start_date,
+        end_date=end_date,
+        limit=per_page,
+        offset=offset,
     )
     pages = (total + per_page - 1) // per_page if total > 0 else 0
     return {
         "items": [_format(r) for r in records],
-        "total": total, "page": page, "per_page": per_page,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
         "pages": pages,
     }
 
@@ -124,7 +144,9 @@ async def update_sanction(
     """编辑处分 — 仅 PENDING 状态可编辑"""
     try:
         sanction = await DisciplineService.update_sanction(
-            db, sanction_id, body.model_dump(exclude_none=True),
+            db,
+            sanction_id,
+            body.model_dump(exclude_none=True),
         )
         if not sanction:
             raise HTTPException(status_code=404, detail="处分记录不存在")
@@ -154,6 +176,7 @@ async def delete_sanction(
 # 状态机: 审批
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post("/sanctions/{sanction_id}/approve")
 async def approve_sanction(
     sanction_id: int,
@@ -178,7 +201,8 @@ async def approve_sanction(
         reviewer_role = _resolve_reviewer_role(current_user)
 
         sanction = await DisciplineService.approve_sanction(
-            db, sanction_id,
+            db,
+            sanction_id,
             comment=body.comment or "",
             reviewer_id=current_user.id,
             reviewer_role=reviewer_role,
@@ -213,7 +237,8 @@ async def reject_sanction(
         reviewer_role = _resolve_reviewer_role(current_user)
 
         sanction = await DisciplineService.reject_sanction(
-            db, sanction_id,
+            db,
+            sanction_id,
             comment=body.comment or "",
             reviewer_id=current_user.id,
             reviewer_role=reviewer_role,
@@ -228,6 +253,7 @@ async def reject_sanction(
 # ═══════════════════════════════════════════════════════════════
 # 状态机: 撤销
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/sanctions/{sanction_id}/revoke")
 async def revoke_sanction(
@@ -249,7 +275,8 @@ async def revoke_sanction(
     """
     try:
         sanction = await DisciplineService.revoke_sanction(
-            db, sanction_id,
+            db,
+            sanction_id,
             revoke_reason=body.revoke_reason,
             revoke_date=body.revoke_date,
         )
@@ -263,6 +290,7 @@ async def revoke_sanction(
 # ═══════════════════════════════════════════════════════════════
 # 违纪一键升级
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/escalation/{student_id}")
 async def check_escalation(
@@ -279,9 +307,13 @@ async def escalate_to_sanction(
     student_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _guard: User = Depends(require_role(
-        UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER,
-    )),
+    _guard: User = Depends(
+        require_role(
+            UserRole.MS_ADMIN,
+            UserRole.GRADE_LEADER,
+            UserRole.CLASS_TEACHER,
+        )
+    ),
 ):
     """
     违纪一键升级为处分 — 自动创建 PENDING 处分草案
@@ -294,7 +326,9 @@ async def escalate_to_sanction(
     """
     try:
         sanction = await DisciplineService.escalate_to_sanction(
-            db, student_id, current_user.id,
+            db,
+            student_id,
+            current_user.id,
         )
         return _format(sanction)
     except ValueError as e:
@@ -305,19 +339,22 @@ async def escalate_to_sanction(
 # 统计
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/stats")
 async def sanction_stats(
-    grade_id: Optional[int] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    grade_id: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """处分统计概览"""
     return await DisciplineService.get_stats(
-        db, current_user.school_id,
+        db,
+        current_user.school_id,
         grade_id=grade_id,
-        start_date=start_date, end_date=end_date,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 
@@ -325,11 +362,12 @@ async def sanction_stats(
 # Phase 2: 草稿箱管理 — 30天滑窗自动化引擎
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/drafts")
 async def list_drafts(
-    class_id: Optional[int] = None,
-    grade_id: Optional[int] = None,
-    student_id: Optional[int] = None,
+    class_id: int | None = None,
+    grade_id: int | None = None,
+    student_id: int | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -350,9 +388,13 @@ async def list_drafts(
 
     offset = (page - 1) * per_page
     records, total = await DisciplineService.list_drafts(
-        db, current_user.school_id,
-        class_id=_cid, grade_id=grade_id, student_id=student_id,
-        limit=per_page, offset=offset,
+        db,
+        current_user.school_id,
+        class_id=_cid,
+        grade_id=grade_id,
+        student_id=student_id,
+        limit=per_page,
+        offset=offset,
     )
     pages = (total + per_page - 1) // per_page if total > 0 else 0
 
@@ -365,7 +407,9 @@ async def list_drafts(
 
     return {
         "items": items,
-        "total": total, "page": page, "per_page": per_page,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
         "pages": pages,
     }
 
@@ -392,9 +436,13 @@ async def submit_draft(
     body: DraftSubmit,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _guard: User = Depends(require_role(
-        UserRole.CLASS_TEACHER, UserRole.MS_ADMIN, UserRole.GRADE_LEADER,
-    )),
+    _guard: User = Depends(
+        require_role(
+            UserRole.CLASS_TEACHER,
+            UserRole.MS_ADMIN,
+            UserRole.GRADE_LEADER,
+        )
+    ),
 ):
     """
     班主任一键提交草稿: DRAFT_PENDING → PENDING
@@ -404,7 +452,8 @@ async def submit_draft(
     """
     try:
         sanction = await DisciplineService.submit_draft(
-            db, draft_id,
+            db,
+            draft_id,
             confirm_reason=body.confirm_reason,
             submitter_id=current_user.id,
         )
@@ -490,16 +539,17 @@ async def webhook_create_appeal(
     # ── 根据 school_id 查询──
     # Webhook 场景无登录态，需要从处分记录反查 school_id
     from .models import DisciplineSanction as DS
-    sanction = await db.scalar(
-        select(DS).where(DS.id == body.sanction_id)
-    )
+
+    sanction = await db.scalar(select(DS).where(DS.id == body.sanction_id))
     if not sanction:
         raise HTTPException(status_code=404, detail=f"处分记录不存在: id={body.sanction_id}")
     school_id = sanction.school_id
 
     try:
         result = await DisciplineService.create_appeal_from_webhook(
-            db, school_id, body.model_dump(),
+            db,
+            school_id,
+            body.model_dump(),
         )
         appeal = result["appeal"]
         created = result["created"]
@@ -514,27 +564,36 @@ async def webhook_create_appeal(
 
 @router.get("/appeals")
 async def list_appeals(
-    sanction_id: Optional[int] = None,
-    status: Optional[str] = None,
+    sanction_id: int | None = None,
+    status: str | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _guard: User = Depends(require_role(
-        UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER,
-    )),
+    _guard: User = Depends(
+        require_role(
+            UserRole.MS_ADMIN,
+            UserRole.GRADE_LEADER,
+            UserRole.CLASS_TEACHER,
+        )
+    ),
 ):
     """分页查询申诉列表 — 德育处/年级组长/班主任"""
     offset = (page - 1) * per_page
     records, total = await DisciplineService.list_appeals(
-        db, current_user.school_id,
-        sanction_id=sanction_id, status=status,
-        limit=per_page, offset=offset,
+        db,
+        current_user.school_id,
+        sanction_id=sanction_id,
+        status=status,
+        limit=per_page,
+        offset=offset,
     )
     pages = (total + per_page - 1) // per_page if total > 0 else 0
     return {
         "items": [_format_appeal(r) for r in records],
-        "total": total, "page": page, "per_page": per_page,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
         "pages": pages,
     }
 
@@ -571,7 +630,8 @@ async def review_appeal(
     """
     try:
         result = await DisciplineService.review_appeal(
-            db, appeal_id,
+            db,
+            appeal_id,
             action=body.action,
             reviewer_id=current_user.id,
             comment=body.comment,
@@ -592,6 +652,7 @@ async def review_appeal(
 # ═══════════════════════════════════════════════════════════════
 # 格式化辅助
 # ═══════════════════════════════════════════════════════════════
+
 
 def _resolve_reviewer_role(user: User) -> str:
     """
@@ -617,14 +678,21 @@ def _format(s) -> dict:
     try:
         student_name = s.student.name if s.student else None
         student_no = s.student.student_no if s.student else None
-        class_name = (s.class_.name if s.class_ else
-                      s.student.class_.name if s.student and getattr(s.student, 'class_', None) else None)
+        class_name = (
+            s.class_.name
+            if s.class_
+            else s.student.class_.name
+            if s.student and getattr(s.student, "class_", None)
+            else None
+        )
         grade_name = s.grade.name if s.grade else None
         creator_name = s.creator.display_name if s.creator else None
         approver_name = s.approver.display_name if s.approver else None
         grade_leader_name = s.grade_leader.display_name if s.grade_leader else None
     except Exception:
-        student_name = student_no = class_name = grade_name = creator_name = approver_name = grade_leader_name = None
+        student_name = student_no = class_name = grade_name = creator_name = approver_name = (
+            grade_leader_name
+        ) = None
 
     # 等级标签
     try:
@@ -657,9 +725,9 @@ def _format(s) -> dict:
         "grade_id": s.grade_id,
         "grade_name": grade_name,
         "behavior_record_id": s.behavior_record_id,
-        "level": s.level.value if hasattr(s.level, 'value') else str(s.level),
+        "level": s.level.value if hasattr(s.level, "value") else str(s.level),
         "level_label": level_label,
-        "status": s.status.value if hasattr(s.status, 'value') else str(s.status),
+        "status": s.status.value if hasattr(s.status, "value") else str(s.status),
         "status_label": status_label,
         "reason": s.reason,
         "document_no": s.document_no,
@@ -673,7 +741,9 @@ def _format(s) -> dict:
         "grade_leader_id": s.grade_leader_id,
         "grade_leader_name": grade_leader_name,
         "grade_leader_comment": s.grade_leader_comment,
-        "grade_leader_reviewed_at": s.grade_leader_reviewed_at.isoformat() if s.grade_leader_reviewed_at else None,
+        "grade_leader_reviewed_at": s.grade_leader_reviewed_at.isoformat()
+        if s.grade_leader_reviewed_at
+        else None,
         "approver_comment": s.approver_comment,
         "penalty_points": penalty,
         "is_veto": is_veto,
@@ -686,19 +756,25 @@ def _format(s) -> dict:
 
 def _format_appeal(a) -> dict:
     """安全格式化申诉记录 → JSON"""
-    from .models import SanctionAppeal, APPEAL_STATUS_LABELS, LEVEL_LABELS as LL
+    from .models import LEVEL_LABELS as LL
 
     # 安全获取关联处分信息
-    sanction = a.sanction if hasattr(a, 'sanction') and a.sanction else None
+    sanction = a.sanction if hasattr(a, "sanction") and a.sanction else None
     try:
-        sanction_level = sanction.level.value if sanction and hasattr(sanction.level, 'value') else None
+        sanction_level = (
+            sanction.level.value if sanction and hasattr(sanction.level, "value") else None
+        )
         sanction_level_label = LL.get(sanction.level) if sanction else None
         sanction_reason = sanction.reason if sanction else None
-        sanction_status = sanction.status.value if sanction and hasattr(sanction.status, 'value') else None
+        sanction_status = (
+            sanction.status.value if sanction and hasattr(sanction.status, "value") else None
+        )
         student_id = sanction.student_id if sanction else None
         student_name = sanction.student.name if sanction and sanction.student else None
     except Exception:
-        sanction_level = sanction_level_label = sanction_reason = sanction_status = student_id = student_name = None
+        sanction_level = sanction_level_label = sanction_reason = sanction_status = student_id = (
+            student_name
+        ) = None
 
     # 状态标签
     try:
@@ -707,7 +783,7 @@ def _format_appeal(a) -> dict:
         status_label = str(a.status)
 
     # 复核人
-    reviewer_name = a.reviewer.display_name if hasattr(a, 'reviewer') and a.reviewer else None
+    reviewer_name = a.reviewer.display_name if hasattr(a, "reviewer") and a.reviewer else None
 
     return {
         "id": a.id,
@@ -723,7 +799,7 @@ def _format_appeal(a) -> dict:
         "applicant_phone": a.applicant_phone,
         "reason": a.reason,
         "idempotency_key": a.idempotency_key,
-        "status": a.status.value if hasattr(a.status, 'value') else str(a.status),
+        "status": a.status.value if hasattr(a.status, "value") else str(a.status),
         "status_label": status_label,
         "reviewer_id": a.reviewer_id,
         "reviewer_name": reviewer_name,

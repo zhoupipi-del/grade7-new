@@ -10,12 +10,20 @@ psych_profiles/models.py — 学生心理档案 + 筛查快照
     联表: risk_warnings (RDI四维) + student_risk_alerts (Z-Score学业) + psy_profiles (心理)
 """
 
-from sqlalchemy import (
-    Column, BigInteger, String, Integer, Float, Boolean, DateTime, Text, JSON,
-    UniqueConstraint, Index,
-)
-
 from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 
 # ──────────────────────────────────────────────
@@ -31,11 +39,13 @@ class PsyProfile(Base, SchoolMixin):
 
     # ── 动态风险等级 ──
     risk_level = Column(
-        String(10), default="green",
+        String(10),
+        default="green",
         comment="综合风险等级: green(正常)/yellow(关注)/orange(预警)/red(危机)",
     )
     risk_level_source = Column(
-        String(20), default="manual",
+        String(20),
+        default="manual",
         comment="风险等级来源: manual(手动设定)/auto(自动计算)/screening(筛查驱动)/nexus(双轨合成)",
     )
     risk_level_updated_at = Column(DateTime, comment="风险等级最后更新时间")
@@ -46,17 +56,23 @@ class PsyProfile(Base, SchoolMixin):
 
     # ── 家校沟通 ──
     guardian_contact_status = Column(
-        String(20), default="normal",
+        String(20),
+        default="normal",
         comment="家校沟通状态: normal(正常)/sensitive(敏感)/restricted(受限)/blocked(阻断)",
     )
     guardian_contact_note = Column(String(200), comment="家校沟通备注(明文)")
 
     # ── 聚合统计 (定期从子表聚合, 非实时) ──
-    total_counseling_count = Column(Integer, default=0, comment="累计咨询次数 (从 psy_consult_records 聚合)")
+    total_counseling_count = Column(
+        Integer, default=0, comment="累计咨询次数 (从 psy_consult_records 聚合)"
+    )
     total_screening_count = Column(Integer, default=0, comment="累计筛查次数")
-    total_intervention_count = Column(Integer, default=0, comment="累计干预次数 (从 intervention_records 聚合)")
+    total_intervention_count = Column(
+        Integer, default=0, comment="累计干预次数 (从 intervention_records 聚合)"
+    )
     highest_risk_level = Column(
-        String(10), default="green",
+        String(10),
+        default="green",
         comment="历史最高风险等级: green/yellow/orange/red",
     )
 
@@ -99,7 +115,8 @@ class PsyScreeningRecord(Base, SchoolMixin):
 
     # ── 量表信息 ──
     scale_name = Column(
-        String(100), nullable=False,
+        String(100),
+        nullable=False,
         comment="量表名称: MSSMHS-55 / SCL-90 / MHT / SDS / SAS / PCE-55",
     )
     scale_version = Column(String(20), comment="量表版本")
@@ -110,11 +127,13 @@ class PsyScreeningRecord(Base, SchoolMixin):
 
     # ── 风险因子 ──
     risk_factors = Column(
-        JSON, default=list,
+        JSON,
+        default=list,
         comment='高风险因子列表: ["depression:4.2", "anxiety:3.8"]',
     )
     risk_level = Column(
-        String(10), default="green",
+        String(10),
+        default="green",
         comment="本次筛查风险等级: green/yellow/orange/red",
     )
 
@@ -124,7 +143,8 @@ class PsyScreeningRecord(Base, SchoolMixin):
 
     # ── 来源 ──
     source = Column(
-        String(20), default="self_report",
+        String(20),
+        default="self_report",
         comment="来源: self_report(自填)/teacher_referral(教师转介)/routine(常规筛查)/external(外部导入)/synced(从mental_health_assessments同步)",
     )
     operator_id = Column(BigInteger, comment="操作人 user_id")

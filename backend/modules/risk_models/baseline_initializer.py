@@ -13,34 +13,43 @@ risk_baseline_initializer.py — 风险基线冷启动预热脚本
 
 import asyncio
 import logging
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Tuple
-import pymysql
-import os
-from pathlib import Path
+from datetime import date, timedelta
 
-# 数据库配置 (从 backend/.env 读取)
+import pymysql
+from core.db_utils import require_db_url
+
+# 数据库配置 (从 DATABASE_URL 环境变量安全解析)
+_DB_URL = require_db_url()
+# mysql+aiomysql://user:password@host:port/db
+# 解析出 host/port/user/password/database
+_parts = _DB_URL.replace("mysql+aiomysql://", "").replace("mysql+pymysql://", "")
+_creds_host, _db = _parts.split("/", 1) if "/" in _parts else (_parts, "wings3")
+_creds, _host_port = (
+    _creds_host.rsplit("@", 1) if "@" in _creds_host else (_creds_host, "127.0.0.1:3307")
+)
+_user, _password = _creds.split(":", 1) if ":" in _creds else ("grade7", "")
+_host, _port = _host_port.split(":", 1) if ":" in _host_port else (_host_port, "3307")
+
 DB_CONFIG = {
-    "host": "127.0.0.1",
-    "port": 3307,
-    "user": "grade7",
-    "password": "waOPKoyFf4ByQD1h",
-    "database": "wings3",
-    "charset": "utf8mb4"
+    "host": _host,
+    "port": int(_port),
+    "user": _user,
+    "password": _password,
+    "database": _db.split("?")[0],
+    "charset": "utf8mb4",
 }
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
-async def get_students(db_config: dict, school_id: int) -> List[dict]:
+async def get_students(db_config: dict, school_id: int) -> list[dict]:
     """获取学校所有学生"""
     conn = pymysql.connect(**db_config)
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT id, class_id, grade_id FROM students WHERE school_id=%s",
-                (school_id,)
+                "SELECT id, class_id, grade_id FROM students WHERE school_id=%s", (school_id,)
             )
             return cursor.fetchall()
     finally:
@@ -49,7 +58,7 @@ async def get_students(db_config: dict, school_id: int) -> List[dict]:
 
 async def calculate_behavior_baseline(
     db_config: dict, student_id: int, window_days: int
-) -> Tuple[float, float, int]:
+) -> tuple[float, float, int]:
     """
     计算行为维度基线 (从 discipline_records 表)
 
@@ -67,7 +76,7 @@ async def calculate_behavior_baseline(
                 WHERE student_id = %s
                   AND created_at >= %s
                 """,
-                (student_id, start_date)
+                (student_id, start_date),
             )
             result = cursor.fetchone()
             count = result[0] if result else 0
@@ -84,7 +93,7 @@ async def calculate_behavior_baseline(
 
 async def calculate_attendance_baseline(
     db_config: dict, student_id: int, window_days: int
-) -> Tuple[float, float, int]:
+) -> tuple[float, float, int]:
     """计算考勤维度基线 (从 attendance 表)"""
     conn = pymysql.connect(**db_config)
     try:
@@ -100,7 +109,7 @@ async def calculate_attendance_baseline(
                 WHERE student_id = %s
                   AND date >= %s
                 """,
-                (student_id, start_date)
+                (student_id, start_date),
             )
             result = cursor.fetchone()
             if result and result[2] > 0:
@@ -115,7 +124,7 @@ async def calculate_attendance_baseline(
 
 async def calculate_score_baseline(
     db_config: dict, student_id: int, window_days: int
-) -> Tuple[float, float, int]:
+) -> tuple[float, float, int]:
     """计算评价维度基线 (从 wings_scores 表)"""
     conn = pymysql.connect(**db_config)
     try:
@@ -130,7 +139,7 @@ async def calculate_score_baseline(
                 WHERE student_id = %s
                   AND created_at >= %s
                 """,
-                (student_id, start_date)
+                (student_id, start_date),
             )
             result = cursor.fetchone()
             if result and result[0] is not None:
@@ -149,7 +158,7 @@ async def upsert_baseline(
     window_days: int,
     mean: float,
     std: float,
-    sample_size: int
+    sample_size: int,
 ):
     """插入或更新基线记录"""
     conn = pymysql.connect(**db_config)
@@ -162,7 +171,7 @@ async def upsert_baseline(
                 WHERE school_id=%s AND student_id=%s
                   AND baseline_type=%s AND window_days=%s
                 """,
-                (school_id, student_id, baseline_type, window_days)
+                (school_id, student_id, baseline_type, window_days),
             )
             existing = cursor.fetchone()
 
@@ -174,7 +183,7 @@ async def upsert_baseline(
                     SET mean_value=%s, std_value=%s, sample_size=%s, last_updated=NOW()
                     WHERE id=%s
                     """,
-                    (mean, std, sample_size, existing[0])
+                    (mean, std, sample_size, existing[0]),
                 )
             else:
                 # 插入
@@ -185,8 +194,16 @@ async def upsert_baseline(
                      mean_value, std_value, sample_size, last_updated)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     """,
-                    (school_id, student_id, class_id, baseline_type, window_days,
-                     mean, std, sample_size)
+                    (
+                        school_id,
+                        student_id,
+                        class_id,
+                        baseline_type,
+                        window_days,
+                        mean,
+                        std,
+                        sample_size,
+                    ),
                 )
             conn.commit()
     except Exception as e:
@@ -221,8 +238,15 @@ async def initialize_baselines(school_id: int = 1, window_days: int = 30):
             DB_CONFIG, student_id, window_days
         )
         await upsert_baseline(
-            DB_CONFIG, school_id, student_id, class_id,
-            "behavior", window_days, mean_b, std_b, size_b
+            DB_CONFIG,
+            school_id,
+            student_id,
+            class_id,
+            "behavior",
+            window_days,
+            mean_b,
+            std_b,
+            size_b,
         )
 
         # 考勤基线
@@ -230,17 +254,21 @@ async def initialize_baselines(school_id: int = 1, window_days: int = 30):
             DB_CONFIG, student_id, window_days
         )
         await upsert_baseline(
-            DB_CONFIG, school_id, student_id, class_id,
-            "attendance", window_days, mean_a, std_a, size_a
+            DB_CONFIG,
+            school_id,
+            student_id,
+            class_id,
+            "attendance",
+            window_days,
+            mean_a,
+            std_a,
+            size_a,
         )
 
         # 评价基线
-        mean_s, std_s, size_s = await calculate_score_baseline(
-            DB_CONFIG, student_id, window_days
-        )
+        mean_s, std_s, size_s = await calculate_score_baseline(DB_CONFIG, student_id, window_days)
         await upsert_baseline(
-            DB_CONFIG, school_id, student_id, class_id,
-            "score", window_days, mean_s, std_s, size_s
+            DB_CONFIG, school_id, student_id, class_id, "score", window_days, mean_s, std_s, size_s
         )
 
         if i % 10 == 0:
@@ -252,6 +280,7 @@ async def initialize_baselines(school_id: int = 1, window_days: int = 30):
 async def main():
     """主函数"""
     import argparse
+
     parser = argparse.ArgumentParser(description="风险基线冷启动预热脚本")
     parser.add_argument("--school-id", type=int, default=1, help="学校 ID")
     parser.add_argument("--window", type=int, default=30, help="基线窗口天数")

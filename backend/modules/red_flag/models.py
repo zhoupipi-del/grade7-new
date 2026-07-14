@@ -12,16 +12,25 @@ modules/red_flag/models.py — 流动红旗数据模型
 """
 
 import json
-from datetime import date, datetime
 
-from sqlalchemy import (
-    BigInteger, Boolean, Column, Date, DateTime, Float, Integer, String, Text, UniqueConstraint,
-)
 from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 
 class RoutineScore(SchoolMixin, Base):
     """日常常规评分 — 班主任/年级组/德育处按类别打分"""
+
     __tablename__ = "routine_scores"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -32,26 +41,35 @@ class RoutineScore(SchoolMixin, Base):
     note = Column(Text, nullable=True)
     inspector = Column(String(64), nullable=True, comment="检查人")
     scorer_type = Column(
-        String(20), nullable=False, index=True,
-        comment="评分人类型: class_teacher/grade_leader/ms_admin"
+        String(20),
+        nullable=False,
+        index=True,
+        comment="评分人类型: class_teacher/grade_leader/ms_admin",
     )
     record_date = Column(Date, index=True, nullable=False)
     created_at = Column(DateTime, default=get_local_now)
 
     __table_args__ = (
-        UniqueConstraint("class_id", "category", "record_date", "scorer_type",
-                         name="uq_routine_class_cat_date_scorer"),
+        UniqueConstraint(
+            "class_id",
+            "category",
+            "record_date",
+            "scorer_type",
+            name="uq_routine_class_cat_date_scorer",
+        ),
         {"comment": "常规评分原始数据"},
     )
 
 
 class FlagEvaluation(SchoolMixin, Base):
     """流动红旗评价汇总 — 三维度加权 + 违纪/考勤扣分"""
+
     __tablename__ = "flag_evaluations"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    period_type = Column(String(10), nullable=False, index=True,
-                         comment="评价周期: week/month/term")
+    period_type = Column(
+        String(10), nullable=False, index=True, comment="评价周期: week/month/term"
+    )
     period_label = Column(String(60), nullable=False, comment="周期标签: 第12周/2026年3月")
     grade_id = Column(BigInteger, nullable=False, index=True)
     class_id = Column(BigInteger, nullable=False, index=True)
@@ -81,20 +99,28 @@ class FlagEvaluation(SchoolMixin, Base):
     final_score = Column(Float, nullable=False, default=0.0)
     rank = Column(Integer, nullable=True, comment="年级内排名（发布时计算）")
 
-    status = Column(String(10), nullable=False, default="draft", index=True,
-                    comment="draft/published")
+    status = Column(
+        String(10), nullable=False, default="draft", index=True, comment="draft/published"
+    )
     created_at = Column(DateTime, default=get_local_now)
     published_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("period_type", "period_label", "grade_id", "class_id", "school_id",
-                         name="uq_flag_eval_period_class"),
+        UniqueConstraint(
+            "period_type",
+            "period_label",
+            "grade_id",
+            "class_id",
+            "school_id",
+            name="uq_flag_eval_period_class",
+        ),
         {"comment": "流动红旗评价汇总"},
     )
 
 
 class FlagArchiveReport(SchoolMixin, Base):
     """流动红旗归档快照 — 不可变历史记录"""
+
     __tablename__ = "flag_archive_reports"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -126,7 +152,8 @@ class FlagArchiveReport(SchoolMixin, Base):
         self.snapshot_data_json = json.dumps(value, ensure_ascii=False, default=str)
 
     __table_args__ = (
-        UniqueConstraint("period_type", "period_label", "class_id",
-                         name="uq_flag_archive_period_class"),
+        UniqueConstraint(
+            "period_type", "period_label", "class_id", name="uq_flag_archive_period_class"
+        ),
         {"comment": "流动红旗归档快照（不可变）"},
     )

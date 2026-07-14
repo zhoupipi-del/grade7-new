@@ -8,15 +8,19 @@ module_loader.py — Wings 3.0 模块动态加载引擎
 4. 熔断降级：依赖缺失 → 跳过 + 告警，绝不引发全盘崩溃
 """
 
-import os
-import sys
 import importlib
 import importlib.util
-from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any, Set
-from collections import defaultdict, deque
-from dataclasses import dataclass, field
 import logging
+import os
+import re
+import sys
+from collections import deque
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+# 模块代码安全白名单: 小写字母开头, 仅允许小写字母/数字/下划线
+_VALID_MODULE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 logger = logging.getLogger("module_loader")
 
@@ -25,22 +29,29 @@ logger = logging.getLogger("module_loader")
 # 数据结构
 # ═══════════════════════════════════════════════════════════════
 
+
 @dataclass
 class ModuleManifest:
     """模块元信息声明"""
-    code: str              # 模块代码，如 "attendance"
-    name: str              # 显示名称，如 "考勤管理"
-    category: str          # 分类：behavior / academic / mental / admin
-    dependencies: List[str] = field(default_factory=list)  # 前置依赖模块代码
-    path: str = ""         # 物理路径
-    enabled_by_default: bool = False  # 新学校是否默认启用
-    phases: List[str] = field(default_factory=list)  # 适用学段白名单, 空列表=全学段开放
 
-    def validate(self) -> List[str]:
+    code: str  # 模块代码，如 "attendance"
+    name: str  # 显示名称，如 "考勤管理"
+    category: str  # 分类：behavior / academic / mental / admin
+    dependencies: list[str] = field(default_factory=list)  # 前置依赖模块代码
+    path: str = ""  # 物理路径
+    enabled_by_default: bool = False  # 新学校是否默认启用
+    phases: list[str] = field(default_factory=list)  # 适用学段白名单, 空列表=全学段开放
+
+    def validate(self) -> list[str]:
         """自检 manifest 合法性，返回错误列表"""
         errors = []
         if not self.code or not self.code.strip():
             errors.append(f"[{self.path}] MODULE_CODE 不能为空")
+        elif not _VALID_MODULE_CODE_RE.match(self.code):
+            errors.append(
+                f"[{self.path}] MODULE_CODE='{self.code}' 格式非法, "
+                f"仅允许小写字母开头+小写字母/数字/下划线 (如 'attendance', 'psych_profiles')"
+            )
         if not self.name:
             errors.append(f"[{self.path}] MODULE_NAME 不能为空")
         return errors
@@ -49,30 +60,47 @@ class ModuleManifest:
 @dataclass
 class LoadResult:
     """模块加载结果"""
+
     module: ModuleManifest
     success: bool
-    error: Optional[str] = None
+    error: str | None = None
     dep_skipped: bool = False  # 因依赖缺失被熔断
-    dep_missing: List[str] = field(default_factory=list)
-    config_level: Optional[str] = None   # "school" / "branch" / "org" / "default" / None
-    config_enabled: Optional[bool] = None  # 级联配置是否启用
+    dep_missing: list[str] = field(default_factory=list)
+    config_level: str | None = None  # "school" / "branch" / "org" / "default" / None
+    config_enabled: bool | None = None  # 级联配置是否启用
 
 
 # ═══════════════════════════════════════════════════════════════
 # 扫描器
 # ═══════════════════════════════════════════════════════════════
 
+
 class ModuleScanner:
     """扫描 modules/ 目录，读取所有 manifest.py"""
 
     def __init__(self, modules_root: str):
-        self.modules_root = Path(modules_root)
+        self.modules_root = Path(modules_root).resolve()
         if not self.modules_root.is_dir():
             raise FileNotFoundError(f"模块目录不存在: {modules_root}")
 
-    def scan(self) -> Dict[str, ModuleManifest]:
+    def _validate_module_path(self, path: Path) -> None:
+        """
+        路径遍历防护：确保目标路径解析后在 modules_root 内部。
+        防止通过符号链接或 ../ 逃逸到模块目录之外。
+        """
+        resolved = path.resolve()
+        if (
+            not str(resolved).startswith(str(self.modules_root) + os.sep)
+            and resolved != self.modules_root
+        ):
+            raise ValueError(
+                f"安全拦截: 模块路径 '{path}' 解析后 '{resolved}' "
+                f"不在模块根目录 '{self.modules_root}' 内"
+            )
+
+    def scan(self) -> dict[str, ModuleManifest]:
         """扫描并返回 {module_code: ModuleManifest}"""
-        manifests: Dict[str, ModuleManifest] = {}
+        manifests: dict[str, ModuleManifest] = {}
 
         for entry in sorted(self.modules_root.iterdir()):
             if not entry.is_dir():
@@ -99,9 +127,11 @@ class ModuleScanner:
 
     def _load_manifest(self, manifest_path: Path, module_dir: str) -> ModuleManifest:
         """从 manifest.py 动态加载模块声明"""
+        # 路径遍历防护：manifest 文件必须在 modules_root 内部
+        self._validate_module_path(manifest_path)
+
         spec = importlib.util.spec_from_file_location(
-            f"_wings_module_{manifest_path.parent.name}",
-            manifest_path
+            f"_wings_module_{manifest_path.parent.name}", manifest_path
         )
         if spec is None or spec.loader is None:
             raise ImportError(f"无法解析: {manifest_path}")
@@ -138,6 +168,7 @@ class ModuleScanner:
 # DAG 拓扑排序器
 # ═══════════════════════════════════════════════════════════════
 
+
 class TopologicalSorter:
     """
     基于 Kahn 算法的 DAG 拓扑排序。
@@ -147,16 +178,16 @@ class TopologicalSorter:
     """
 
     @staticmethod
-    def sort(manifests: Dict[str, ModuleManifest]) -> Tuple[List[str], Set[str]]:
+    def sort(manifests: dict[str, ModuleManifest]) -> tuple[list[str], set[str]]:
         """
         返回 (sorted_codes, missing_deps)
         - sorted_codes: 拓扑排序后的模块代码列表
         - missing_deps: 声明了但系统中不存在的依赖
         """
         # 构建邻接表和入度
-        in_degree: Dict[str, int] = {code: 0 for code in manifests}
-        adjacency: Dict[str, List[str]] = {code: [] for code in manifests}
-        missing: Set[str] = set()
+        in_degree: dict[str, int] = dict.fromkeys(manifests, 0)
+        adjacency: dict[str, list[str]] = {code: [] for code in manifests}
+        missing: set[str] = set()
 
         for code, manifest in manifests.items():
             for dep in manifest.dependencies:
@@ -169,7 +200,7 @@ class TopologicalSorter:
 
         # Kahn 算法
         queue = deque([code for code, deg in in_degree.items() if deg == 0])
-        sorted_codes: List[str] = []
+        sorted_codes: list[str] = []
 
         while queue:
             current = queue.popleft()
@@ -193,6 +224,7 @@ class TopologicalSorter:
 # 主加载器
 # ═══════════════════════════════════════════════════════════════
 
+
 class ModuleLoader:
     """
     Wings 3.0 模块动态加载引擎。
@@ -214,20 +246,20 @@ class ModuleLoader:
         self.scanner = ModuleScanner(modules_root)
         self.sorter = TopologicalSorter()
 
-        self.manifests: Dict[str, ModuleManifest] = {}
-        self.sorted_codes: List[str] = []
-        self.missing_deps: Set[str] = set()
+        self.manifests: dict[str, ModuleManifest] = {}
+        self.sorted_codes: list[str] = []
+        self.missing_deps: set[str] = set()
 
         # 加载结果
-        self.results: List[LoadResult] = []
+        self.results: list[LoadResult] = []
         # 已注册的路由: {module_code: (APIRouter, prefix)}
-        self.registered_routers: Dict[str, Any] = {}
+        self.registered_routers: dict[str, Any] = {}
         # 级联配置矩阵: {module_code: {school_id: (source_level, is_enabled)}}
-        self.config_matrix: Dict[str, Dict[int, tuple]] = {}
+        self.config_matrix: dict[str, dict[int, tuple]] = {}
 
     # ── 阶段 1: 发现 ──
 
-    def discover(self) -> Dict[str, ModuleManifest]:
+    def discover(self) -> dict[str, ModuleManifest]:
         """扫描 modules/ 目录，返回所有发现的模块清单"""
         self.manifests = self.scanner.scan()
         logger.info(f"模块扫描完成: 发现 {len(self.manifests)} 个候选模块")
@@ -235,7 +267,7 @@ class ModuleLoader:
 
     # ── 阶段 2: 排序 ──
 
-    def sort(self) -> Tuple[List[str], Set[str]]:
+    def sort(self) -> tuple[list[str], set[str]]:
         """拓扑排序，返回 (有序模块列表, 缺失依赖集合)"""
         self.sorted_codes, self.missing_deps = self.sorter.sort(self.manifests)
 
@@ -244,7 +276,8 @@ class ModuleLoader:
 
         logger.info(
             f"拓扑排序完成: {' → '.join(self.sorted_codes)}"
-            if self.sorted_codes else "无模块可加载"
+            if self.sorted_codes
+            else "无模块可加载"
         )
         return self.sorted_codes, self.missing_deps
 
@@ -255,10 +288,10 @@ class ModuleLoader:
         school_id: int,
         db_session,
         fastapi_app,
-        enabled_module_codes: Optional[set] = None,
+        enabled_module_codes: set | None = None,
         resolve_configs: bool = False,
-        config_school_ids: Optional[List[int]] = None,
-    ) -> List[LoadResult]:
+        config_school_ids: list[int] | None = None,
+    ) -> list[LoadResult]:
         """
         为指定学校加载已启用的模块路由。
 
@@ -279,6 +312,7 @@ class ModuleLoader:
         if enabled_module_codes is None:
             from core.models import SchoolModule
             from sqlalchemy import select
+
             result = await db_session.execute(
                 select(SchoolModule.module_code).where(
                     SchoolModule.school_id == school_id,
@@ -289,7 +323,8 @@ class ModuleLoader:
 
         logger.info(
             f"学校 [{school_id}] 启用模块: {enabled_module_codes}"
-            if enabled_module_codes else f"学校 [{school_id}] 无启用模块"
+            if enabled_module_codes
+            else f"学校 [{school_id}] 无启用模块"
         )
 
         core_loaded = False
@@ -301,31 +336,33 @@ class ModuleLoader:
 
             # 检查是否启用
             if code not in enabled_module_codes:
-                self.results.append(LoadResult(
-                    module=manifest,
-                    success=False,
-                    error=f"学校 [{school_id}] 未启用此模块",
-                ))
+                self.results.append(
+                    LoadResult(
+                        module=manifest,
+                        success=False,
+                        error=f"学校 [{school_id}] 未启用此模块",
+                    )
+                )
                 logger.debug(f"[{code}] 跳过: 学校 [{school_id}] 未启用")
                 continue
 
             # 熔断检查: 依赖缺失
             missing_for_this = [d for d in manifest.dependencies if d in self.missing_deps]
             if missing_for_this:
-                self.results.append(LoadResult(
-                    module=manifest,
-                    success=False,
-                    dep_skipped=True,
-                    dep_missing=missing_for_this,
-                    error=f"依赖缺失: {missing_for_this}",
-                ))
+                self.results.append(
+                    LoadResult(
+                        module=manifest,
+                        success=False,
+                        dep_skipped=True,
+                        dep_missing=missing_for_this,
+                        error=f"依赖缺失: {missing_for_this}",
+                    )
+                )
                 logger.warning(f"[{code}] 熔断: 依赖缺失 {missing_for_this}")
                 continue
 
             # 加载模块
-            result = await self._load_single_module(
-                manifest, fastapi_app, school_id, db_session
-            )
+            result = await self._load_single_module(manifest, fastapi_app, school_id, db_session)
             self.results.append(result)
 
             if result.success:
@@ -353,10 +390,13 @@ class ModuleLoader:
     ) -> LoadResult:
         """加载单个模块：执行 manifest.register() → 注册路由"""
         try:
+            # 路径遍历防护：二次验证 manifest.path 未逃逸
+            manifest_file = Path(manifest.path) / "manifest.py"
+            self.scanner._validate_module_path(manifest_file)
+
             # 动态导入模块的 manifest
             spec = importlib.util.spec_from_file_location(
-                f"_wings_runtime_{manifest.code}",
-                os.path.join(manifest.path, "manifest.py")
+                f"_wings_runtime_{manifest.code}", str(manifest_file)
             )
             if spec is None or spec.loader is None:
                 return LoadResult(module=manifest, success=False, error="无法解析 manifest")
@@ -368,7 +408,9 @@ class ModuleLoader:
             # 调用 register() 获取路由
             register_fn = getattr(mod, "register", None)
             if register_fn is None:
-                return LoadResult(module=manifest, success=False, error="manifest 缺少 register() 函数")
+                return LoadResult(
+                    module=manifest, success=False, error="manifest 缺少 register() 函数"
+                )
 
             router_prefix = f"/api/v1/{manifest.code}"
             result = register_fn(router_prefix=router_prefix)
@@ -387,11 +429,10 @@ class ModuleLoader:
             if manifest.phases:
                 from core.routers import require_school_phase
                 from fastapi import Depends as FastAPIDepends
+
                 phase_guard = require_school_phase(manifest.phases)
                 deps = [FastAPIDepends(phase_guard)]
-                logger.info(
-                    f"[{manifest.code}] 🔒 学段隔离已激活: {manifest.phases}"
-                )
+                logger.info(f"[{manifest.code}] 🔒 学段隔离已激活: {manifest.phases}")
 
             fastapi_app.include_router(router, prefix=prefix, dependencies=deps)
 
@@ -409,7 +450,7 @@ class ModuleLoader:
     async def _resolve_cascading_configs(
         self,
         db_session,
-        school_ids: Optional[List[int]] = None,
+        school_ids: list[int] | None = None,
     ) -> None:
         """
         为所有已加载模块解析级联配置，输出 School→Branch→Org→Default 查找链日志。
@@ -418,8 +459,8 @@ class ModuleLoader:
             db_session: 异步数据库会话
             school_ids: 目标学校 ID 列表（None=所有活跃学校）
         """
-        from core.tenant_context import get_effective_config_with_source
         from core.models import School
+        from core.tenant_context import get_effective_config_with_source
         from sqlalchemy import select
 
         # 获取学校列表
@@ -437,7 +478,9 @@ class ModuleLoader:
         school_map = {sid: sname for sid, sname in schools}
         self.config_matrix = {}
 
-        logger.info(f"级联配置解析开始: {len(schools)} 所学校 × {len(self.registered_routers)} 个已加载模块")
+        logger.info(
+            f"级联配置解析开始: {len(schools)} 所学校 × {len(self.registered_routers)} 个已加载模块"
+        )
 
         for code in self.sorted_codes:
             if code not in self.registered_routers:
@@ -447,9 +490,7 @@ class ModuleLoader:
             parts = []
 
             for sid, _ in schools:
-                config, source = await get_effective_config_with_source(
-                    code, sid, db_session
-                )
+                config, source = await get_effective_config_with_source(code, sid, db_session)
                 is_on = config.get("enabled", False)
                 self.config_matrix[code][sid] = (source, is_on)
 
@@ -466,7 +507,7 @@ class ModuleLoader:
 
         logger.info("级联配置解析完成")
 
-    def get_config_matrix(self) -> Dict[str, Dict[int, tuple]]:
+    def get_config_matrix(self) -> dict[str, dict[int, tuple]]:
         """
         返回级联配置矩阵: {module_code: {school_id: (source_level, is_enabled)}}
 

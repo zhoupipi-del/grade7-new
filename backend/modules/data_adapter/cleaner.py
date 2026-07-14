@@ -14,22 +14,24 @@ Wings Data Adapter - Excel 数据清洗过滤阀
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
 from enum import Enum
+from typing import Any
 
 
 class ErrorType(str, Enum):
     """坏账错误类型"""
-    TYPE_MISMATCH = "type_mismatch"           # 类型不匹配
-    PARSE_FAILED = "parse_failed"             # 解析失败
-    MISSING_REQUIRED = "missing_required"     # 必填字段缺失
-    INVALID_FORMAT = "invalid_format"         # 格式无效
-    ABSENT_MARKER = "absent_marker"           # 缺考标记 (非错误, 跳过)
+
+    TYPE_MISMATCH = "type_mismatch"  # 类型不匹配
+    PARSE_FAILED = "parse_failed"  # 解析失败
+    MISSING_REQUIRED = "missing_required"  # 必填字段缺失
+    INVALID_FORMAT = "invalid_format"  # 格式无效
+    ABSENT_MARKER = "absent_marker"  # 缺考标记 (非错误, 跳过)
 
 
 @dataclass
 class CleanError:
     """单条坏账记录"""
+
     row: int
     column: str
     raw_value: str
@@ -40,10 +42,11 @@ class CleanError:
 @dataclass
 class CleanResult:
     """清洗结果"""
+
     total_rows: int = 0
     success_rows: int = 0
     failed_rows: int = 0
-    skipped_rows: int = 0       # 缺考跳过 (非错误)
+    skipped_rows: int = 0  # 缺考跳过 (非错误)
     errors: list = field(default_factory=list)
     cleaned_data: list = field(default_factory=list)
 
@@ -58,16 +61,12 @@ SUBJECT_ALIASES = {
     "思想政治": "道德与法治",
     "思品": "道德与法治",
     "品德": "道德与法治",
-
     # 生物
     "生物": "生物",
-
     # 历史
     "历史": "历史",
-
     # 地理
     "地理": "地理",
-
     # 语文/数学/英语 (基本不混, 但兜底)
     "语文": "语文",
     "中文": "语文",
@@ -75,7 +74,6 @@ SUBJECT_ALIASES = {
     "英语": "英语",
     "外语": "英语",
     "英文": "英语",
-
     # 高中段可能出现的学科
     "物理": "物理",
     "化学": "化学",
@@ -94,9 +92,9 @@ for alias, standard in SUBJECT_ALIASES.items():
 ABSENT_PATTERNS = [
     re.compile(r"缺考", re.IGNORECASE),
     re.compile(r"免考", re.IGNORECASE),
-    re.compile(r"^\s*W\s*$", re.IGNORECASE),      # "W" / "w"
-    re.compile(r"^\s*F\s*$", re.IGNORECASE),      # "F" (false)
-    re.compile(r"^\s*-+\s*$"),                      # "---"
+    re.compile(r"^\s*W\s*$", re.IGNORECASE),  # "W" / "w"
+    re.compile(r"^\s*F\s*$", re.IGNORECASE),  # "F" (false)
+    re.compile(r"^\s*-+\s*$"),  # "---"
     re.compile(r"^\s*NULL\s*$", re.IGNORECASE),
     re.compile(r"^\s*空\s*$"),
 ]
@@ -116,6 +114,7 @@ def is_absent_marker(value: Any) -> bool:
 # ============================================================
 # 清洗函数
 # ============================================================
+
 
 def clean_class_name(value: Any) -> str:
     """
@@ -152,7 +151,7 @@ def clean_subject_name(value: Any) -> str:
     return SUBJECT_ALIASES.get(s, s)
 
 
-def clean_score(value: Any, row: int, col: str, result: CleanResult) -> Optional[float]:
+def clean_score(value: Any, row: int, col: str, result: CleanResult) -> float | None:
     """
     P1-1: 成绩值清洗
     - 缺考标记 → None + skipped_rows++
@@ -161,11 +160,15 @@ def clean_score(value: Any, row: int, col: str, result: CleanResult) -> Optional
     - 异常 → error log
     """
     if value is None or (isinstance(value, str) and value.strip() == ""):
-        result.errors.append(CleanError(
-            row=row, column=col, raw_value=str(value),
-            error_type=ErrorType.MISSING_REQUIRED,
-            message="成绩为空"
-        ))
+        result.errors.append(
+            CleanError(
+                row=row,
+                column=col,
+                raw_value=str(value),
+                error_type=ErrorType.MISSING_REQUIRED,
+                message="成绩为空",
+            )
+        )
         result.failed_rows += 1
         return None
 
@@ -181,11 +184,15 @@ def clean_score(value: Any, row: int, col: str, result: CleanResult) -> Optional
         s = str(value).strip().replace(" ", "")
         return float(s)
     except (ValueError, TypeError):
-        result.errors.append(CleanError(
-            row=row, column=col, raw_value=str(value),
-            error_type=ErrorType.PARSE_FAILED,
-            message=f"无法解析为数值: {value}"
-        ))
+        result.errors.append(
+            CleanError(
+                row=row,
+                column=col,
+                raw_value=str(value),
+                error_type=ErrorType.PARSE_FAILED,
+                message=f"无法解析为数值: {value}",
+            )
+        )
         result.failed_rows += 1
         return None
 
@@ -292,22 +299,26 @@ def deduplicate_columns(headers: list) -> list:
         }
         canonical = duplicate_groups.get(h_clean, h_clean)
         if canonical in seen:
-            result.append({
-                "index": i,
-                "header": h_clean,
-                "canonical": canonical,
-                "is_duplicate": True,
-                "keep": False  # 丢弃重复列
-            })
+            result.append(
+                {
+                    "index": i,
+                    "header": h_clean,
+                    "canonical": canonical,
+                    "is_duplicate": True,
+                    "keep": False,  # 丢弃重复列
+                }
+            )
         else:
             seen[canonical] = i
-            result.append({
-                "index": i,
-                "header": h_clean,
-                "canonical": canonical,
-                "is_duplicate": False,
-                "keep": True
-            })
+            result.append(
+                {
+                    "index": i,
+                    "header": h_clean,
+                    "canonical": canonical,
+                    "is_duplicate": False,
+                    "keep": True,
+                }
+            )
     return result
 
 
@@ -315,12 +326,10 @@ def deduplicate_columns(headers: list) -> list:
 # 主清洗流水线
 # ============================================================
 
+
 def clean_grades_row(
-    row_idx: int,
-    raw_row: dict,
-    field_mapping: dict,
-    result: CleanResult
-) -> Optional[dict]:
+    row_idx: int, raw_row: dict, field_mapping: dict, result: CleanResult
+) -> dict | None:
     """
     成绩行清洗主函数
 
@@ -340,11 +349,15 @@ def clean_grades_row(
     raw_class = raw_row.get(class_col)
     cleaned["class_name"] = clean_class_name(raw_class)
     if not cleaned["class_name"]:
-        result.errors.append(CleanError(
-            row=row_idx, column=class_col, raw_value=str(raw_class),
-            error_type=ErrorType.MISSING_REQUIRED,
-            message="班级名称为空"
-        ))
+        result.errors.append(
+            CleanError(
+                row=row_idx,
+                column=class_col,
+                raw_value=str(raw_class),
+                error_type=ErrorType.MISSING_REQUIRED,
+                message="班级名称为空",
+            )
+        )
         result.failed_rows += 1
         return None
 
@@ -353,11 +366,15 @@ def clean_grades_row(
     raw_name = raw_row.get(name_col)
     cleaned["student_name"] = clean_name(raw_name)
     if not cleaned["student_name"]:
-        result.errors.append(CleanError(
-            row=row_idx, column=name_col, raw_value=str(raw_name),
-            error_type=ErrorType.MISSING_REQUIRED,
-            message="姓名为空"
-        ))
+        result.errors.append(
+            CleanError(
+                row=row_idx,
+                column=name_col,
+                raw_value=str(raw_name),
+                error_type=ErrorType.MISSING_REQUIRED,
+                message="姓名为空",
+            )
+        )
         result.failed_rows += 1
         return None
 
@@ -386,11 +403,8 @@ def clean_grades_row(
 
 
 def clean_roster_row(
-    row_idx: int,
-    raw_row: dict,
-    field_mapping: dict,
-    result: CleanResult
-) -> Optional[dict]:
+    row_idx: int, raw_row: dict, field_mapping: dict, result: CleanResult
+) -> dict | None:
     """
     学籍行清洗主函数
     """
@@ -444,11 +458,15 @@ def clean_roster_row(
 
     # 必填校验
     if not cleaned["student_name"]:
-        result.errors.append(CleanError(
-            row=row_idx, column="student_name", raw_value="",
-            error_type=ErrorType.MISSING_REQUIRED,
-            message="姓名为空"
-        ))
+        result.errors.append(
+            CleanError(
+                row=row_idx,
+                column="student_name",
+                raw_value="",
+                error_type=ErrorType.MISSING_REQUIRED,
+                message="姓名为空",
+            )
+        )
         result.failed_rows += 1
         return None
 
@@ -469,13 +487,13 @@ GRADES_IMPORT_SCHEMA = {
         "exam_name": {
             "type": "string",
             "description": "考试名称, 如 '2025年初中七年一期期末质量监测'",
-            "required": True
+            "required": True,
         },
         "exam_date": {
             "type": "string",
             "format": "date",
             "description": "考试日期 YYYY-MM-DD",
-            "required": False
+            "required": False,
         },
         "field_mapping": {
             "type": "object",
@@ -483,39 +501,39 @@ GRADES_IMPORT_SCHEMA = {
                 "class_name": {
                     "type": "string",
                     "description": "班级列名, 默认 '班级'",
-                    "default": "班级"
+                    "default": "班级",
                 },
                 "student_name": {
                     "type": "string",
                     "description": "姓名列名, 默认 '姓名'",
-                    "default": "姓名"
+                    "default": "姓名",
                 },
                 "student_no": {
                     "type": "string",
                     "description": "准考证号列名, 可选",
-                    "required": False
+                    "required": False,
                 },
                 "total_score": {
                     "type": "string",
                     "description": "总分列名, 默认 '总分'",
-                    "default": "总分"
+                    "default": "总分",
                 },
                 "school_rank": {
                     "type": "string",
                     "description": "校次列名, 默认 '校次'",
-                    "default": "校次"
+                    "default": "校次",
                 },
                 "class_rank": {
                     "type": "string",
                     "description": "班次列名, 可选",
-                    "required": False
+                    "required": False,
                 },
                 "subjects": {
                     "type": "object",
                     "description": "学科列名 → 标准学科名映射",
                     "additionalProperties": {
                         "type": "string",
-                        "description": "标准学科名 (参考 SUBJECT_ALIASES)"
+                        "description": "标准学科名 (参考 SUBJECT_ALIASES)",
                     },
                     "examples": [
                         {
@@ -525,12 +543,12 @@ GRADES_IMPORT_SCHEMA = {
                             "生物": "生物",
                             "道法": "道德与法治",
                             "历史": "历史",
-                            "地理": "地理"
+                            "地理": "地理",
                         }
-                    ]
-                }
+                    ],
+                },
             },
-            "required": ["class_name", "student_name", "subjects"]
+            "required": ["class_name", "student_name", "subjects"],
         },
         "cleaning_rules": {
             "type": "object",
@@ -538,29 +556,29 @@ GRADES_IMPORT_SCHEMA = {
                 "normalize_class_name": {
                     "type": "boolean",
                     "default": True,
-                    "description": "班级名称标准化 (去年级前缀/补班后缀)"
+                    "description": "班级名称标准化 (去年级前缀/补班后缀)",
                 },
                 "normalize_subject_name": {
                     "type": "boolean",
                     "default": True,
-                    "description": "学科名称标准化 (道法→道德与法治)"
+                    "description": "学科名称标准化 (道法→道德与法治)",
                 },
                 "strip_name_spaces": {
                     "type": "boolean",
                     "default": True,
-                    "description": "姓名去空格"
+                    "description": "姓名去空格",
                 },
                 "absent_as_null": {
                     "type": "boolean",
                     "default": True,
-                    "description": "缺考标记转为 NULL (不报错)"
+                    "description": "缺考标记转为 NULL (不报错)",
                 },
                 "skip_all_absent": {
                     "type": "boolean",
                     "default": True,
-                    "description": "全科目缺考则跳过该行"
-                }
-            }
+                    "description": "全科目缺考则跳过该行",
+                },
+            },
         },
         "error_handling": {
             "type": "object",
@@ -569,17 +587,17 @@ GRADES_IMPORT_SCHEMA = {
                     "type": "string",
                     "enum": ["skip", "abort"],
                     "default": "skip",
-                    "description": "遇到坏账: skip=跳过继续, abort=中断"
+                    "description": "遇到坏账: skip=跳过继续, abort=中断",
                 },
                 "max_errors": {
                     "type": "integer",
                     "default": 100,
-                    "description": "最大坏账数, 超过则中断"
-                }
-            }
-        }
+                    "description": "最大坏账数, 超过则中断",
+                },
+            },
+        },
     },
-    "required": ["exam_name", "field_mapping"]
+    "required": ["exam_name", "field_mapping"],
 }
 
 
@@ -604,16 +622,16 @@ ROSTER_IMPORT_SCHEMA = {
                 "guardian1_name": {"type": "string", "default": "监护一"},
                 "guardian1_phone": {"type": "string", "default": "监护一电话号码"},
                 "guardian2_name": {"type": "string", "default": "监护二"},
-                "guardian2_phone": {"type": "string", "default": "监护二电话号码"}
-            }
+                "guardian2_phone": {"type": "string", "default": "监护二电话号码"},
+            },
         },
         "deduplicate_columns": {
             "type": "boolean",
             "default": True,
-            "description": "自动去重重复列 (姓名+学生姓名 等)"
-        }
+            "description": "自动去重重复列 (姓名+学生姓名 等)",
+        },
     },
-    "required": ["field_mapping"]
+    "required": ["field_mapping"],
 }
 
 
@@ -635,22 +653,19 @@ TEMPLATE_LIJIANG_FINAL = {
             "生物": "生物",
             "历史": "历史",
             "地理": "地理",
-            "道法": "道德与法治"
+            "道法": "道德与法治",
         },
         "total_score": "总分",
-        "school_rank": "校次"
+        "school_rank": "校次",
     },
     "cleaning_rules": {
         "normalize_class_name": True,
         "normalize_subject_name": True,
         "strip_name_spaces": True,
         "absent_as_null": True,
-        "skip_all_absent": True
+        "skip_all_absent": True,
     },
-    "error_handling": {
-        "on_error": "skip",
-        "max_errors": 100
-    }
+    "error_handling": {"on_error": "skip", "max_errors": 100},
 }
 
 TEMPLATE_LIJIANG_MIDTERM = {
@@ -665,20 +680,20 @@ TEMPLATE_LIJIANG_MIDTERM = {
             "数学": "数学",
             "英语": "英语",
             "生物": "生物",
-            "政治": "道德与法治",   # 注意: 期中叫"政治"
+            "政治": "道德与法治",  # 注意: 期中叫"政治"
             "历史": "历史",
-            "地理": "地理"
+            "地理": "地理",
         },
         "total_score": "总分",
-        "school_rank": "校次"
+        "school_rank": "校次",
     },
     "cleaning_rules": {
         "normalize_class_name": True,
         "normalize_subject_name": True,
         "strip_name_spaces": True,
         "absent_as_null": True,
-        "skip_all_absent": True
-    }
+        "skip_all_absent": True,
+    },
 }
 
 TEMPLATE_LIJIANG_ROSTER = {
@@ -698,9 +713,9 @@ TEMPLATE_LIJIANG_ROSTER = {
         "guardian1_name": "监护一",
         "guardian1_phone": "监护一电话号码",
         "guardian2_name": "监护二",
-        "guardian2_phone": "监护二电话号码"
+        "guardian2_phone": "监护二电话号码",
     },
-    "deduplicate_columns": True
+    "deduplicate_columns": True,
 }
 
 ALL_TEMPLATES = [

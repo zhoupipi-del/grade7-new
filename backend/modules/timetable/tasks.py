@@ -13,13 +13,11 @@ modules/timetable/tasks.py — Wings 3.1 时空发电机 (Celery Beat 定时任�
 
 import asyncio
 import logging
-import os
 from datetime import date, timedelta
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-
 from modules.reports.celery_app import celery_engine
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 logger = logging.getLogger("wings.timetable.tasks")
 
@@ -27,17 +25,16 @@ logger = logging.getLogger("wings.timetable.tasks")
 # 独立数据库引擎 (避免与 app.py 循环导入)
 # ═══════════════════════════════════════════════════════════════
 
-_DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "mysql+aiomysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3",
-)
+from core.db_utils import require_db_url
+
+_DATABASE_URL = require_db_url()
 
 _task_engine = create_async_engine(
     _DATABASE_URL,
     echo=False,
     pool_pre_ping=True,
     pool_recycle=300,
-    pool_size=3,       # 定时任务低频调用，保守连接池
+    pool_size=3,  # 定时任务低频调用，保守连接池
     max_overflow=5,
     pool_timeout=30,
 )
@@ -53,6 +50,7 @@ TaskSessionLocal = async_sessionmaker(
 # 异步核心逻辑
 # ═══════════════════════════════════════════════════════════════
 
+
 async def _auto_generate_instances_async() -> dict:
     """
     遍历所有活跃学校租户，滚动生成今日到未来 7 天的课表实例。
@@ -66,9 +64,7 @@ async def _auto_generate_instances_async() -> dict:
     start_date = date.today()
     end_date = start_date + timedelta(days=7)
 
-    logger.info(
-        f"📡 时空发电机自动唤醒: {start_date} → {end_date} (7天滚动窗口)"
-    )
+    logger.info(f"📡 时空发电机自动唤醒: {start_date} → {end_date} (7天滚动窗口)")
 
     summary = {"schools_processed": 0, "total_inserted": 0, "errors": 0}
 
@@ -88,8 +84,7 @@ async def _auto_generate_instances_async() -> dict:
             for school in schools:
                 try:
                     logger.info(
-                        f"🏫 学校 [ID={school.id}] {school.name}: "
-                        f"滚动 {start_date} → {end_date}"
+                        f"🏫 学校 [ID={school.id}] {school.name}: 滚动 {start_date} → {end_date}"
                     )
 
                     stats = await TimetableDataPump.pump_static_to_instances(
@@ -141,6 +136,7 @@ async def _auto_generate_instances_async() -> dict:
 # ═══════════════════════════════════════════════════════════════
 # Celery 定时任务入口 (Beat → periodic 队列)
 # ═══════════════════════════════════════════════════════════════
+
 
 @celery_engine.task(
     bind=True,

@@ -16,11 +16,11 @@ AI 智能定向弱科诊断与细颗粒度学业处方持久化引擎 (Task #139
 import json
 import logging
 import os
-from sqlalchemy import select, delete
-from sqlalchemy.ext.asyncio import AsyncSession
-import httpx
 
+import httpx
 from modules.data_adapter.models import StudentRiskAlert, StudentWeaknessPrescription
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -153,10 +153,7 @@ async def run_ai_prescription_pipeline(
             continue
 
         # 提取 Layer 2 的所有学科聚合节点
-        agg_nodes = [
-            node for node in graph["nodes"]
-            if node.get("layer") == "aggregation_metrics"
-        ]
+        agg_nodes = [node for node in graph["nodes"] if node.get("layer") == "aggregation_metrics"]
 
         for node in agg_nodes:
             node_data = node.get("data", {})
@@ -258,7 +255,9 @@ async def run_ai_prescription_pipeline(
 
                 logger.info(
                     "[AI-Prescription] 处方生成成功 | student=%s subject=%s Z=%.2f tokens=%s",
-                    student_id, sub_code, z_score,
+                    student_id,
+                    sub_code,
+                    z_score,
                     meta.get("total_tokens", 0),
                 )
 
@@ -266,7 +265,9 @@ async def run_ai_prescription_pipeline(
                 error_count += 1
                 logger.warning(
                     "[AI-Prescription] 局部溃缩 | student=%s subject=%s: %s",
-                    student_id, sub_code, str(e),
+                    student_id,
+                    sub_code,
+                    str(e),
                 )
                 continue
 

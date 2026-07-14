@@ -11,25 +11,27 @@ import platform
 from datetime import datetime
 
 import matplotlib
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-from matplotlib.ticker import MaxNLocator
+import matplotlib.pyplot as plt
 import numpy as np
-
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 from reportlab.lib.colors import HexColor, grey
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle,
-    PageBreak,
-)
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import (
+    Image,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 # ═══════════════════════════════════════════════════════════════
 # 中文字体注册（跨平台自动探测）
@@ -91,8 +93,8 @@ def _ensure_chinese_font():
                 pass
 
     try:
-        pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
-        _FONT_PATHS['STSong'] = '__cid__'
+        pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+        _FONT_PATHS["STSong"] = "__cid__"
     except Exception:
         pass
 
@@ -108,15 +110,18 @@ def _setup_matplotlib_chinese():
     if _matplotlib_setup_done:
         return
     for name, path in _FONT_PATHS.items():
-        if path != '__cid__' and os.path.exists(path):
+        if path != "__cid__" and os.path.exists(path):
             try:
                 fm.fontManager.addfont(path)
             except Exception:
                 pass
     if platform.system() == "Linux":
         plt.rcParams["font.sans-serif"] = [
-            "WenQuanYi Micro Hei", "Noto Sans CJK SC", "SimHei",
-            "SimSun", "DejaVu Sans"
+            "WenQuanYi Micro Hei",
+            "Noto Sans CJK SC",
+            "SimHei",
+            "SimSun",
+            "DejaVu Sans",
         ]
     else:
         plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "SimSun"]
@@ -165,7 +170,7 @@ def _init_styles():
         return
 
     _ensure_chinese_font()
-    registered = set(pdfmetrics._fonts.keys()) if hasattr(pdfmetrics, '_fonts') else set()
+    registered = set(pdfmetrics._fonts.keys()) if hasattr(pdfmetrics, "_fonts") else set()
 
     # 标题字体
     if "SimHei" in registered:
@@ -198,36 +203,72 @@ def _init_styles():
         font_kai = font_body
 
     _STYLES["title"] = ParagraphStyle(
-        "RPT_Title", fontName=font_title, fontSize=22, leading=30,
-        alignment=TA_CENTER, textColor=BRAND_RED, spaceAfter=4,
+        "RPT_Title",
+        fontName=font_title,
+        fontSize=22,
+        leading=30,
+        alignment=TA_CENTER,
+        textColor=BRAND_RED,
+        spaceAfter=4,
     )
     _STYLES["subtitle"] = ParagraphStyle(
-        "RPT_Subtitle", fontName=font_body, fontSize=12, leading=18,
-        alignment=TA_CENTER, textColor=BRAND_DARK, spaceAfter=2,
+        "RPT_Subtitle",
+        fontName=font_body,
+        fontSize=12,
+        leading=18,
+        alignment=TA_CENTER,
+        textColor=BRAND_DARK,
+        spaceAfter=2,
     )
     _STYLES["info"] = ParagraphStyle(
-        "RPT_Info", fontName=font_body, fontSize=10, leading=16,
-        alignment=TA_CENTER, textColor=BRAND_DARK, spaceAfter=12,
+        "RPT_Info",
+        fontName=font_body,
+        fontSize=10,
+        leading=16,
+        alignment=TA_CENTER,
+        textColor=BRAND_DARK,
+        spaceAfter=12,
     )
     _STYLES["section_title"] = ParagraphStyle(
-        "RPT_SectionTitle", fontName=font_title, fontSize=14, leading=20,
-        textColor=BRAND_RED, spaceBefore=16, spaceAfter=8,
+        "RPT_SectionTitle",
+        fontName=font_title,
+        fontSize=14,
+        leading=20,
+        textColor=BRAND_RED,
+        spaceBefore=16,
+        spaceAfter=8,
     )
     _STYLES["body"] = ParagraphStyle(
-        "RPT_Body", fontName=font_body, fontSize=10, leading=16,
-        textColor=BRAND_DARK, alignment=TA_JUSTIFY,
+        "RPT_Body",
+        fontName=font_body,
+        fontSize=10,
+        leading=16,
+        textColor=BRAND_DARK,
+        alignment=TA_JUSTIFY,
     )
     _STYLES["footer"] = ParagraphStyle(
-        "RPT_Footer", fontName=font_body, fontSize=8, leading=12,
-        alignment=TA_CENTER, textColor=grey,
+        "RPT_Footer",
+        fontName=font_body,
+        fontSize=8,
+        leading=12,
+        alignment=TA_CENTER,
+        textColor=grey,
     )
     _STYLES["table_header"] = ParagraphStyle(
-        "RPT_TH", fontName=font_title, fontSize=9, leading=14,
-        textColor=BRAND_RED, alignment=TA_CENTER,
+        "RPT_TH",
+        fontName=font_title,
+        fontSize=9,
+        leading=14,
+        textColor=BRAND_RED,
+        alignment=TA_CENTER,
     )
     _STYLES["table_cell"] = ParagraphStyle(
-        "RPT_TD", fontName=font_body, fontSize=9, leading=14,
-        textColor=BRAND_DARK, alignment=TA_CENTER,
+        "RPT_TD",
+        fontName=font_body,
+        fontSize=9,
+        leading=14,
+        textColor=BRAND_DARK,
+        alignment=TA_CENTER,
     )
     _styles_initialized = True
 
@@ -247,6 +288,7 @@ def _separator(width: float, color=BRAND_RED, thickness: float = 1.2) -> Table:
 # 图表生成（matplotlib → PNG BytesIO）
 # ═══════════════════════════════════════════════════════════════
 
+
 def generate_radar_chart(dim_scores: dict, dpi: int = 120) -> io.BytesIO:
     """五维素质雷达图 → PNG"""
     _setup_matplotlib_chinese()
@@ -259,14 +301,22 @@ def generate_radar_chart(dim_scores: dict, dpi: int = 120) -> io.BytesIO:
     angles += angles[:1]
     values_plot = values + values[:1]
 
-    fig, ax = plt.subplots(figsize=(4.5, 4.5), dpi=dpi,
-                           subplot_kw={"projection": "polar"},
-                           facecolor="white")
+    fig, ax = plt.subplots(
+        figsize=(4.5, 4.5), dpi=dpi, subplot_kw={"projection": "polar"}, facecolor="white"
+    )
 
     ax.fill(angles, values_plot, color=CHART_COLORS[0], alpha=0.12)
-    ax.plot(angles, values_plot, color=CHART_COLORS[0], linewidth=2,
-            marker="o", markersize=6, markerfacecolor="white",
-            markeredgewidth=1.5, markeredgecolor=CHART_COLORS[0])
+    ax.plot(
+        angles,
+        values_plot,
+        color=CHART_COLORS[0],
+        linewidth=2,
+        marker="o",
+        markersize=6,
+        markerfacecolor="white",
+        markeredgewidth=1.5,
+        markeredgecolor=CHART_COLORS[0],
+    )
 
     ax.set_ylim(0, 100)
     ax.set_yticks([20, 40, 60, 80, 100])
@@ -277,15 +327,23 @@ def generate_radar_chart(dim_scores: dict, dpi: int = 120) -> io.BytesIO:
     ax.grid(True, alpha=0.3, linestyle="--")
 
     for angle, val in zip(angles[:-1], values):
-        ax.annotate(f"{val:.0f}", xy=(angle, val),
-                    xytext=(6, 6), textcoords="offset points",
-                    fontsize=7, fontweight="bold", color=CHART_COLORS[0],
-                    bbox=dict(boxstyle="round,pad=0.15", facecolor="white",
-                              edgecolor=CHART_COLORS[0], alpha=0.8))
+        ax.annotate(
+            f"{val:.0f}",
+            xy=(angle, val),
+            xytext=(6, 6),
+            textcoords="offset points",
+            fontsize=7,
+            fontweight="bold",
+            color=CHART_COLORS[0],
+            bbox=dict(
+                boxstyle="round,pad=0.15", facecolor="white", edgecolor=CHART_COLORS[0], alpha=0.8
+            ),
+        )
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
-                facecolor="white", edgecolor="none")
+    fig.savefig(
+        buf, format="png", dpi=dpi, bbox_inches="tight", facecolor="white", edgecolor="none"
+    )
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -313,9 +371,16 @@ def generate_class_scores_bar(students: list, dpi: int = 120) -> io.BytesIO:
     bars = ax.bar(range(len(names)), scores, color=colors_bar, edgecolor="white", linewidth=0.5)
 
     for bar, val in zip(bars, scores):
-        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                f"{val:.0f}", ha="center", va="bottom", fontsize=7, fontweight="bold",
-                color=MPL_DARK)
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 1,
+            f"{val:.0f}",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            fontweight="bold",
+            color=MPL_DARK,
+        )
 
     ax.set_xticks(range(len(names)))
     ax.set_xticklabels(names, fontsize=7, rotation=45, ha="right")
@@ -324,12 +389,14 @@ def generate_class_scores_bar(students: list, dpi: int = 120) -> io.BytesIO:
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
-    ax.set_title("全班综合素质总分排名 Top 20", fontsize=12, fontweight="bold",
-                 color=MPL_DARK, pad=10)
+    ax.set_title(
+        "全班综合素质总分排名 Top 20", fontsize=12, fontweight="bold", color=MPL_DARK, pad=10
+    )
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
-                facecolor="white", edgecolor="none")
+    fig.savefig(
+        buf, format="png", dpi=dpi, bbox_inches="tight", facecolor="white", edgecolor="none"
+    )
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -341,12 +408,22 @@ def generate_flag_history_chart(flag_history: list, dpi: int = 120) -> io.BytesI
 
     if not flag_history:
         fig, ax = plt.subplots(figsize=(8, 2.5), dpi=dpi, facecolor="white")
-        ax.text(0.5, 0.5, "暂无流动红旗数据", ha="center", va="center",
-                fontsize=12, color="grey", transform=ax.transAxes)
-        ax.set_xticks([]); ax.set_yticks([])
+        ax.text(
+            0.5,
+            0.5,
+            "暂无流动红旗数据",
+            ha="center",
+            va="center",
+            fontsize=12,
+            color="grey",
+            transform=ax.transAxes,
+        )
+        ax.set_xticks([])
+        ax.set_yticks([])
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
-                    facecolor="white", edgecolor="none")
+        fig.savefig(
+            buf, format="png", dpi=dpi, bbox_inches="tight", facecolor="white", edgecolor="none"
+        )
         plt.close(fig)
         buf.seek(0)
         return buf
@@ -365,17 +442,31 @@ def generate_flag_history_chart(flag_history: list, dpi: int = 120) -> io.BytesI
     sizes = [14 if f else 8 for f in has_flags]
 
     for i, (xi, yi) in enumerate(zip(x, scores_val)):
-        ax.plot(xi, yi, marker=markers[i], markersize=sizes[i],
-                color=colors[i], markeredgewidth=0.5, markeredgecolor="white",
-                markerfacecolor=colors[i], zorder=3)
+        ax.plot(
+            xi,
+            yi,
+            marker=markers[i],
+            markersize=sizes[i],
+            color=colors[i],
+            markeredgewidth=0.5,
+            markeredgecolor="white",
+            markerfacecolor=colors[i],
+            zorder=3,
+        )
 
     ax.plot(x, scores_val, color=MPL_DARK, linewidth=1.5, alpha=0.5, zorder=1)
 
     for i, (xi, yi) in enumerate(zip(x, scores_val)):
-        ax.annotate(f"{yi:.1f}", (xi, yi), textcoords="offset points",
-                    xytext=(0, 12), ha="center", fontsize=8,
-                    fontweight="bold" if has_flags[i] else "normal",
-                    color=colors[i])
+        ax.annotate(
+            f"{yi:.1f}",
+            (xi, yi),
+            textcoords="offset points",
+            xytext=(0, 12),
+            ha="center",
+            fontsize=8,
+            fontweight="bold" if has_flags[i] else "normal",
+            color=colors[i],
+        )
 
     ax.set_xticks(list(x))
     ax.set_xticklabels(labels, fontsize=7, rotation=30, ha="right")
@@ -383,12 +474,14 @@ def generate_flag_history_chart(flag_history: list, dpi: int = 120) -> io.BytesI
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
-    ax.set_title("流动红旗得分历史（★ = 获得红旗）", fontsize=12,
-                 fontweight="bold", color=MPL_DARK, pad=10)
+    ax.set_title(
+        "流动红旗得分历史（★ = 获得红旗）", fontsize=12, fontweight="bold", color=MPL_DARK, pad=10
+    )
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
-                facecolor="white", edgecolor="none")
+    fig.savefig(
+        buf, format="png", dpi=dpi, bbox_inches="tight", facecolor="white", edgecolor="none"
+    )
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -397,6 +490,7 @@ def generate_flag_history_chart(flag_history: list, dpi: int = 120) -> io.BytesI
 # ═══════════════════════════════════════════════════════════════
 # 数据表格构建
 # ═══════════════════════════════════════════════════════════════
+
 
 def _build_student_score_table(students: list, col_widths: list) -> Table:
     """构建全班成绩汇总大表"""
@@ -417,17 +511,19 @@ def _build_student_score_table(students: list, col_widths: list) -> Table:
     rows = [header]
     for s in sorted(students, key=lambda x: x.get("rank_total", 999)):
         scores = s.get("scores", {})
-        rows.append([
-            Paragraph(s["name"], _STYLES["table_cell"]),
-            Paragraph(s.get("student_no", ""), _STYLES["table_cell"]),
-            Paragraph(f"{scores.get('moral', 0):.0f}", _STYLES["table_cell"]),
-            Paragraph(f"{scores.get('academic', 0):.0f}", _STYLES["table_cell"]),
-            Paragraph(f"{scores.get('health', 0):.0f}", _STYLES["table_cell"]),
-            Paragraph(f"{scores.get('art', 0):.0f}", _STYLES["table_cell"]),
-            Paragraph(f"{scores.get('social', 0):.0f}", _STYLES["table_cell"]),
-            Paragraph(f"{scores.get('total', 0):.0f}", _STYLES["table_cell"]),
-            Paragraph(str(s.get("rank_total", "-")), _STYLES["table_cell"]),
-        ])
+        rows.append(
+            [
+                Paragraph(s["name"], _STYLES["table_cell"]),
+                Paragraph(s.get("student_no", ""), _STYLES["table_cell"]),
+                Paragraph(f"{scores.get('moral', 0):.0f}", _STYLES["table_cell"]),
+                Paragraph(f"{scores.get('academic', 0):.0f}", _STYLES["table_cell"]),
+                Paragraph(f"{scores.get('health', 0):.0f}", _STYLES["table_cell"]),
+                Paragraph(f"{scores.get('art', 0):.0f}", _STYLES["table_cell"]),
+                Paragraph(f"{scores.get('social', 0):.0f}", _STYLES["table_cell"]),
+                Paragraph(f"{scores.get('total', 0):.0f}", _STYLES["table_cell"]),
+                Paragraph(str(s.get("rank_total", "-")), _STYLES["table_cell"]),
+            ]
+        )
 
     t = Table(rows, colWidths=col_widths, repeatRows=1)
     style_commands = [
@@ -463,29 +559,36 @@ def _build_discipline_summary(students: list, col_widths: list) -> Table:
     for s in students:
         disc = s.get("discipline", {})
         att = s.get("attendance", {})
-        rows.append([
-            Paragraph(s["name"], _STYLES["table_cell"]),
-            Paragraph(str(disc.get("count", 0)), _STYLES["table_cell"]),
-            Paragraph(str(disc.get("total_points", 0)), _STYLES["table_cell"]),
-            Paragraph(str(att.get("present", 0)), _STYLES["table_cell"]),
-            Paragraph(str(att.get("late", 0)), _STYLES["table_cell"]),
-            Paragraph(str(att.get("absent", 0)), _STYLES["table_cell"]),
-        ])
+        rows.append(
+            [
+                Paragraph(s["name"], _STYLES["table_cell"]),
+                Paragraph(str(disc.get("count", 0)), _STYLES["table_cell"]),
+                Paragraph(str(disc.get("total_points", 0)), _STYLES["table_cell"]),
+                Paragraph(str(att.get("present", 0)), _STYLES["table_cell"]),
+                Paragraph(str(att.get("late", 0)), _STYLES["table_cell"]),
+                Paragraph(str(att.get("absent", 0)), _STYLES["table_cell"]),
+            ]
+        )
 
     t = Table(rows, colWidths=col_widths, repeatRows=1)
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), BRAND_LIGHT),
-        ("GRID", (0, 0), (-1, -1), 0.5, grey),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
+    t.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), BRAND_LIGHT),
+                ("GRID", (0, 0), (-1, -1), 0.5, grey),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
     return t
 
 
 # ═══════════════════════════════════════════════════════════════
 # 主入口: 班级德育综合报告 PDF
 # ═══════════════════════════════════════════════════════════════
+
 
 def generate_class_moral_report_pdf(report_data: dict) -> tuple:
     """
@@ -506,8 +609,7 @@ def generate_class_moral_report_pdf(report_data: dict) -> tuple:
     semester_parts = semester.split("-") if semester else []
     if len(semester_parts) >= 3:
         semester_display = (
-            f"{semester_parts[0]}学年度 "
-            f"第{'一' if semester_parts[2] == '1' else '二'}学期"
+            f"{semester_parts[0]}学年度 第{'一' if semester_parts[2] == '1' else '二'}学期"
         )
     else:
         semester_display = semester
@@ -517,9 +619,12 @@ def generate_class_moral_report_pdf(report_data: dict) -> tuple:
     page_w, page_h = A4
 
     doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        leftMargin=15 * mm, rightMargin=15 * mm,
-        topMargin=15 * mm, bottomMargin=15 * mm,
+        buf,
+        pagesize=A4,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
         title=f"{class_name} 德育综合素质报告",
         author="梨江中学德育处",
     )
@@ -536,9 +641,7 @@ def generate_class_moral_report_pdf(report_data: dict) -> tuple:
 
     # 班级信息
     info_text = (
-        f"班级：{class_name}　　　"
-        f"学生人数：{len(students)} 人　　　"
-        f"报告生成时间：{generated_at}"
+        f"班级：{class_name}　　　学生人数：{len(students)} 人　　　报告生成时间：{generated_at}"
     )
     story.append(Paragraph(info_text, _STYLES["info"]))
     story.append(_separator(available_width))
@@ -548,8 +651,7 @@ def generate_class_moral_report_pdf(report_data: dict) -> tuple:
     story.append(_section_title("一、全班综合素质总分排名"))
     if students:
         chart_buf = generate_class_scores_bar(students)
-        chart_img = Image(chart_buf, width=available_width * 0.95,
-                          height=available_width * 0.42)
+        chart_img = Image(chart_buf, width=available_width * 0.95, height=available_width * 0.42)
         story.append(chart_img)
     else:
         story.append(Paragraph("暂无评价数据", _STYLES["body"]))
@@ -559,11 +661,17 @@ def generate_class_moral_report_pdf(report_data: dict) -> tuple:
     # ═══ 二、五维素质分详表 ═══
     story.append(_section_title("二、五维素质分详表"))
     if students:
-        col_w = [available_width * 0.12, available_width * 0.10,
-                 available_width * 0.10, available_width * 0.10,
-                 available_width * 0.10, available_width * 0.10,
-                 available_width * 0.10, available_width * 0.10,
-                 available_width * 0.08]
+        col_w = [
+            available_width * 0.12,
+            available_width * 0.10,
+            available_width * 0.10,
+            available_width * 0.10,
+            available_width * 0.10,
+            available_width * 0.10,
+            available_width * 0.10,
+            available_width * 0.10,
+            available_width * 0.08,
+        ]
         score_table = _build_student_score_table(students, col_w)
         story.append(score_table)
     else:
@@ -575,8 +683,7 @@ def generate_class_moral_report_pdf(report_data: dict) -> tuple:
     story.append(_section_title("三、流动红旗得分历史"))
     if flag_history:
         flag_chart_buf = generate_flag_history_chart(flag_history)
-        flag_img = Image(flag_chart_buf, width=available_width * 0.9,
-                         height=available_width * 0.32)
+        flag_img = Image(flag_chart_buf, width=available_width * 0.9, height=available_width * 0.32)
         story.append(flag_img)
     else:
         story.append(Paragraph("暂无流动红旗评估数据", _STYLES["body"]))
@@ -586,9 +693,14 @@ def generate_class_moral_report_pdf(report_data: dict) -> tuple:
     # ═══ 四、违纪与考勤汇总 ═══
     story.append(_section_title("四、违纪与考勤汇总"))
     if students:
-        disc_col_w = [available_width * 0.12, available_width * 0.15,
-                      available_width * 0.15, available_width * 0.15,
-                      available_width * 0.13, available_width * 0.13]
+        disc_col_w = [
+            available_width * 0.12,
+            available_width * 0.15,
+            available_width * 0.15,
+            available_width * 0.15,
+            available_width * 0.13,
+            available_width * 0.13,
+        ]
         disc_table = _build_discipline_summary(students, disc_col_w)
         story.append(disc_table)
     else:
@@ -598,11 +710,7 @@ def generate_class_moral_report_pdf(report_data: dict) -> tuple:
     story.append(Spacer(1, 10 * mm))
     story.append(_separator(available_width, BRAND_RED, 1.5))
     story.append(Spacer(1, 3 * mm))
-    footer_text = (
-        f"报告生成时间：{generated_at}　　　"
-        f"梨江中学德育处　　　"
-        f"本报告仅供家校沟通使用"
-    )
+    footer_text = f"报告生成时间：{generated_at}　　　梨江中学德育处　　　本报告仅供家校沟通使用"
     story.append(Paragraph(footer_text, _STYLES["footer"]))
 
     # ── 编译 PDF ──
@@ -619,6 +727,7 @@ def generate_class_moral_report_pdf(report_data: dict) -> tuple:
 # ═══════════════════════════════════════════════════════════════
 # 学生个人报告（保持兼容，后续扩展）
 # ═══════════════════════════════════════════════════════════════
+
 
 def generate_student_report_pdf(report_data: dict) -> tuple:
     """
@@ -639,9 +748,12 @@ def generate_student_report_pdf(report_data: dict) -> tuple:
     page_w, page_h = A4
 
     doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        leftMargin=18 * mm, rightMargin=18 * mm,
-        topMargin=18 * mm, bottomMargin=18 * mm,
+        buf,
+        pagesize=A4,
+        leftMargin=18 * mm,
+        rightMargin=18 * mm,
+        topMargin=18 * mm,
+        bottomMargin=18 * mm,
         title=f"{student.get('name', '学生')} 综合素质报告单",
         author="梨江中学德育处",
     )
@@ -667,8 +779,7 @@ def generate_student_report_pdf(report_data: dict) -> tuple:
     story.append(_section_title("一、五维素质评价"))
     if scores:
         radar_buf = generate_radar_chart(scores)
-        radar_img = Image(radar_buf, width=available_width * 0.55,
-                          height=available_width * 0.55)
+        radar_img = Image(radar_buf, width=available_width * 0.55, height=available_width * 0.55)
         radar_table = Table([[radar_img]], colWidths=[available_width])
         radar_table.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
         story.append(radar_table)
@@ -697,10 +808,12 @@ def generate_student_report_pdf(report_data: dict) -> tuple:
     story.append(Spacer(1, 10 * mm))
     story.append(_separator(available_width, BRAND_RED, 1.5))
     story.append(Spacer(1, 3 * mm))
-    story.append(Paragraph(
-        f"报告生成时间：{generated_at}　　　梨江中学德育处　　　本报告仅供家校沟通使用",
-        _STYLES["footer"]
-    ))
+    story.append(
+        Paragraph(
+            f"报告生成时间：{generated_at}　　　梨江中学德育处　　　本报告仅供家校沟通使用",
+            _STYLES["footer"],
+        )
+    )
 
     doc.build(story)
 

@@ -15,40 +15,34 @@ V3 升维 (Task #1448 — AIContextHydrator):
     _format_growth_timeline / _format_growth_snapshot / _format_homework
     _format_error_funnel / _format_psych_deep
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
 
 import httpx
 from celery import Task
-from celery.exceptions import Retry
-from sqlalchemy import Engine, create_engine
-from sqlalchemy.orm import scoped_session, sessionmaker
-
 from modules.ai_prescription.models import (
     AIPrescription,
     PrescriptionType,
     RiskLevel,
 )
 from modules.reports.celery_app import celery_engine
+from sqlalchemy import create_engine
+from sqlalchemy.orm import scoped_session, sessionmaker
 
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
 # 数据库 URL（Worker 进程用，从环境变量读取，本地兜底）
 # ─────────────────────────────────────────────
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "mysql+aiomysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3"
-)
-DATABASE_URL_SYNC = os.environ.get(
-    "DATABASE_URL_SYNC",
-    "mysql+pymysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3"
-)
+from core.db_utils import require_db_url, require_sync_db_url
+
+DATABASE_URL = require_db_url()
+DATABASE_URL_SYNC = require_sync_db_url()
 _SessionLocal: scoped_session | None = None
 
 
@@ -63,9 +57,7 @@ def _get_sync_session():
             pool_pre_ping=True,
             pool_recycle=300,
         )
-        _SessionLocal = scoped_session(
-            sessionmaker(bind=_sync_engine, expire_on_commit=False)
-        )
+        _SessionLocal = scoped_session(sessionmaker(bind=_sync_engine, expire_on_commit=False))
     return _SessionLocal()
 
 
@@ -73,10 +65,7 @@ def _get_sync_session():
 # DeepSeek 配置（从 systemd 环境变量读取）
 # ─────────────────────────────────────────────
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-LLM_API_URL = os.environ.get(
-    "LLM_API_URL",
-    "https://api.deepseek.com/v1/chat/completions"
-)
+LLM_API_URL = os.environ.get("LLM_API_URL", "https://api.deepseek.com/v1/chat/completions")
 LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
 
 # 熔断器：连续失败 3 次 → 冷却 60s
@@ -137,7 +126,8 @@ def _call_deepseek(prompt: str, system_prompt: str, timeout: int = 60) -> dict:
             _circuit_cooldown_until = time.time() + _CIRCUIT_COOLDOWN
             logger.error(
                 "[AI-Tasks] 熔断器触发！连续失败 %s 次，冷却 %s 秒",
-                _circuit_failures, _CIRCUIT_COOLDOWN
+                _circuit_failures,
+                _CIRCUIT_COOLDOWN,
             )
         raise RuntimeError(f"DeepSeek 调用失败：{exc}") from exc
 
@@ -285,7 +275,7 @@ def generate_class_diagnosis(
         logger.error("[AI-Tasks] 班级诊断失败：%s", exc, exc_info=True)
         # Celery 重试（指数退避）
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=exc, countdown=2 ** self.request.retries * 5)
+            raise self.retry(exc=exc, countdown=2**self.request.retries * 5)
         # 超限：写入失败记录
         db = _get_sync_session()
         try:
@@ -377,7 +367,9 @@ def generate_student_intervention(
         finally:
             db.close()
 
-        logger.info("[AI-Tasks] 学生干预处方完成 (V3)：record_id=%s, risk=%s", record_id, risk_level)
+        logger.info(
+            "[AI-Tasks] 学生干预处方完成 (V3)：record_id=%s, risk=%s", record_id, risk_level
+        )
         return {
             "status": "SUCCESS",
             "record_id": record_id,
@@ -393,7 +385,7 @@ def generate_student_intervention(
     except Exception as exc:
         logger.error("[AI-Tasks] 学生干预话术失败：%s", exc, exc_info=True)
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=exc, countdown=2 ** self.request.retries * 5)
+            raise self.retry(exc=exc, countdown=2**self.request.retries * 5)
         db = _get_sync_session()
         try:
             record = AIPrescription(
@@ -416,6 +408,7 @@ def generate_student_intervention(
 # ─────────────────────────────────────────────
 # Prompt 构建器
 # ─────────────────────────────────────────────
+
 
 def _build_class_prompt(context: dict) -> str:
     """将班级上下文序列化为 LLM Prompt"""
@@ -533,6 +526,7 @@ def _build_student_prompt(context: dict) -> str:
 # 格式化辅助
 # ─────────────────────────────────────────────
 
+
 def _format_academic_trend(trend: dict | None) -> str:
     if not trend:
         return "（无多学期对比数据）"
@@ -551,7 +545,9 @@ def _format_rdi_diagnosis(rdi: dict | None) -> str:
     escalating = "是" if rdi["is_escalating"] else "否"
     veto_flag = ""
     if rdi.get("psych_veto_triggered"):
-        veto_flag = f"\n- ⚠️ 心理一票否决已触发 (PSYCH_VETO)，否决维度：{rdi.get('veto_dimension', '未知')}"
+        veto_flag = (
+            f"\n- ⚠️ 心理一票否决已触发 (PSYCH_VETO)，否决维度：{rdi.get('veto_dimension', '未知')}"
+        )
     psych_dev_line = ""
     if rdi.get("psych_deviation") is not None:
         psych_dev_line = f"\n- 心理偏离度：{rdi['psych_deviation']}σ"
@@ -576,13 +572,10 @@ def _format_psych_profile(profile: dict | None) -> str:
     lines.append(f"- 完成时间：{profile.get('completed_at', 'N/A')}")
     for dim in profile.get("dimensions", []):
         extreme_tag = " ★极端" if dim.get("is_extreme") else ""
-        lines.append(
-            f"  · {dim['label']}：{dim['score']}σ{extreme_tag}"
-        )
+        lines.append(f"  · {dim['label']}：{dim['score']}σ{extreme_tag}")
     if profile.get("extreme_dimension_cn"):
         lines.append(
-            f"- 最高偏离维度：{profile['extreme_dimension_cn']} "
-            f"({profile['extreme_value']}σ)"
+            f"- 最高偏离维度：{profile['extreme_dimension_cn']} ({profile['extreme_value']}σ)"
         )
     return "\n".join(lines)
 
@@ -648,17 +641,24 @@ def _format_score(score: dict | None) -> str:
 # V3 格式化辅助 (Task #1448 — 5路新数据源)
 # ─────────────────────────────────────────────
 
+
 def _format_growth_timeline(timeline: list | None) -> str:
     """格式化成长时光轴事件流 (V3 新增)"""
     if not timeline:
         return "（无成长事件记录）"
     lines = []
     dim_cn = {
-        "academic": "学业", "attendance": "考勤", "behavior": "行为",
-        "psychology": "心理", "activity": "活动",
+        "academic": "学业",
+        "attendance": "考勤",
+        "behavior": "行为",
+        "psychology": "心理",
+        "activity": "活动",
     }
     sev_icon = {
-        "info": "○", "bonus": "★", "warning": "△", "critical": "⚠",
+        "info": "○",
+        "bonus": "★",
+        "warning": "△",
+        "critical": "⚠",
     }
     for ev in timeline[:15]:
         date_str = ev.get("occurred_at", "")[:10] if ev.get("occurred_at") else "?"
@@ -710,16 +710,22 @@ def _format_homework(homework: dict | None) -> str:
     if recent:
         lines.append("- 最近提交明细：")
         grade_cn = {
-            "excellent": "优", "good": "良", "fair": "中",
+            "excellent": "优",
+            "good": "良",
+            "fair": "中",
             "needs_improvement": "待提高",
         }
         for item in recent:
             grade_label = grade_cn.get(item.get("grade", ""), item.get("grade", ""))
             pct = item.get("score_percentage")
             pct_str = f"得分率{pct}%" if pct is not None else "未批改"
-            late_tag = f" 迟交{item.get('late_minutes', 0)}min" if item.get("late_minutes", 0) > 0 else ""
+            late_tag = (
+                f" 迟交{item.get('late_minutes', 0)}min" if item.get("late_minutes", 0) > 0 else ""
+            )
             err_tag = f" 错题{item.get('error_count', 0)}道" if item.get("error_count") else ""
-            lines.append(f"  · {item.get('status', '')} {pct_str}({grade_label}){late_tag}{err_tag}")
+            lines.append(
+                f"  · {item.get('status', '')} {pct_str}({grade_label}){late_tag}{err_tag}"
+            )
     return "\n".join(lines)
 
 
@@ -747,8 +753,11 @@ def _format_error_funnel(error_funnel: dict | None) -> str:
     errors = error_funnel.get("recent_errors", [])
     if errors:
         error_type_cn = {
-            "conceptual": "概念错误", "procedural": "过程错误",
-            "careless": "粗心错误", "omission": "遗漏错误", "unknown": "未知",
+            "conceptual": "概念错误",
+            "procedural": "过程错误",
+            "careless": "粗心错误",
+            "omission": "遗漏错误",
+            "unknown": "未知",
         }
         lines.append("- 最近错题摘要：")
         for e in errors[:5]:
@@ -767,11 +776,17 @@ def _format_psych_deep(psych_deep: dict | None) -> str:
     profile = psych_deep.get("profile")
     if profile:
         risk_cn = {
-            "green": "🟢正常", "yellow": "🟡关注",
-            "orange": "🟠预警", "red": "🔴危机",
+            "green": "🟢正常",
+            "yellow": "🟡关注",
+            "orange": "🟠预警",
+            "red": "🔴危机",
         }
-        lines.append(f"- 当前风险等级：{risk_cn.get(profile.get('risk_level'), profile.get('risk_level'))}")
-        lines.append(f"- 历史最高风险：{risk_cn.get(profile.get('highest_risk_level'), profile.get('highest_risk_level'))}")
+        lines.append(
+            f"- 当前风险等级：{risk_cn.get(profile.get('risk_level'), profile.get('risk_level'))}"
+        )
+        lines.append(
+            f"- 历史最高风险：{risk_cn.get(profile.get('highest_risk_level'), profile.get('highest_risk_level'))}"
+        )
         lines.append(f"- 累计咨询次数：{profile.get('total_counseling_count', 0)}")
         lines.append(f"- 累计筛查次数：{profile.get('total_screening_count', 0)}")
         if profile.get("is_referred"):
@@ -801,8 +816,12 @@ def _format_psych_deep(psych_deep: dict | None) -> str:
     if consults:
         lines.append("- 最近咨询记录元数据：")
         cat_cn = {
-            "emotion": "情绪", "interpersonal": "人际", "academic": "学业",
-            "family": "家庭", "self_harm": "自伤风险", "other": "其他",
+            "emotion": "情绪",
+            "interpersonal": "人际",
+            "academic": "学业",
+            "family": "家庭",
+            "self_harm": "自伤风险",
+            "other": "其他",
         }
         for c in consults:
             cat_label = cat_cn.get(c.get("consult_category", ""), c.get("consult_category", ""))
@@ -822,20 +841,17 @@ def _format_psych_deep(psych_deep: dict | None) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 import asyncio
-from datetime import datetime as _dt
 
-from sqlalchemy import create_engine as _create_engine
-from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
+from sqlalchemy import text as _text
 from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
 from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sm
-from sqlalchemy import select as _select, text as _text
+from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
 
 # 异步引擎 (仅用于 build_student_context)
-_ASYNC_DB_URL = os.environ.get(
-    "DATABASE_URL",
-    "mysql+aiomysql://grade7:waOPKoyFf4ByQD1h@127.0.0.1:3307/wings3",
+_ASYNC_DB_URL = require_db_url()
+_async_engine = _create_async_engine(
+    _ASYNC_DB_URL, pool_pre_ping=True, pool_recycle=300, pool_size=2
 )
-_async_engine = _create_async_engine(_ASYNC_DB_URL, pool_pre_ping=True, pool_recycle=300, pool_size=2)
 _AsyncSessionLocal = _async_sm(_async_engine, class_=_AsyncSession, expire_on_commit=False)
 
 
@@ -854,7 +870,7 @@ async def _build_context_async(student_id: int, school_id: int) -> dict:
 
 def _find_class_teacher(sync_db, student_id: int, school_id: int) -> int | None:
     """查询学生的班主任 user_id"""
-    from core.models import User, UserRole, Student
+    from core.models import User, UserRole
 
     # 1. 获取学生的 class_id
     student = sync_db.execute(
@@ -865,12 +881,16 @@ def _find_class_teacher(sync_db, student_id: int, school_id: int) -> int | None:
         return None
 
     # 2. 查询该班的班主任
-    teacher = sync_db.query(User).filter(
-        User.school_id == school_id,
-        User.role == UserRole.CLASS_TEACHER,
-        User.class_id == student.class_id,
-        User.is_active == True,
-    ).first()
+    teacher = (
+        sync_db.query(User)
+        .filter(
+            User.school_id == school_id,
+            User.role == UserRole.CLASS_TEACHER,
+            User.class_id == student.class_id,
+            User.is_active == True,
+        )
+        .first()
+    )
     return teacher.id if teacher else None
 
 
@@ -892,23 +912,34 @@ def _create_approval_request(
     from modules.evaluation.models import ApprovalRequest
 
     # 幂等检查: 同一 warning_id 不重复创建
-    existing = sync_db.query(ApprovalRequest).filter(
-        ApprovalRequest.school_id == school_id,
-        ApprovalRequest.source_type == "ai_prescription",
-        ApprovalRequest.source_id == warning_id,
-        ApprovalRequest.current_status == "pending",
-    ).first()
+    existing = (
+        sync_db.query(ApprovalRequest)
+        .filter(
+            ApprovalRequest.school_id == school_id,
+            ApprovalRequest.source_type == "ai_prescription",
+            ApprovalRequest.source_id == warning_id,
+            ApprovalRequest.current_status == "pending",
+        )
+        .first()
+    )
     if existing:
-        logger.info("[BRIDGE] 幂等跳过: warning_id=%s 已有 pending 审批工单 #%s", warning_id, existing.id)
+        logger.info(
+            "[BRIDGE] 幂等跳过: warning_id=%s 已有 pending 审批工单 #%s", warning_id, existing.id
+        )
         return existing.id
 
     # L1: 尝试多租户审批链
     chain_config = None
     try:
         from modules.approval.services import resolve_chain
+
         chain_config = resolve_chain(sync_db, school_id, "ai_intervention")
         if chain_config:
-            logger.info("[BRIDGE] 使用多租户审批链 | school=%s chain_id=%s", school_id, chain_config.get("chain_id"))
+            logger.info(
+                "[BRIDGE] 使用多租户审批链 | school=%s chain_id=%s",
+                school_id,
+                chain_config.get("chain_id"),
+            )
     except Exception as e:
         logger.warning("[BRIDGE] 多租户审批链查询失败(降级到默认): %s", e)
 
@@ -953,7 +984,11 @@ def _create_approval_request(
     sync_db.refresh(ar)
     logger.info(
         "[BRIDGE] 审批工单已创建 | ar_id=%s student=%s prescription=%s warning=%s rdi=%.2f",
-        ar.id, student_id, prescription_id, warning_id, rdi_score,
+        ar.id,
+        student_id,
+        prescription_id,
+        warning_id,
+        rdi_score,
     )
     return ar.id
 
@@ -1022,7 +1057,10 @@ def bridge_rdi_to_approval(
     t0 = time.time()
     logger.info(
         "[BRIDGE] 桥接启动 | student=%s school=%s warning=%s rdi=%.2f",
-        student_id, school_id, warning_id, rdi_score,
+        student_id,
+        school_id,
+        warning_id,
+        rdi_score,
     )
 
     try:
@@ -1085,7 +1123,8 @@ def bridge_rdi_to_approval(
 
         logger.info(
             "[BRIDGE] AI 处方已生成 | prescription_id=%s risk=%s",
-            prescription_id, risk_level.value,
+            prescription_id,
+            risk_level.value,
         )
 
         # ── Step 4: 创建审批工单 ──
@@ -1099,8 +1138,13 @@ def bridge_rdi_to_approval(
             teacher_id = _find_class_teacher(db, student_id, school_id)
             if teacher_id:
                 _try_notify_class_teacher(
-                    db, teacher_id, school_id, student_id,
-                    prescription_id, ar_id, rdi_score,
+                    db,
+                    teacher_id,
+                    school_id,
+                    student_id,
+                    prescription_id,
+                    ar_id,
+                    rdi_score,
                 )
             else:
                 logger.warning(
@@ -1113,7 +1157,10 @@ def bridge_rdi_to_approval(
         elapsed = round(time.time() - t0, 2)
         logger.info(
             "[BRIDGE] 桥接完成 | student=%s prescription=%s ar=%s 耗时=%.2fs",
-            student_id, prescription_id, ar_id, elapsed,
+            student_id,
+            prescription_id,
+            ar_id,
+            elapsed,
         )
 
         return {
@@ -1128,9 +1175,11 @@ def bridge_rdi_to_approval(
     except Exception as exc:
         logger.error(
             "[BRIDGE] 桥接失败 | student=%s warning=%s: %s",
-            student_id, warning_id, exc,
+            student_id,
+            warning_id,
+            exc,
             exc_info=True,
         )
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=exc, countdown=2 ** self.request.retries * 10)
+            raise self.retry(exc=exc, countdown=2**self.request.retries * 10)
         return {"status": "FAILURE", "student_id": student_id, "error": str(exc)}

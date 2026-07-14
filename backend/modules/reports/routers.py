@@ -13,31 +13,30 @@ RDI白皮书轨 (新增):
   端点 7: GET  /class-report/{cid}  → 班主任一键班级报告
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Depends, status, HTTPException, Query
-from fastapi.responses import JSONResponse, HTMLResponse
-from celery.result import AsyncResult
-from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
 
-from core.routers import get_current_user, get_db, require_role
+from celery.result import AsyncResult
 from core.models import User, UserRole
+from core.routers import get_current_user, get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import HTMLResponse, JSONResponse
 from modules.reports.schemas import (
+    ClassTeacherReportResponse,
+    ExportGradeReportRequest,
     ExportMoralReportRequest,
+    GradeTaskAcceptedResponse,
+    HighRiskExportResponse,
+    SchoolWideReportResponse,
     TaskAcceptedResponse,
     TaskStatusResponse,
-    ExportGradeReportRequest,
-    GradeTaskAcceptedResponse,
-    SchoolWideReportResponse,
-    HighRiskExportResponse,
-    ClassTeacherReportResponse,
 )
-from modules.reports.tasks import generate_class_moral_report, _get_sync_session
 from modules.reports.services import (
-    get_school_wide_rdi_summary,
-    get_high_risk_students,
     get_class_teacher_report,
+    get_high_risk_students,
+    get_school_wide_rdi_summary,
 )
+from modules.reports.tasks import _get_sync_session, generate_class_moral_report
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["Reports 德育报告引擎"])
 
@@ -119,6 +118,7 @@ async def get_task_status(task_id: str):
 def _default_semester() -> str:
     """根据当前日期推算默认学期"""
     from core.models import get_local_now
+
     now = get_local_now()
     if now.month >= 2 and now.month <= 7:
         return f"{now.year - 1}-{now.year}-2"
@@ -145,7 +145,6 @@ async def export_grade_moral_report(
       - ms_admin:   可导出全校任意年级
       - grade_leader: 只能导出本年级
     """
-    from core.routers import require_role
     from core.models import UserRole
 
     # 权限检查
@@ -158,14 +157,13 @@ async def export_grade_moral_report(
             grade = db.query(Grade).filter(Grade.id == body.grade_id).first()
             if not grade or grade.school_id != current_user.school_id:
                 return JSONResponse(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    content={"detail": "无权访问该年级"}
+                    status_code=status.HTTP_403_FORBIDDEN, content={"detail": "无权访问该年级"}
                 )
             # 检查年级组长是否负责管理该年级
             if grade.leader_id != current_user.id:
                 return JSONResponse(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    content={"detail": "仅能导出您负责的年级"}
+                    content={"detail": "仅能导出您负责的年级"},
                 )
         finally:
             db.close()
@@ -178,22 +176,29 @@ async def export_grade_moral_report(
     try:
         if body.include_classes:
             # 指定班级导出
-            classes = db.query(Class).filter(
-                Class.id.in_(body.include_classes),
-                Class.school_id == current_user.school_id,
-                Class.grade_id == body.grade_id,
-            ).all()
+            classes = (
+                db.query(Class)
+                .filter(
+                    Class.id.in_(body.include_classes),
+                    Class.school_id == current_user.school_id,
+                    Class.grade_id == body.grade_id,
+                )
+                .all()
+            )
         else:
             # 全年级导出
-            classes = db.query(Class).filter(
-                Class.grade_id == body.grade_id,
-                Class.school_id == current_user.school_id,
-            ).all()
+            classes = (
+                db.query(Class)
+                .filter(
+                    Class.grade_id == body.grade_id,
+                    Class.school_id == current_user.school_id,
+                )
+                .all()
+            )
 
         if not classes:
             return JSONResponse(
-                status_code=status.HTTP_404_NOT_FOUND,
-                content={"detail": "该年级无班级"}
+                status_code=status.HTTP_404_NOT_FOUND, content={"detail": "该年级无班级"}
             )
 
         # 为每个班级派发任务
@@ -219,6 +224,7 @@ async def export_grade_moral_report(
     finally:
         db.close()
 
+
 @router.get("/batch-export", response_class=HTMLResponse)
 async def get_batch_export_page(current_user: User = Depends(get_current_user)):
     """
@@ -231,13 +237,12 @@ async def get_batch_export_page(current_user: User = Depends(get_current_user)):
 
     try:
         # 使用 utf-8 编码安全读取绝对路径下的 HTML
-        with open(HTML_FILE_PATH, "r", encoding="utf-8") as f:
+        with open(HTML_FILE_PATH, encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
         # 即使报错，也将绝对路径打印在日志中，便于前线一秒排障
         raise HTTPException(
-            status_code=404,
-            detail=f"🚧 前端战术模板丢失！预设绝对路径未命中: {HTML_FILE_PATH}"
+            status_code=404, detail=f"🚧 前端战术模板丢失！预设绝对路径未命中: {HTML_FILE_PATH}"
         )
 
 
@@ -245,9 +250,10 @@ async def get_batch_export_page(current_user: User = Depends(get_current_user)):
 # RDI 白皮书轨 — 同步实时聚合端点 (新增)
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/rdi-summary", response_model=SchoolWideReportResponse)
 async def get_rdi_summary(
-    grade_id: Optional[int] = Query(None, description="年级ID过滤（为空则全校）"),
+    grade_id: int | None = Query(None, description="年级ID过滤（为空则全校）"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -281,8 +287,8 @@ async def get_rdi_summary(
 
 @router.post("/export/high-risk", response_model=HighRiskExportResponse)
 async def export_high_risk(
-    grade_id: Optional[int] = Query(None, description="年级ID过滤"),
-    risk_levels: Optional[List[str]] = Query(None, description="风险等级过滤，默认 intervention"),
+    grade_id: int | None = Query(None, description="年级ID过滤"),
+    risk_levels: list[str] | None = Query(None, description="风险等级过滤，默认 intervention"),
     export_format: str = Query("json", description="导出格式: json / excel / pdf"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

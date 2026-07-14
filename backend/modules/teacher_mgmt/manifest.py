@@ -12,4 +12,5 @@ MODULE_PHASES = ["junior", "senior", "primary", "integrated"]
 
 def register(router_prefix="/api/v1/teacher-mgmt"):
     from modules.teacher_mgmt.routers import router
+
     return router, router_prefix

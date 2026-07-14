@@ -14,6 +14,10 @@
  *   GET    /weekly/teacher/{teacher_id}    — 教师周课表
  *   GET    /conflicts                      — 冲突列表
  *   PUT    /conflicts/{id}/resolve         — 解决冲突
+ *
+ * Wings 3.1 阵地⑧ — 时空变轨矩阵
+ *   GET    /instances                      — 日历级课表实例查询
+ *   PUT    /instances/{id}/adjust          — 教务变轨 (调课/代课)
  */
 
 import request from './request'
@@ -34,12 +38,12 @@ export interface Classroom {
 export interface Course {
   id: number
   name: string
-  subject_code: string
-  grade_id: number
-  periods_per_week: number
-  is_exam_subject: boolean
-  sort_order: number
+  short_name?: string
+  subject_category?: string
+  color?: string
+  weekly_slots?: number
   is_active: boolean
+  created_at?: string
 }
 
 export interface CourseSlot {
@@ -192,4 +196,55 @@ export function listConflicts(params?: { resolution?: string; page?: number; pag
 
 export function resolveConflict(conflictId: number, resolution: string) {
   return request.put(`/timetable/conflicts/${conflictId}/resolve`, null, { params: { resolution } })
+}
+
+// ── 时空变轨矩阵 (Wings 3.1 阵地⑧) ──
+
+export interface TimetableInstance {
+  id: number
+  class_id: number
+  date: string
+  slot_id: number
+  period_index: number
+  subject_id: number
+  teacher_id: number
+  is_adjusted: boolean
+}
+
+export interface TimetableInstanceListResponse {
+  total: number
+  instances: TimetableInstance[]
+}
+
+export interface AdjustTimetablePayload {
+  subject_id: number
+  teacher_id: number
+  adjustment_reason?: string
+}
+
+export interface AdjustTimetableResponse {
+  status: string
+  msg: string
+  data: {
+    instance_id: number
+    class_id: number
+    date: string
+    old_subject_id: number
+    new_subject_id: number
+    old_teacher_id: number
+    new_teacher_id: number
+    adjusted: boolean
+  }
+}
+
+/** 查询班级在指定日期范围内的日历级课表实例 */
+export function getTimetableInstances(classId: number, startDate: string, endDate: string) {
+  return request.get<TimetableInstanceListResponse>('/timetable/instances', {
+    params: { class_id: classId, start_date: startDate, end_date: endDate },
+  })
+}
+
+/** 教务变轨 — 调课/代课 */
+export function adjustTimetableInstance(instanceId: number, payload: AdjustTimetablePayload) {
+  return request.put<AdjustTimetableResponse>(`/timetable/instances/${instanceId}/adjust`, payload)
 }

@@ -12,21 +12,20 @@ modules/notifications/routers.py — 通知 API 端点
 import asyncio
 import json
 import logging
-from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
-from sse_starlette.sse import EventSourceResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from core.routers import get_current_user, get_db
 from core.models import User, UserRole
 from core.redis_client import get_redis
-from .services import NotificationService
+from core.routers import get_current_user, get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sse_starlette.sse import EventSourceResponse
+
 from .schemas import (
-    NotificationOut,
     NotificationListResponse,
+    NotificationOut,
     UnreadCountResponse,
 )
+from .services import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +39,15 @@ SSE_ALLOWED_ROLES = {UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TE
 # GET / — 通知列表（分页）
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/", response_model=NotificationListResponse)
 async def list_notifications(
     limit: int = Query(20, ge=1, le=100, description="每页条数"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    type: Optional[str] = Query(None, description="按类型过滤: discipline_pending/discipline_activated/..."),
-    is_read: Optional[bool] = Query(None, description="按已读状态过滤"),
+    type: str | None = Query(
+        None, description="按类型过滤: discipline_pending/discipline_activated/..."
+    ),
+    is_read: bool | None = Query(None, description="按已读状态过滤"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -70,6 +72,7 @@ async def list_notifications(
 # GET /unread — 未读计数
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/unread", response_model=UnreadCountResponse)
 async def get_unread_count(
     current_user: User = Depends(get_current_user),
@@ -83,6 +86,7 @@ async def get_unread_count(
 # ═══════════════════════════════════════════════════════════════
 # PUT /{notification_id}/read — 标记单条已读
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.put("/{notification_id}/read")
 async def mark_notification_read(
@@ -107,16 +111,15 @@ async def mark_notification_read(
 # PUT /read-all — 全部已读
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.put("/read-all")
 async def mark_all_read(
-    type: Optional[str] = Query(None, description="只标记指定类型的通知"),
+    type: str | None = Query(None, description="只标记指定类型的通知"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """标记当前用户的所有未读通知为已读"""
-    count = await NotificationService.mark_all_as_read(
-        db, recipient_id=current_user.id, type=type
-    )
+    count = await NotificationService.mark_all_as_read(db, recipient_id=current_user.id, type=type)
     await db.commit()
     return {"ok": True, "marked_count": count}
 
@@ -124,6 +127,7 @@ async def mark_all_read(
 # ═══════════════════════════════════════════════════════════════
 # GET /stream — SSE 实时事件流 (CEP复合预警泵站)
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.get("/stream")
 async def stream_composite_alerts(
@@ -178,7 +182,8 @@ async def stream_composite_alerts(
 
                 # 阻塞式轮询 Redis Pub/Sub，timeout=0.5s 防止忙等
                 message = await pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=0.5,
+                    ignore_subscribe_messages=True,
+                    timeout=0.5,
                 )
 
                 if message and message.get("type") == "message":

@@ -10,14 +10,15 @@ modules/parent_portal/schemas.py — 家长门户 Pydantic schemas
 """
 
 import enum
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
+from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
 
 # ═══════════════════════════════════════════════════════════════
 # 枚举 (1:1 映射前端 FeedbackType / FeedbackStatus / AppealTargetModule)
 # ═══════════════════════════════════════════════════════════════
+
 
 class FeedbackTypeEnum(str, enum.Enum):
     SUGGESTION = "suggestion"
@@ -68,12 +69,15 @@ APPEAL_TARGET_LABELS = {
 # 时间轴事件 (1:1 映射前端 ChildOverview.recent_timeline)
 # ═══════════════════════════════════════════════════════════════
 
+
 class TimelineEvent(BaseModel):
     event_id: str
-    event_type: str = Field(..., description="事件类型: evaluation/score_log/behavior/attendance/risk")
+    event_type: str = Field(
+        ..., description="事件类型: evaluation/score_log/behavior/attendance/risk"
+    )
     occurred_at: str
     title: str
-    description: Optional[str] = None
+    description: str | None = None
     severity: str = Field("info", description="严重程度: success/warning/danger/info")
 
 
@@ -81,32 +85,34 @@ class TimelineEvent(BaseModel):
 # 反馈条目 (1:1 映射前端 FeedbackItem)
 # ═══════════════════════════════════════════════════════════════
 
+
 class FeedbackItem(BaseModel):
     """反馈条目 — 支持 ORM 对象直转 (from_attributes=True)"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     student_id: int
     parent_id: int
-    parent_name: Optional[str] = None
+    parent_name: str | None = None
     feedback_type: FeedbackTypeEnum
     feedback_type_label: str = Field("", description="中文标签（自动填充）")
     title: str
     content: str
     status: FeedbackStatusEnum
     status_label: str = Field("", description="中文标签（自动填充）")
-    handler_id: Optional[int] = None
-    handler_name: Optional[str] = None
-    handler_reply: Optional[str] = None
-    handled_at: Optional[datetime] = None
-    attachments: Optional[List[str]] = None
-    source_context: Optional[Dict[str, Any]] = None
+    handler_id: int | None = None
+    handler_name: str | None = None
+    handler_reply: str | None = None
+    handled_at: datetime | None = None
+    attachments: list[str] | None = None
+    source_context: dict[str, Any] | None = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 class FeedbackListResponse(BaseModel):
-    items: List[FeedbackItem]
+    items: list[FeedbackItem]
     total: int
 
 
@@ -114,8 +120,10 @@ class FeedbackListResponse(BaseModel):
 # 孩子概览 (1:1 映射前端 ChildOverview)
 # ═══════════════════════════════════════════════════════════════
 
+
 class ChildOverview(BaseModel):
     """跨模块聚合: 评价快照 + 考勤统计 + 违纪统计 + 时间轴 + 风险等级"""
+
     student_id: int
     student_name: str
     student_no: str
@@ -123,12 +131,12 @@ class ChildOverview(BaseModel):
     grade_name: str
 
     # 评价快照（五维分数，来自 evaluation.StudentScore）
-    total_score: Optional[float] = None
-    moral_score: Optional[float] = None
-    academic_score: Optional[float] = None
-    health_score: Optional[float] = None
-    art_score: Optional[float] = None
-    social_score: Optional[float] = None
+    total_score: float | None = None
+    moral_score: float | None = None
+    academic_score: float | None = None
+    health_score: float | None = None
+    art_score: float | None = None
+    social_score: float | None = None
 
     # 统计计数
     attendance_normal_count: int = 0
@@ -137,75 +145,83 @@ class ChildOverview(BaseModel):
     positive_score_total: int = 0
 
     # 最近时间轴事件（来自 growth 模块聚合）
-    recent_timeline: List[TimelineEvent] = []
+    recent_timeline: list[TimelineEvent] = []
 
     # 风险状态（来自 risk_models 模块）
-    risk_level: Optional[str] = None
-    risk_label: Optional[str] = None
+    risk_level: str | None = None
+    risk_label: str | None = None
 
 
 # ═══════════════════════════════════════════════════════════════
 # 家长仪表盘 (1:1 映射前端 ParentDashboard)
 # ═══════════════════════════════════════════════════════════════
 
+
 class ParentDashboard(BaseModel):
     """首页聚合: 孩子概览 + 未读通知 + 待处理反馈 + 最近反馈"""
+
     model_config = ConfigDict(populate_by_name=True)
 
     child: ChildOverview
     unread_notifications: int = 0
     pending_feedbacks: int = 0
-    recent_feedbacks: List[FeedbackItem] = []
-    meta: Optional[Dict[str, Any]] = None
+    recent_feedbacks: list[FeedbackItem] = []
+    meta: dict[str, Any] | None = None
 
 
 # ═══════════════════════════════════════════════════════════════
 # 申诉代理结果 (1:1 映射前端 AppealProxyResult)
 # ═══════════════════════════════════════════════════════════════
 
+
 class AppealProxyResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     success: bool
     target_module: AppealTargetModuleEnum
-    target_appeal_id: Optional[int] = None
+    target_appeal_id: int | None = None
     message: str
-    source_context: Optional[Dict[str, Any]] = None
-    meta: Optional[Dict[str, Any]] = None
+    source_context: dict[str, Any] | None = None
+    meta: dict[str, Any] | None = None
 
 
 # ═══════════════════════════════════════════════════════════════
 # 请求体 (1:1 映射前端 Payload 类型)
 # ═══════════════════════════════════════════════════════════════
 
+
 class FeedbackCreatePayload(BaseModel):
     """家长提交反馈 — student_id 由越权铁闸从 bound_student_id 自动注入"""
+
     student_id: int = Field(..., description="学生 ID（必须与当前家长 bound_student_id 一致）")
     feedback_type: FeedbackTypeEnum
     title: str = Field(..., max_length=200)
     content: str = Field(...)
-    attachments: Optional[List[str]] = None
+    attachments: list[str] | None = None
 
 
 class FeedbackReplyPayload(BaseModel):
     """班主任/德育处处理反馈"""
+
     status: FeedbackStatusEnum = Field(FeedbackStatusEnum.RESOLVED)
     reply: str = Field(..., description="处理回复内容")
 
 
 class AppealProxyPayload(BaseModel):
     """申诉代理 — Facade 路由到 discipline/behavior"""
+
     target_module: AppealTargetModuleEnum
     target_record_id: int = Field(..., description="目标原始记录 ID")
     student_id: int = Field(..., description="学生 ID（越权铁闸校验）")
     applicant_name: str = Field(..., max_length=50)
-    applicant_phone: Optional[str] = None
+    applicant_phone: str | None = None
     reason: str = Field(..., description="申诉理由")
 
 
 # ═══════════════════════════════════════════════════════════════
 # 辅助函数
 # ═══════════════════════════════════════════════════════════════
+
 
 def fill_labels(item: FeedbackItem) -> FeedbackItem:
     """自动填充 feedback_type_label 和 status_label"""

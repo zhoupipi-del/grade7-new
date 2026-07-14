@@ -11,14 +11,20 @@ homework_mgmt/models.py — 结构化作业管理
   提交: pending → submitted/late → graded → (missing)
 """
 
+from core.models import Base, SchoolMixin, get_local_now
 from sqlalchemy import (
-    Column, BigInteger, String, Integer, Boolean, DateTime, Text, JSON,
-    ForeignKey, Index, UniqueConstraint, Numeric,
+    JSON,
+    BigInteger,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
 )
-
-from core.models import Base, get_local_now
-from core.models import SchoolMixin
-
 
 # ──────────────────────────────────────────────
 # 状态枚举常量
@@ -64,13 +70,15 @@ class HwAssignment(Base, SchoolMixin):
     title = Column(String(200), nullable=False, comment="作业标题")
     description = Column(Text, comment="作业说明/要求")
     homework_type = Column(
-        String(20), default=HW_DAILY,
+        String(20),
+        default=HW_DAILY,
         comment="类型: daily/weekly/unit_review/exam_prep",
     )
     assigned_date = Column(DateTime, nullable=False, comment="布置日期")
     due_date = Column(DateTime, nullable=False, comment="截止日期")
     status = Column(
-        String(20), default=ASSIGNMENT_PUBLISHED,
+        String(20),
+        default=ASSIGNMENT_PUBLISHED,
         comment="状态: draft/published/closed",
     )
 
@@ -95,14 +103,17 @@ class HwSubmission(Base, SchoolMixin):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    assignment_id = Column(BigInteger, ForeignKey("hw_assignments.id", ondelete="CASCADE"), nullable=False)
+    assignment_id = Column(
+        BigInteger, ForeignKey("hw_assignments.id", ondelete="CASCADE"), nullable=False
+    )
     student_id = Column(BigInteger, nullable=False, comment="学生 students.id")
 
     content = Column(Text, comment="文字作答")
     attachment_url = Column(String(500), comment="拍照附件")
     submitted_at = Column(DateTime, comment="提交时间")
     status = Column(
-        String(20), default=SUBMISSION_PENDING,
+        String(20),
+        default=SUBMISSION_PENDING,
         comment="状态: pending/submitted/late/graded/missing",
     )
     late_minutes = Column(Integer, default=0, comment="迟交分钟数")
@@ -110,7 +121,9 @@ class HwSubmission(Base, SchoolMixin):
     created_at = Column(DateTime, default=get_local_now)
 
     __table_args__ = (
-        UniqueConstraint("school_id", "assignment_id", "student_id", name="uk_hw_sub_school_assign_student"),
+        UniqueConstraint(
+            "school_id", "assignment_id", "student_id", name="uk_hw_sub_school_assign_student"
+        ),
         Index("idx_hw_sub_school_student", "school_id", "student_id"),
         Index("idx_hw_sub_assign", "assignment_id", "status"),
     )
@@ -123,7 +136,9 @@ class HwGrading(Base, SchoolMixin):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    submission_id = Column(BigInteger, ForeignKey("hw_submissions.id", ondelete="CASCADE"), nullable=False)
+    submission_id = Column(
+        BigInteger, ForeignKey("hw_submissions.id", ondelete="CASCADE"), nullable=False
+    )
     teacher_id = Column(BigInteger, nullable=False, comment="批改教师 user_id")
 
     score = Column(Numeric(6, 2), comment="得分")

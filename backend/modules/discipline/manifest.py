@@ -11,4 +11,5 @@ MODULE_DEPENDENCIES = ["behavior"]  # 依赖违纪模块（处分与违纪记录
 
 def register(router_prefix="/api/v1/discipline"):
     from modules.discipline.routers import router
+
     return router, router_prefix

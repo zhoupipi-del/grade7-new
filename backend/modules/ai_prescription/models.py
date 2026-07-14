@@ -2,37 +2,37 @@
 AI 德育处方大脑 — 数据模型
 ai_prescriptions 表：持久化 LLM 生成的班级诊断书 / 学生干预话术
 """
+
 from __future__ import annotations
 
 import enum
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from core.models import Base, SchoolMixin
 from sqlalchemy import (
+    JSON,
     Column,
     DateTime,
     Enum,
-    ForeignKey,
     Integer,
-    JSON,
     String,
     Text,
 )
-from sqlalchemy.orm import relationship
-
-from core.models import Base, SchoolMixin
 
 
 class PrescriptionType(str, enum.Enum):
     """处方类型"""
-    CLASS_DIAGNOSIS = "CLASS_DIAGNOSIS"   # 班级月度诊断书
-    STUDENT_INTV = "STUDENT_INTV"         # 学生心理干预话术
+
+    CLASS_DIAGNOSIS = "CLASS_DIAGNOSIS"  # 班级月度诊断书
+    STUDENT_INTV = "STUDENT_INTV"  # 学生心理干预话术
 
 
 class RiskLevel(str, enum.Enum):
     """风险等级"""
-    HIGH = "HIGH"       # 高风险（需立即干预）
-    MEDIUM = "MEDIUM"   # 中风险（需关注）
-    LOW = "LOW"         # 低风险（正常）
+
+    HIGH = "HIGH"  # 高风险（需立即干预）
+    MEDIUM = "MEDIUM"  # 中风险（需关注）
+    LOW = "LOW"  # 低风险（正常）
 
 
 class AIPrescription(Base, SchoolMixin):
@@ -40,6 +40,7 @@ class AIPrescription(Base, SchoolMixin):
     AI 处方记录表
     同时支持班级诊断（target_type='class'）和学生干预（target_type='student'）
     """
+
     __tablename__ = "ai_prescriptions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -68,13 +69,13 @@ class AIPrescription(Base, SchoolMixin):
 
     created_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
 
@@ -90,8 +91,7 @@ class AIPrescription(Base, SchoolMixin):
         return {
             "id": self.id,
             "school_id": self.school_id,
-            "prescription_type": self.prescription_type.value
-            if self.prescription_type else None,
+            "prescription_type": self.prescription_type.value if self.prescription_type else None,
             "target_id": self.target_id,
             "target_type": self.target_type,
             "risk_level": self.risk_level.value if self.risk_level else None,

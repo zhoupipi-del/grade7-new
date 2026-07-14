@@ -15,19 +15,22 @@ modules/behavior/routers.py — 违纪行为管理 API
   POST   /api/v1/behavior/appeals/{id}/review  审核申诉
 """
 
-from typing import Optional
 from datetime import date
 
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.models import User, UserRole
-from core.routers import get_db, get_current_user, require_role
-from .services import BehaviorService
 from .schemas import (
-    DisciplineCreate, DisciplineUpdate, DisciplineOut,
-    DisciplineStatsOut, AppealCreate, AppealReview, AppealOut,
+    AppealCreate,
+    AppealOut,
+    AppealReview,
+    DisciplineCreate,
+    DisciplineOut,
+    DisciplineUpdate,
 )
+from .services import BehaviorService
 
 router = APIRouter(tags=["behavior"])
 
@@ -35,6 +38,7 @@ router = APIRouter(tags=["behavior"])
 # ═══════════════════════════════════════════════════════════════
 # 辅助函数
 # ═══════════════════════════════════════════════════════════════
+
 
 def _resolve_role(role) -> str:
     """自呼吸看守熔断 — 杜绝 str/enum 混合体 AttributeError，始终返回纯字符串"""
@@ -52,18 +56,23 @@ def _resolve_role(role) -> str:
 # 违纪记录 CRUD
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post("/records", response_model=DisciplineOut, status_code=201)
 async def create_discipline(
     body: DisciplineCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
+    _guard: User = Depends(
+        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
+    ),
 ):
     """创建违纪记录 — 自动触发累计扣分升级检查"""
     try:
         record = await BehaviorService.create_record(
-            db, current_user.school_id,
-            body.model_dump(), current_user.id,
+            db,
+            current_user.school_id,
+            body.model_dump(),
+            current_user.id,
             creator_role=_resolve_role(current_user.role),
         )
         return _format_record(record)
@@ -73,13 +82,13 @@ async def create_discipline(
 
 @router.get("/records")
 async def list_discipline(
-    class_id: Optional[int] = None,
-    grade_id: Optional[int] = None,
-    student_id: Optional[int] = None,
-    type: Optional[str] = None,
-    status: Optional[str] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    class_id: int | None = None,
+    grade_id: int | None = None,
+    student_id: int | None = None,
+    type: str | None = None,
+    status: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -88,16 +97,24 @@ async def list_discipline(
     """分页查询违纪记录列表"""
     offset = (page - 1) * per_page
     records, total = await BehaviorService.list_records(
-        db, current_user.school_id,
-        class_id=class_id, grade_id=grade_id, student_id=student_id,
-        type=type, status=status,
-        start_date=start_date, end_date=end_date,
-        limit=per_page, offset=offset,
+        db,
+        current_user.school_id,
+        class_id=class_id,
+        grade_id=grade_id,
+        student_id=student_id,
+        type=type,
+        status=status,
+        start_date=start_date,
+        end_date=end_date,
+        limit=per_page,
+        offset=offset,
     )
     pages = (total + per_page - 1) // per_page if total > 0 else 0
     return {
         "items": [_format_record(r) for r in records],
-        "total": total, "page": page, "per_page": per_page,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
         "pages": pages,
     }
 
@@ -159,19 +176,22 @@ async def resolve_discipline(
 # 统计 & 风险评估
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/stats")
 async def discipline_stats(
-    grade_id: Optional[int] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    grade_id: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """违纪统计概览（按类型/分类/班级/月份分组）"""
     return await BehaviorService.get_stats(
-        db, current_user.school_id,
+        db,
+        current_user.school_id,
         grade_id=grade_id,
-        start_date=start_date, end_date=end_date,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 
@@ -189,6 +209,7 @@ async def escalation_risk(
 # 申诉
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.post("/appeals", response_model=AppealOut, status_code=201)
 async def create_appeal(
     body: AppealCreate,
@@ -198,7 +219,8 @@ async def create_appeal(
     """提交违纪申诉（家长端）"""
     try:
         appeal = await BehaviorService.create_appeal(
-            db, current_user.school_id,
+            db,
+            current_user.school_id,
             body.model_dump(),
             current_user.id,
             current_user.bound_student_id or 0,
@@ -212,21 +234,25 @@ async def create_appeal(
 
 @router.get("/appeals")
 async def list_appeals(
-    status: Optional[str] = None,
+    status: str | None = None,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     appeals, total = await BehaviorService.list_appeals(
-        db, current_user.school_id,
+        db,
+        current_user.school_id,
         status=status,
-        limit=per_page, offset=(page - 1) * per_page,
+        limit=per_page,
+        offset=(page - 1) * per_page,
     )
     pages = (total + per_page - 1) // per_page if total > 0 else 0
     return {
         "items": [_format_appeal(a) for a in appeals],
-        "total": total, "page": page, "per_page": per_page,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
         "pages": pages,
     }
 
@@ -240,8 +266,11 @@ async def review_appeal(
 ):
     """审核申诉（班主任/年级组长/德育处）"""
     appeal = await BehaviorService.review_appeal(
-        db, appeal_id, body.status,
-        body.review_comment or "", current_user.id,
+        db,
+        appeal_id,
+        body.status,
+        body.review_comment or "",
+        current_user.id,
     )
     if not appeal:
         raise HTTPException(status_code=400, detail="申诉不存在或已处理")
@@ -252,12 +281,15 @@ async def review_appeal(
 # 格式化辅助
 # ═══════════════════════════════════════════════════════════════
 
+
 def _format_record(r) -> dict:
     """安全格式化违纪记录，容错关系未加载"""
     try:
         student_name = r.student.name if r.student else None
         student_no = r.student.student_no if r.student else None
-        class_name = r.student.class_.name if r.student and getattr(r.student, 'class_', None) else None
+        class_name = (
+            r.student.class_.name if r.student and getattr(r.student, "class_", None) else None
+        )
         creator_name = r.creator.display_name if r.creator else None
     except Exception:
         student_name = student_no = class_name = creator_name = None

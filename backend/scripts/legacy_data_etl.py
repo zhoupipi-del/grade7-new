@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 legacy_data_etl.py — 旧系统数据清洗 ETL 脚本模板
 
@@ -20,9 +19,8 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, date
-from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
+from datetime import date, datetime
 
 # 日志配置
 logging.basicConfig(
@@ -40,9 +38,11 @@ logger = logging.getLogger(__name__)
 # 数据血缘标记
 # ═══════════════════════════════════════════════════════════════
 
+
 @dataclass
 class LineageMarker:
     """数据血缘标记 — 记录每条导入数据的来源信息"""
+
     source_system: str = "legacy_flask"
     source_table: str = ""
     source_id: str = ""
@@ -51,7 +51,7 @@ class LineageMarker:
     batch_id: str = ""
     sync_status: str = "legacy"  # native / legacy / imported
     imported_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    field_mapping: Dict[str, str] = field(default_factory=dict)
+    field_mapping: dict[str, str] = field(default_factory=dict)
     transform_notes: str = ""
 
     def to_dict(self) -> dict:
@@ -65,6 +65,7 @@ class LineageMarker:
 # ═══════════════════════════════════════════════════════════════
 # 影子存储 — 旧数据的临时存储层
 # ═══════════════════════════════════════════════════════════════
+
 
 class ShadowStore:
     """
@@ -82,58 +83,73 @@ class ShadowStore:
         self.storage_dir = storage_dir
         os.makedirs(storage_dir, exist_ok=True)
 
-    def save_students(self, students: List[dict], batch_id: str) -> str:
+    def save_students(self, students: list[dict], batch_id: str) -> str:
         """保存旧学生数据到影子存储"""
         path = os.path.join(self.storage_dir, f"students_{batch_id}.json")
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({
-                "batch_id": batch_id,
-                "total": len(students),
-                "imported_at": datetime.now().isoformat(),
-                "students": students,
-            }, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {
+                    "batch_id": batch_id,
+                    "total": len(students),
+                    "imported_at": datetime.now().isoformat(),
+                    "students": students,
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
         logger.info(f"影子存储: {len(students)} 条学生数据保存到 {path}")
         return path
 
-    def save_classes(self, classes: List[dict], batch_id: str) -> str:
+    def save_classes(self, classes: list[dict], batch_id: str) -> str:
         path = os.path.join(self.storage_dir, f"classes_{batch_id}.json")
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({
-                "batch_id": batch_id,
-                "total": len(classes),
-                "imported_at": datetime.now().isoformat(),
-                "classes": classes,
-            }, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {
+                    "batch_id": batch_id,
+                    "total": len(classes),
+                    "imported_at": datetime.now().isoformat(),
+                    "classes": classes,
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
         logger.info(f"影子存储: {len(classes)} 条班级数据保存到 {path}")
         return path
 
-    def save_teachers(self, teachers: List[dict], batch_id: str) -> str:
+    def save_teachers(self, teachers: list[dict], batch_id: str) -> str:
         path = os.path.join(self.storage_dir, f"teachers_{batch_id}.json")
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({
-                "batch_id": batch_id,
-                "total": len(teachers),
-                "imported_at": datetime.now().isoformat(),
-                "teachers": teachers,
-            }, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {
+                    "batch_id": batch_id,
+                    "total": len(teachers),
+                    "imported_at": datetime.now().isoformat(),
+                    "teachers": teachers,
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
         logger.info(f"影子存储: {len(teachers)} 条教师数据保存到 {path}")
         return path
 
-    def load_students(self, batch_id: str) -> List[dict]:
+    def load_students(self, batch_id: str) -> list[dict]:
         path = os.path.join(self.storage_dir, f"students_{batch_id}.json")
         if not os.path.exists(path):
             return []
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         return data.get("students", [])
 
-    def find_student(self, keyword: str) -> Optional[dict]:
+    def find_student(self, keyword: str) -> dict | None:
         """在影子存储中查找学生（按学号或姓名）"""
         for fname in os.listdir(self.storage_dir):
             if not fname.startswith("students_"):
                 continue
             path = os.path.join(self.storage_dir, fname)
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             for s in data.get("students", []):
                 if s.get("student_no") == keyword or s.get("name") == keyword:
@@ -144,6 +160,7 @@ class ShadowStore:
 # ═══════════════════════════════════════════════════════════════
 # ETL 管道 — 抽取/转换/加载
 # ═══════════════════════════════════════════════════════════════
+
 
 class ETLPipeline:
     """
@@ -157,10 +174,11 @@ class ETLPipeline:
 
     # ── 抽取 ──
 
-    def extract_from_excel(self, file_path: str, sheet_name: str = "Sheet1") -> List[dict]:
+    def extract_from_excel(self, file_path: str, sheet_name: str = "Sheet1") -> list[dict]:
         """从 Excel 抽取旧数据"""
         try:
             import openpyxl
+
             wb = openpyxl.load_workbook(file_path, data_only=True)
             ws = wb[sheet_name]
             rows = list(ws.iter_rows(min_row=2, values_only=True))
@@ -184,11 +202,12 @@ class ETLPipeline:
             logger.error(f"抽取失败: {e}")
             raise
 
-    def extract_from_csv(self, file_path: str, encoding: str = "utf-8") -> List[dict]:
+    def extract_from_csv(self, file_path: str, encoding: str = "utf-8") -> list[dict]:
         """从 CSV 抽取旧数据"""
         import csv
+
         data = []
-        with open(file_path, "r", encoding=encoding) as f:
+        with open(file_path, encoding=encoding) as f:
             reader = csv.DictReader(f)
             for row in reader:
                 data.append(dict(row))
@@ -197,7 +216,7 @@ class ETLPipeline:
 
     # ── 转换 ──
 
-    def transform_students(self, raw_students: List[dict]) -> List[dict]:
+    def transform_students(self, raw_students: list[dict]) -> list[dict]:
         """
         清洗学生数据：
         - 字段名映射（旧系统 -> WINGS）
@@ -257,10 +276,14 @@ class ETLPipeline:
                     val = record.get(date_field)
                     if val and isinstance(val, str):
                         try:
-                            record[date_field] = datetime.strptime(val[:10], "%Y-%m-%d").date().isoformat()
+                            record[date_field] = (
+                                datetime.strptime(val[:10], "%Y-%m-%d").date().isoformat()
+                            )
                         except ValueError:
                             try:
-                                record[date_field] = datetime.strptime(val[:10], "%Y/%m/%d").date().isoformat()
+                                record[date_field] = (
+                                    datetime.strptime(val[:10], "%Y/%m/%d").date().isoformat()
+                                )
                             except ValueError:
                                 record[date_field] = None
                     elif val and isinstance(val, datetime):
@@ -288,7 +311,7 @@ class ETLPipeline:
 
         return transformed
 
-    def transform_classes(self, raw_classes: List[dict]) -> List[dict]:
+    def transform_classes(self, raw_classes: list[dict]) -> list[dict]:
         """清洗班级数据"""
         field_mapping = {
             "班级名称": "name",
@@ -316,7 +339,7 @@ class ETLPipeline:
         logger.info(f"班级转换: {len(raw_classes)} -> {len(transformed)} 条")
         return transformed
 
-    def transform_teachers(self, raw_teachers: List[dict]) -> List[dict]:
+    def transform_teachers(self, raw_teachers: list[dict]) -> list[dict]:
         """清洗教师数据"""
         field_mapping = {
             "姓名": "name",
@@ -343,7 +366,9 @@ class ETLPipeline:
                 g = str(gender).strip()
                 record["gender"] = "M" if g in ("男", "M") else "F" if g in ("女", "F") else None
             record["sync_status"] = "legacy"
-            record["lineage_ref"] = f"legacy_flask:teachers:{record.get('employee_no') or record.get('name')}"
+            record["lineage_ref"] = (
+                f"legacy_flask:teachers:{record.get('employee_no') or record.get('name')}"
+            )
             record["batch_id"] = self.batch_id
             transformed.append(record)
 
@@ -352,7 +377,7 @@ class ETLPipeline:
 
     # ── 加载到影子存储 ──
 
-    def load_to_shadow(self, data: List[dict], data_type: str) -> str:
+    def load_to_shadow(self, data: list[dict], data_type: str) -> str:
         """加载清洗后的数据到影子存储"""
         if data_type == "students":
             return self.shadow.save_students(data, self.batch_id)
@@ -424,7 +449,7 @@ class ETLPipeline:
 
     # ── 按需激活 ──
 
-    def activate_student(self, student_no: str) -> Optional[dict]:
+    def activate_student(self, student_no: str) -> dict | None:
         """
         按需激活 — 当学生在 WINGS 中触发业务请求时，
         从影子存储加载该学生的历史数据到新系统。
@@ -462,7 +487,7 @@ class ETLPipeline:
         if not os.path.exists(report_path):
             return {"error": f"未找到批次报告: {batch_id}"}
 
-        with open(report_path, "r", encoding="utf-8") as f:
+        with open(report_path, encoding="utf-8") as f:
             report = json.load(f)
 
         # 对比源数据和影子存储数据
@@ -488,12 +513,21 @@ class ETLPipeline:
 # CLI 入口
 # ═══════════════════════════════════════════════════════════════
 
+
 def main():
     parser = argparse.ArgumentParser(description="WINGS 旧数据 ETL 工具")
-    parser.add_argument("--action", required=True,
-                        choices=["import-students", "import-classes", "import-teachers",
-                                 "activate-student", "verify"],
-                        help="执行的操作")
+    parser.add_argument(
+        "--action",
+        required=True,
+        choices=[
+            "import-students",
+            "import-classes",
+            "import-teachers",
+            "activate-student",
+            "verify",
+        ],
+        help="执行的操作",
+    )
     parser.add_argument("--source", help="源数据文件路径")
     parser.add_argument("--student-no", help="要激活的学生学号")
     parser.add_argument("--batch-id", help="要验证的批次ID")
@@ -508,7 +542,7 @@ def main():
             print("错误: 需要 --source 参数")
             sys.exit(1)
         report = etl.run_full_etl(args.source, "students")
-        print(f"\n导入完成:")
+        print("\n导入完成:")
         print(f"  源数据: {report['raw_count']} 条")
         print(f"  清洗后: {report['transformed_count']} 条")
         print(f"  影子存储: {report['shadow_path']}")
@@ -534,7 +568,7 @@ def main():
             sys.exit(1)
         result = etl.activate_student(args.student_no)
         if result:
-            print(f"\n学生激活成功:")
+            print("\n学生激活成功:")
             print(f"  姓名: {result.get('name')}")
             print(f"  学号: {result.get('student_no')}")
             print(f"  旧学号: {result.get('legacy_student_no')}")
@@ -547,7 +581,7 @@ def main():
             print("错误: 需要 --batch-id 参数")
             sys.exit(1)
         result = etl.verify_import(args.batch_id)
-        print(f"\n验证结果:")
+        print("\n验证结果:")
         for k, v in result.items():
             print(f"  {k}: {v}")
 

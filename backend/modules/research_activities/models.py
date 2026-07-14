@@ -11,22 +11,26 @@ research_activities/models.py — 教研活动管理
   PLANNED → CANCELLED
 """
 
+from core.models import Base, SchoolMixin, get_local_now
 from sqlalchemy import (
-    Column, BigInteger, String, Integer, Float, Boolean, DateTime, Text, JSON,
-    Index, UniqueConstraint,
+    JSON,
+    BigInteger,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
-
-from core.models import Base, get_local_now
-from core.models import SchoolMixin
-
 
 # ──────────────────────────────────────────────
 # 状态枚举
 # ──────────────────────────────────────────────
-ACT_PLANNED = "planned"          # 已计划
+ACT_PLANNED = "planned"  # 已计划
 ACT_IN_PROGRESS = "in_progress"  # 进行中
-ACT_COMPLETED = "completed"      # 已完成
-ACT_CANCELLED = "cancelled"      # 已取消
+ACT_COMPLETED = "completed"  # 已完成
+ACT_CANCELLED = "cancelled"  # 已取消
 
 VALID_ACT_TRANSITIONS = {
     ACT_PLANNED: [ACT_IN_PROGRESS, ACT_CANCELLED],
@@ -36,30 +40,30 @@ VALID_ACT_TRANSITIONS = {
 }
 
 # 活动类型
-ACT_TYPE_REGULAR = "regular_meeting"    # 常规教研会
-ACT_TYPE_SPECIAL = "special_topic"       # 专题研讨
+ACT_TYPE_REGULAR = "regular_meeting"  # 常规教研会
+ACT_TYPE_SPECIAL = "special_topic"  # 专题研讨
 ACT_TYPE_LESSON_STUDY = "lesson_study"  # 课例研究
-ACT_TYPE_TRAINING = "training"           # 培训进修
-ACT_TYPE_EXCHANGE = "exchange"           # 交流观摩
+ACT_TYPE_TRAINING = "training"  # 培训进修
+ACT_TYPE_EXCHANGE = "exchange"  # 交流观摩
 
 # 参与角色
-PART_ORGANIZER = "organizer"    # 组织者
-PART_PRESENTER = "presenter"    # 主讲人
-PART_RECORDER = "recorder"      # 记录人
+PART_ORGANIZER = "organizer"  # 组织者
+PART_PRESENTER = "presenter"  # 主讲人
+PART_RECORDER = "recorder"  # 记录人
 PART_PARTICIPANT = "participant"  # 参与者
 
 # 考勤状态
 ATTEND_REGISTERED = "registered"  # 已报名
-ATTEND_PRESENT = "present"        # 出席
-ATTEND_LATE = "late"              # 迟到
-ATTEND_ABSENT = "absent"          # 缺席
-ATTEND_LEAVE = "leave"            # 请假
+ATTEND_PRESENT = "present"  # 出席
+ATTEND_LATE = "late"  # 迟到
+ATTEND_ABSENT = "absent"  # 缺席
+ATTEND_LEAVE = "leave"  # 请假
 
 # 议题状态
-AGENDA_PENDING = "pending"        # 待讨论
+AGENDA_PENDING = "pending"  # 待讨论
 AGENDA_DISCUSSING = "discussing"  # 讨论中
-AGENDA_RESOLVED = "resolved"      # 已决议
-AGENDA_DEFERRED = "deferred"      # 暂缓
+AGENDA_RESOLVED = "resolved"  # 已决议
+AGENDA_DEFERRED = "deferred"  # 暂缓
 
 
 class ResearchActivity(Base, SchoolMixin):
@@ -73,7 +77,8 @@ class ResearchActivity(Base, SchoolMixin):
     title = Column(String(200), nullable=False, comment="活动标题")
     description = Column(Text, comment="活动简介")
     activity_type = Column(
-        String(30), default=ACT_TYPE_REGULAR,
+        String(30),
+        default=ACT_TYPE_REGULAR,
         comment="类型: regular_meeting/special_topic/lesson_study/training/exchange",
     )
 
@@ -90,7 +95,9 @@ class ResearchActivity(Base, SchoolMixin):
 
     # ── 状态机 ──
     status = Column(
-        String(20), default=ACT_PLANNED, nullable=False,
+        String(20),
+        default=ACT_PLANNED,
+        nullable=False,
         comment="状态: planned/in_progress/completed/cancelled",
     )
     status_updated_at = Column(DateTime, comment="状态最后变更时间")
@@ -103,21 +110,25 @@ class ResearchActivity(Base, SchoolMixin):
     # ── 活动总结 ──
     summary = Column(Text, comment="活动总结")
     decisions = Column(
-        JSON, default=list,
+        JSON,
+        default=list,
         comment='决议事项: ["统一函数章节进度", "下周集体备课主备人:张老师"]',
     )
     attachments = Column(
-        JSON, default=list,
-        comment='附件列表: [{name, url, type}]',
+        JSON,
+        default=list,
+        comment="附件列表: [{name, url, type}]",
     )
 
     # ── 血缘咬合备课+听课 ──
     linked_plan_ids = Column(
-        JSON, default=list,
+        JSON,
+        default=list,
         comment="关联备课教案ID列表: [1, 3, 7]",
     )
     linked_observation_ids = Column(
-        JSON, default=list,
+        JSON,
+        default=list,
         comment="关联听课记录ID列表: [12, 15]",
     )
 
@@ -147,13 +158,15 @@ class ResearchActivityParticipant(Base, SchoolMixin):
 
     # ── 角色 ──
     role = Column(
-        String(20), default=PART_PARTICIPANT,
+        String(20),
+        default=PART_PARTICIPANT,
         comment="角色: organizer/presenter/recorder/participant",
     )
 
     # ── 考勤 ──
     attendance_status = Column(
-        String(20), default=ATTEND_REGISTERED,
+        String(20),
+        default=ATTEND_REGISTERED,
         comment="考勤: registered/present/late/absent/leave",
     )
     check_in_at = Column(DateTime, comment="签到时间")
@@ -161,7 +174,8 @@ class ResearchActivityParticipant(Base, SchoolMixin):
 
     # ── 贡献度 ──
     contribution_score = Column(
-        Integer, comment="参与贡献度 1-5 (活动后由组织者评定)",
+        Integer,
+        comment="参与贡献度 1-5 (活动后由组织者评定)",
     )
     contribution_note = Column(String(200), comment="贡献度备注")
 
@@ -198,7 +212,8 @@ class ResearchActivityAgenda(Base, SchoolMixin):
     # ── 决议 ──
     decision = Column(Text, comment="决议结果")
     status = Column(
-        String(20), default=AGENDA_PENDING,
+        String(20),
+        default=AGENDA_PENDING,
         comment="议题状态: pending/discussing/resolved/deferred",
     )
 

@@ -12,35 +12,41 @@ research_observation/models.py — 听课评课量化追踪
     → APPEALED (教师申诉中) → RESOLVED (申诉已处理)
 """
 
+from core.models import Base, SchoolMixin, get_local_now
 from sqlalchemy import (
-    Column, BigInteger, String, Integer, Float, Boolean, DateTime, Text, JSON,
-    ForeignKey, Index, UniqueConstraint,
+    JSON,
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
-
-from core.models import Base, get_local_now
-from core.models import SchoolMixin
-
 
 # ──────────────────────────────────────────────
 # 反馈状态枚举
 # ──────────────────────────────────────────────
-FEEDBACK_PENDING = "pending"        # 待教师确认
-FEEDBACK_CONFIRMED = "confirmed"    # 教师已确认
-FEEDBACK_APPEALED = "appealed"      # 教师申诉中
-FEEDBACK_RESOLVED = "resolved"      # 申诉已处理
+FEEDBACK_PENDING = "pending"  # 待教师确认
+FEEDBACK_CONFIRMED = "confirmed"  # 教师已确认
+FEEDBACK_APPEALED = "appealed"  # 教师申诉中
+FEEDBACK_RESOLVED = "resolved"  # 申诉已处理
 
 VALID_FEEDBACK_TRANSITIONS = {
     FEEDBACK_PENDING: [FEEDBACK_CONFIRMED, FEEDBACK_APPEALED],
     FEEDBACK_CONFIRMED: [],  # 终态
     FEEDBACK_APPEALED: [FEEDBACK_RESOLVED],
-    FEEDBACK_RESOLVED: [],   # 终态
+    FEEDBACK_RESOLVED: [],  # 终态
 }
 
 # 听课类型
-OBS_TYPE_ROUTINE = "routine"        # 常规推门听课
-OBS_TYPE_SCHEDULED = "scheduled"    # 计划性听课
-OBS_TYPE_PUBLIC = "public"          # 公开课
-OBS_TYPE_DEMO = "demo"              # 示范课
+OBS_TYPE_ROUTINE = "routine"  # 常规推门听课
+OBS_TYPE_SCHEDULED = "scheduled"  # 计划性听课
+OBS_TYPE_PUBLIC = "public"  # 公开课
+OBS_TYPE_DEMO = "demo"  # 示范课
 OBS_TYPE_COMPETITION = "competition"  # 比赛课
 
 
@@ -60,13 +66,21 @@ class ResearchClassObservation(Base, SchoolMixin):
     subject_code = Column(String(20), nullable=False, comment="学科代码")
     lesson_title = Column(String(200), comment="课题名称")
     observation_type = Column(
-        String(20), default=OBS_TYPE_ROUTINE,
+        String(20),
+        default=OBS_TYPE_ROUTINE,
         comment="听课类型: routine/scheduled/public/demo/competition",
     )
 
     # ── 血缘咬合集体备课 ──
-    lesson_plan_id = Column(BigInteger, comment="关联 research_lesson_plans.id (可空, 无教案时为NULL)")
+    lesson_plan_id = Column(
+        BigInteger, comment="关联 research_lesson_plans.id (可空, 无教案时为NULL)"
+    )
     plan_version_number = Column(Integer, comment="听课时教案版本号 (锁定快照)")
+
+    # ── 时空弹道锚定 (Wings 3.1 时空连续体) ──
+    schedule_instance_id = Column(
+        BigInteger, comment="关联 timetable_schedule_instances.id (时空弹道锚定, 可空)"
+    )
 
     # ── 量化评分 ──
     score_total = Column(Float, comment="量化总分 (从rubric自动计算)")
@@ -82,7 +96,7 @@ class ResearchClassObservation(Base, SchoolMixin):
     # ── 文本反馈 ──
     text_feedback = Column(
         JSON,
-        comment='结构化文本: {highlights:[], suggestions:[], overall_comment}',
+        comment="结构化文本: {highlights:[], suggestions:[], overall_comment}",
     )
 
     # ── 教案执行度 ──
@@ -92,9 +106,21 @@ class ResearchClassObservation(Base, SchoolMixin):
     )
     plan_deviation_note = Column(Text, comment="偏离说明 (如果partial/deviated)")
 
+    # ── 时间戳打点弹幕 (Wings 3.1 听评课时空弹道) ──
+    timeline_comments = Column(
+        JSON,
+        comment=(
+            "打点弹幕数组: ["
+            "{seconds_in_lesson, type, text, author_id, author_name, created_at}"
+            "] type: highlight/suggestion/question/note"
+        ),
+    )
+
     # ── 反馈状态机 ──
     feedback_status = Column(
-        String(20), default=FEEDBACK_PENDING, nullable=False,
+        String(20),
+        default=FEEDBACK_PENDING,
+        nullable=False,
         comment="反馈状态: pending/confirmed/appealed/resolved",
     )
     feedback_status_updated_at = Column(DateTime, comment="反馈状态最后变更时间")
@@ -121,7 +147,9 @@ class ResearchObservationRubric(Base, SchoolMixin):
     __tablename__ = "research_observation_rubrics"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    observation_id = Column(BigInteger, nullable=False, comment="关联 research_class_observations.id")
+    observation_id = Column(
+        BigInteger, nullable=False, comment="关联 research_class_observations.id"
+    )
 
     # ── 评分模板信息 ──
     template_name = Column(String(100), comment="评分模板名称 (如: 常规听课评分表/公开课评分表)")
@@ -129,10 +157,11 @@ class ResearchObservationRubric(Base, SchoolMixin):
 
     # ── 多维评分矩阵 ──
     rubric_metrics = Column(
-        JSON, nullable=False,
+        JSON,
+        nullable=False,
         comment=(
             "多维动态评分: ["
-            '{name, score, max, weight, comment}'
+            "{name, score, max, weight, comment}"
             "] 示例: [{name:'教学引入',score:9,max:10,comment:'导入自然'}]"
         ),
     )
@@ -159,19 +188,23 @@ class ResearchObservationAppeal(Base, SchoolMixin):
     __tablename__ = "research_observation_appeals"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    observation_id = Column(BigInteger, nullable=False, comment="关联 research_class_observations.id")
+    observation_id = Column(
+        BigInteger, nullable=False, comment="关联 research_class_observations.id"
+    )
     teacher_id = Column(BigInteger, nullable=False, comment="教师 user_id")
 
     # ── 申诉/确认类型 ──
     action_type = Column(
-        String(20), nullable=False,
+        String(20),
+        nullable=False,
         comment="动作类型: confirm(确认) / appeal(申诉) / resolve(处理申诉)",
     )
 
     # ── 申诉内容 ──
     appeal_reason = Column(Text, comment="申诉理由 (action_type=appeal时填写)")
     appealed_dimensions = Column(
-        JSON, comment="申诉维度列表: ['重难点突出', '生生互动']",
+        JSON,
+        comment="申诉维度列表: ['重难点突出', '生生互动']",
     )
 
     # ── 处理结果 ──

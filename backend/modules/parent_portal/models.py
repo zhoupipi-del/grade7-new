@@ -13,35 +13,42 @@ modules/parent_portal/models.py — 家长门户数据模型
 """
 
 import enum
-from sqlalchemy import (
-    Column, BigInteger, Integer, String, Boolean, DateTime, JSON, Text,
-    Index, ForeignKey,
-)
-from core.models import Base, SchoolMixin, get_local_now
 
+from core.models import Base, SchoolMixin, get_local_now
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+)
 
 # ═══════════════════════════════════════════════════════════════
 # 反馈类型枚举
 # ═══════════════════════════════════════════════════════════════
 
+
 class FeedbackType(str, enum.Enum):
-    SUGGESTION = "suggestion"       # 建议
-    COMPLAINT = "complaint"         # 投诉
-    PRAISE = "praise"               # 表扬
-    CONSULTATION = "consultation"   # 咨询
-    OTHER = "other"                 # 其他
+    SUGGESTION = "suggestion"  # 建议
+    COMPLAINT = "complaint"  # 投诉
+    PRAISE = "praise"  # 表扬
+    CONSULTATION = "consultation"  # 咨询
+    OTHER = "other"  # 其他
 
 
 class FeedbackStatus(str, enum.Enum):
-    PENDING = "pending"             # 待处理
-    PROCESSING = "processing"       # 处理中
-    RESOLVED = "resolved"           # 已解决
-    CLOSED = "closed"               # 已关闭
+    PENDING = "pending"  # 待处理
+    PROCESSING = "processing"  # 处理中
+    RESOLVED = "resolved"  # 已解决
+    CLOSED = "closed"  # 已关闭
 
 
 class AppealTargetModule(str, enum.Enum):
-    DISCIPLINE = "discipline"       # 处分申诉
-    BEHAVIOR = "behavior"           # 违纪申诉
+    DISCIPLINE = "discipline"  # 处分申诉
+    BEHAVIOR = "behavior"  # 违纪申诉
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -77,26 +84,45 @@ class ParentFeedback(Base, SchoolMixin):
     血缘追踪: source_context JSON 记录来源上下文（渠道、触发事件等）
     通知联动: 提交时自动通知班主任，处理时自动通知家长
     """
+
     __tablename__ = "parent_feedbacks"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     # 绑定关系（越权铁闸核心字段）
-    parent_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True,
-                        comment="提交反馈的家长 user_id")
-    student_id = Column(BigInteger, ForeignKey("students.id"), nullable=False, index=True,
-                        comment="反馈关联的学生 id（必须与 parent_id.bound_student_id 一致）")
+    parent_id = Column(
+        BigInteger,
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+        comment="提交反馈的家长 user_id",
+    )
+    student_id = Column(
+        BigInteger,
+        ForeignKey("students.id"),
+        nullable=False,
+        index=True,
+        comment="反馈关联的学生 id（必须与 parent_id.bound_student_id 一致）",
+    )
     parent_name = Column(String(50), nullable=True, comment="家长姓名-冗余减少JOIN")
 
     # 反馈内容
-    feedback_type = Column(String(20), nullable=False, comment="反馈类型: suggestion/complaint/praise/consultation/other")
+    feedback_type = Column(
+        String(20),
+        nullable=False,
+        comment="反馈类型: suggestion/complaint/praise/consultation/other",
+    )
     title = Column(String(200), nullable=False, comment="反馈标题")
     content = Column(Text, nullable=False, comment="反馈正文")
     attachments = Column(JSON, nullable=True, comment="附件 URL 列表")
 
     # 状态机
-    status = Column(String(20), nullable=False, default=FeedbackStatus.PENDING.value,
-                    comment="反馈状态: pending/processing/resolved/closed")
+    status = Column(
+        String(20),
+        nullable=False,
+        default=FeedbackStatus.PENDING.value,
+        comment="反馈状态: pending/processing/resolved/closed",
+    )
 
     # 处理人（班主任/德育处）
     handler_id = Column(BigInteger, ForeignKey("users.id"), nullable=True, comment="处理人 user_id")
@@ -120,6 +146,7 @@ class ParentFeedback(Base, SchoolMixin):
 # 表 2 — 申诉代理追踪（Facade 路由到 discipline/behavior）
 # ═══════════════════════════════════════════════════════════════
 
+
 class ParentAppealsProxy(Base, SchoolMixin):
     """
     申诉代理追踪表 — Facade 模式:
@@ -130,23 +157,35 @@ class ParentAppealsProxy(Base, SchoolMixin):
       - 只做路由追踪: target_module + target_record_id + target_appeal_id
       - 双向闭环: 家长可查询申诉进度，处理结果回传
     """
+
     __tablename__ = "parent_appeals_proxy"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     # 绑定关系（越权铁闸核心字段）
-    parent_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True,
-                        comment="发起申诉的家长 user_id")
-    student_id = Column(BigInteger, ForeignKey("students.id"), nullable=False, index=True,
-                        comment="申诉关联的学生 id")
+    parent_id = Column(
+        BigInteger,
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+        comment="发起申诉的家长 user_id",
+    )
+    student_id = Column(
+        BigInteger,
+        ForeignKey("students.id"),
+        nullable=False,
+        index=True,
+        comment="申诉关联的学生 id",
+    )
 
     # 申诉代理路由
-    target_module = Column(String(20), nullable=False,
-                           comment="目标模块: discipline/behavior")
-    target_record_id = Column(BigInteger, nullable=False,
-                               comment="目标原始记录 id（处分id 或 违纪记录id）")
-    target_appeal_id = Column(BigInteger, nullable=True,
-                              comment="目标模块生成的审批工单 id（路由成功后回填）")
+    target_module = Column(String(20), nullable=False, comment="目标模块: discipline/behavior")
+    target_record_id = Column(
+        BigInteger, nullable=False, comment="目标原始记录 id（处分id 或 违纪记录id）"
+    )
+    target_appeal_id = Column(
+        BigInteger, nullable=True, comment="目标模块生成的审批工单 id（路由成功后回填）"
+    )
 
     # 申诉内容（快照，防止原记录修改影响）
     applicant_name = Column(String(50), nullable=False, comment="申请人姓名")
@@ -154,8 +193,12 @@ class ParentAppealsProxy(Base, SchoolMixin):
     reason = Column(Text, nullable=False, comment="申诉理由")
 
     # 代理状态
-    proxy_status = Column(String(20), nullable=False, default="submitted",
-                          comment="代理状态: submitted/routed/processing/completed/rejected")
+    proxy_status = Column(
+        String(20),
+        nullable=False,
+        default="submitted",
+        comment="代理状态: submitted/routed/processing/completed/rejected",
+    )
 
     # 血缘追踪
     source_context = Column(JSON, nullable=True, comment="来源上下文")

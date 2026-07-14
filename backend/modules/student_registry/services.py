@@ -7,20 +7,21 @@ modules/student_registry/services.py — 学籍管理业务逻辑
 
 import logging
 from datetime import date, datetime
-from typing import Optional, List, Tuple
 
-from sqlalchemy import select, func, update, and_, or_
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
-from core.models import Student, Class, Grade, User, UserRole
+from core.models import Class, Grade, Student
 from modules.student_registry.models import (
-    StudentStatusChange, StudentRegistryExt,
-    STUDENT_STATUS, VALID_TRANSITIONS,
+    VALID_TRANSITIONS,
+    StudentRegistryExt,
+    StudentStatusChange,
 )
 from modules.student_registry.schemas import (
-    StudentCreate, StudentUpdate, StatusChangeCreate,
+    StatusChangeCreate,
+    StudentCreate,
+    StudentUpdate,
 )
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 
@@ -117,9 +118,7 @@ class StudentRegistryService:
             student_no = data.national_student_no
 
         # 检查学号唯一
-        existing = await db.execute(
-            select(Student).where(Student.student_no == student_no)
-        )
+        existing = await db.execute(select(Student).where(Student.student_no == student_no))
         if existing.scalar_one_or_none():
             raise ValueError(f"学号已存在: {student_no}")
 
@@ -169,7 +168,7 @@ class StudentRegistryService:
     # ═══════════════════════════════════════════════════════════
 
     @staticmethod
-    async def get_student(db: AsyncSession, student_id: int) -> Optional[dict]:
+    async def get_student(db: AsyncSession, student_id: int) -> dict | None:
         """获取学籍详情（含扩展信息）"""
         result = await db.execute(
             select(Student, StudentRegistryExt)
@@ -218,11 +217,11 @@ class StudentRegistryService:
         school_id: int,
         page: int = 1,
         page_size: int = 20,
-        class_id: Optional[int] = None,
-        grade_id: Optional[int] = None,
-        status: Optional[str] = None,
-        keyword: Optional[str] = None,
-    ) -> Tuple[List[dict], int]:
+        class_id: int | None = None,
+        grade_id: int | None = None,
+        status: str | None = None,
+        keyword: str | None = None,
+    ) -> tuple[list[dict], int]:
         """分页查询学籍列表"""
         # 构建基础查询
         conditions = [Student.school_id == school_id]
@@ -264,22 +263,24 @@ class StudentRegistryService:
 
         items = []
         for student, ext in result:
-            items.append({
-                "id": student.id,
-                "name": student.name,
-                "student_no": student.student_no,
-                "school_id": student.school_id,
-                "class_id": student.class_id,
-                "grade_id": student.grade_id,
-                "gender": student.gender,
-                "is_active": student.is_active,
-                "enrolled_at": student.enrolled_at,
-                "registry_status": ext.registry_status if ext else "active",
-                "sync_status": ext.sync_status if ext else "native",
-                "class_name": student.class_.name if student.class_ else None,
-                "grade_name": student.grade.name if student.grade else None,
-                "created_at": student.created_at,
-            })
+            items.append(
+                {
+                    "id": student.id,
+                    "name": student.name,
+                    "student_no": student.student_no,
+                    "school_id": student.school_id,
+                    "class_id": student.class_id,
+                    "grade_id": student.grade_id,
+                    "gender": student.gender,
+                    "is_active": student.is_active,
+                    "enrolled_at": student.enrolled_at,
+                    "registry_status": ext.registry_status if ext else "active",
+                    "sync_status": ext.sync_status if ext else "native",
+                    "class_name": student.class_.name if student.class_ else None,
+                    "grade_name": student.grade.name if student.grade else None,
+                    "created_at": student.created_at,
+                }
+            )
 
         return items, total
 
@@ -353,8 +354,7 @@ class StudentRegistryService:
         allowed = VALID_TRANSITIONS.get(current_status, [])
         if target_status not in allowed:
             raise ValueError(
-                f"非法状态转换: {current_status} -> {target_status}. "
-                f"允许的转换: {allowed}"
+                f"非法状态转换: {current_status} -> {target_status}. 允许的转换: {allowed}"
             )
 
         # 创建变更记录
@@ -413,7 +413,7 @@ class StudentRegistryService:
     async def batch_import(
         db: AsyncSession,
         school_id: int,
-        students_data: List[dict],
+        students_data: list[dict],
         imported_by: int,
     ) -> dict:
         """
@@ -455,12 +455,14 @@ class StudentRegistryService:
                 success += 1
             except Exception as e:
                 failed += 1
-                errors.append({
-                    "row": i + 2,  # Excel 行号（从第2行开始有数据）
-                    "name": row.get("name", ""),
-                    "error": str(e),
-                })
-                logger.warning(f"批量导入第{i+1}行失败: {e}")
+                errors.append(
+                    {
+                        "row": i + 2,  # Excel 行号（从第2行开始有数据）
+                        "name": row.get("name", ""),
+                        "error": str(e),
+                    }
+                )
+                logger.warning(f"批量导入第{i + 1}行失败: {e}")
 
         logger.info(f"批量导入完成: total={total} success={success} failed={failed}")
         return {
@@ -537,7 +539,7 @@ class StudentRegistryService:
     async def get_status_history(
         db: AsyncSession,
         student_id: int,
-    ) -> List[StudentStatusChange]:
+    ) -> list[StudentStatusChange]:
         """获取学籍状态变更历史"""
         result = await db.execute(
             select(StudentStatusChange)

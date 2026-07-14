@@ -9,16 +9,13 @@ PolicyEngine RecoveryCalculator — 幂律衰减回血计算器
 总指挥决策3：幂律衰减（非指数），k=0.5，长尾效应。
 永不完全消除（max_recovery_ratio=0.85）。
 """
-from __future__ import annotations
 
-import math
-from datetime import date, datetime
-from typing import Optional
+from __future__ import annotations
 
 import structlog
 
-from .config import PolicyTag, RecoveryModelConfig, PerSeverityConfig
-from .models import RecoveryResult, RecoveryBreakdown
+from .config import PerSeverityConfig, PolicyTag, RecoveryModelConfig
+from .models import RecoveryBreakdown, RecoveryResult
 
 logger = structlog.get_logger("policy_engine.recovery")
 
@@ -75,14 +72,10 @@ class RecoveryCalculator:
         revocation = penalty_amount if is_revoked else 0.0
 
         # 通道 B: 行为回血
-        behavioral = self._channel_behavioral(
-            penalty_amount, positive_streak_days
-        )
+        behavioral = self._channel_behavioral(penalty_amount, positive_streak_days)
 
         # 通道 C: 时间回血（幂律衰减）
-        temporal = self._channel_temporal(
-            penalty_amount, days_elapsed, sev_config
-        )
+        temporal = self._channel_temporal(penalty_amount, days_elapsed, sev_config)
 
         total_recovered = revocation + behavioral + temporal
         max_recovery = penalty_amount * self.config.parameters.max_recovery_ratio
@@ -125,7 +118,9 @@ class RecoveryCalculator:
             return [(d, 0.0, penalty_amount) for d in range(0, max_days + 1, 7)]
 
         k = sev_config.k_override or self.config.parameters.k
-        min_days = sev_config.min_observation_days_override or self.config.parameters.min_observation_days
+        min_days = (
+            sev_config.min_observation_days_override or self.config.parameters.min_observation_days
+        )
 
         curve = []
         for d in range(0, max_days + 1):
@@ -134,7 +129,9 @@ class RecoveryCalculator:
             else:
                 remaining_ratio = 1.0 / ((1.0 + d) ** k)
                 recovered_ratio = 1.0 - remaining_ratio
-                recovered = penalty_amount * min(recovered_ratio, self.config.parameters.max_recovery_ratio)
+                recovered = penalty_amount * min(
+                    recovered_ratio, self.config.parameters.max_recovery_ratio
+                )
             remaining = penalty_amount - recovered
             curve.append((d, recovered / penalty_amount if penalty_amount > 0 else 0.0, remaining))
         return curve
@@ -151,8 +148,7 @@ class RecoveryCalculator:
     ) -> float:
         """通道 C: 幂律时间衰减"""
         min_days = (
-            sev_config.min_observation_days_override
-            or self.config.parameters.min_observation_days
+            sev_config.min_observation_days_override or self.config.parameters.min_observation_days
         )
         if days < min_days:
             return 0.0

@@ -1,17 +1,17 @@
 /**
  * habitCards.ts — 萌卡系统 API 契约层 (Task #1400)
  *
- * 对应后端模块: modules/habit_cards (router_prefix: /api/v1/habit-cards)
+ * 对应后端模块: modules/habit_cards (router_prefix: /api/v1/habit_cards)
  *
  * 端点:
- *   GET    /habit-cards/templates              — 全校卡牌模板
- *   POST   /habit-cards/issue                  — 教师发卡
- *   GET    /habit-cards/wallet/{id}            — 学生钱包
- *   POST   /habit-cards/blindbox/open          — 家长盲盒翻牌
- *   GET    /habit-cards/transactions/{id}      — 发卡流水
- *   GET    /habit-cards/parent/blindbox        — 家长 H5 盲盒 (自动绑定)
- *   GET    /habit-cards/parent/blindbox/history — 盲盒历史
- *   POST   /habit-cards/parent/blindbox/share   — 裂变分享标记
+ *   GET    /habit_cards/templates              — 全校卡牌模板
+ *   POST   /habit_cards/issue                  — 教师发卡
+ *   GET    /habit_cards/wallet/{id}            — 学生钱包
+ *   POST   /habit_cards/blindbox/open          — 家长盲盒翻牌
+ *   GET    /habit_cards/transactions/{id}      — 发卡流水
+ *   GET    /habit_cards/parent/blindbox        — 家长 H5 盲盒 (自动绑定)
+ *   GET    /habit_cards/parent/blindbox/history — 盲盒历史
+ *   POST   /habit_cards/parent/blindbox/share   — 裂变分享标记
  */
 
 import request from './request'
