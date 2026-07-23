@@ -22,7 +22,9 @@ from .celery_app import celery_engine
 logger = logging.getLogger("reports.tasks")
 
 # ── 输出目录 ──
-OUTPUT_DIR = os.environ.get("REPORTS_OUTPUT_DIR", "/root/backend/static/exports/reports")
+# 安全修复: 报告含学生敏感数据, 从公开 static 目录迁至私有目录,
+# 下载一律走带鉴权的 /api/v1/reports/tasks/{task_id}/download 端点
+OUTPUT_DIR = os.environ.get("REPORTS_OUTPUT_DIR", "/root/backend/private/reports")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ═══════════════════════════════════════════════════════════════
@@ -122,7 +124,7 @@ def generate_class_moral_report(
                     ReportSnapshot.class_id == class_id,
                     ReportSnapshot.semester == semester,
                     ReportSnapshot.school_id == school_id,
-                    ReportSnapshot.is_stale == False,
+                    ReportSnapshot.is_stale.is_(False),
                 )
                 .order_by(ReportSnapshot.computed_at.desc())
                 .first()
@@ -166,7 +168,7 @@ def generate_class_moral_report(
         with open(output_path, "wb") as f:
             f.write(pdf_bytes)
 
-        relative_url = f"/static/exports/reports/{filename}"
+        relative_url = f"/api/v1/reports/tasks/{self.request.id}/download"
         file_size_kb = round(len(pdf_bytes) / 1024, 1)
         elapsed = round((datetime.now() - t0).total_seconds(), 2)
 
@@ -187,6 +189,10 @@ def generate_class_moral_report(
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "elapsed_s": elapsed,
             "snapshot_used": snapshot_used,
+            # 鉴权下载端点校验归属所需的元数据
+            "school_id": school_id,
+            "created_by": created_by,
+            "stored_filename": filename,
         }
 
     except SoftTimeLimitExceeded:
@@ -245,7 +251,7 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
             raise ValueError(f"班级 {class_id} 无活跃学生")
 
         student_ids = [s["id"] for s in students]
-        student_map = {s["id"]: s for s in students}
+        {s["id"]: s for s in students}
 
         # ── 3. 素质评价五维分（读模型 StudentScore 快照）─
         scores_raw = session.execute(
@@ -339,7 +345,7 @@ def _aggregate_class_data(school_id: int, class_id: int, semester: str) -> dict:
         # ── 6. 考勤汇总 ──
         att_raw = session.execute(
             text("""
-                SELECT 
+                SELECT
                     student_id,
                     SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) as present_days,
                     SUM(CASE WHEN status = 'late' THEN 1 ELSE 0 END) as late_count,

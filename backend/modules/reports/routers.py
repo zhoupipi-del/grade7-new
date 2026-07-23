@@ -13,13 +13,14 @@ RDI白皮书轨 (新增):
   端点 7: GET  /class-report/{cid}  → 班主任一键班级报告
 """
 
+import os
 from pathlib import Path
 
 from celery.result import AsyncResult
 from core.models import User, UserRole
 from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from modules.reports.schemas import (
     ClassTeacherReportResponse,
     ExportGradeReportRequest,
@@ -78,7 +79,10 @@ async def export_moral_report(
 
 
 @router.get("/tasks/{task_id}", response_model=TaskStatusResponse)
-async def get_task_status(task_id: str):
+async def get_task_status(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """
     【端点 2】状态雷达
 
@@ -104,15 +108,68 @@ async def get_task_status(task_id: str):
 
     elif task_result.state == "SUCCESS":
         result = task_result.result if isinstance(task_result.result, dict) else {}
+        # 安全修复: 任务结果归属校验 — 跨校/跨人查询一律 404, 不泄露任务存在性
+        role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
+        if (
+            result.get("school_id") is not None
+            and result.get("school_id") != current_user.school_id
+        ):
+            raise HTTPException(status_code=404, detail="任务不存在")
+        if (
+            result.get("created_by") is not None
+            and result.get("created_by") != current_user.id
+            and role not in {"ms_admin", "grade_leader"}
+        ):
+            raise HTTPException(status_code=404, detail="任务不存在")
         response["progress"] = 100
         response["status_text"] = "报告生成完成"
         response["result"] = result
 
     elif task_result.state == "FAILURE":
+        # 安全修复: 不向前端暴露内部异常细节
         response["progress"] = 0
-        response["error"] = str(task_result.info) if task_result.info else "未知错误"
+        response["error"] = "报告生成失败，请联系管理员"
 
     return response
+
+
+@router.get("/tasks/{task_id}/download")
+async def download_task_report(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    【端点 2b】带鉴权的报告下载
+
+    安全修复: 报告 PDF 从公开 static 目录迁至私有目录,
+    下载必须持有效 JWT 且通过归属校验（school_id + created_by）。
+    """
+    task_result = AsyncResult(task_id, app=None)
+    if task_result.state != "SUCCESS":
+        raise HTTPException(status_code=404, detail="报告不存在或尚未生成")
+
+    result = task_result.result if isinstance(task_result.result, dict) else {}
+    role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
+    if result.get("school_id") != current_user.school_id:
+        raise HTTPException(status_code=404, detail="报告不存在")
+    if result.get("created_by") != current_user.id and role not in {"ms_admin", "grade_leader"}:
+        raise HTTPException(status_code=404, detail="报告不存在")
+
+    filename = os.path.basename(result.get("stored_filename") or "")
+    if not filename:
+        raise HTTPException(status_code=404, detail="报告文件不存在")
+
+    output_dir = Path(os.environ.get("REPORTS_OUTPUT_DIR", "/root/backend/private/reports"))
+    file_path = (output_dir / filename).resolve()
+    # 路径遍历防御: 解析后必须仍在输出目录之内
+    if output_dir.resolve() not in file_path.parents or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="报告文件不存在")
+
+    return FileResponse(
+        path=file_path,
+        media_type="application/pdf",
+        filename=result.get("filename") or filename,
+    )
 
 
 def _default_semester() -> str:

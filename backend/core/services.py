@@ -10,9 +10,9 @@ import hmac
 import logging
 import os
 import re
-import secrets
 from datetime import UTC, datetime, timedelta, timezone
 
+import bcrypt
 import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,26 +34,42 @@ class AuthService:
 
     @staticmethod
     def _secret() -> str:
-        return os.environ.get("JWT_SECRET_KEY", "change-me-in-production")
+        secret = os.environ.get("JWT_SECRET_KEY")
+        if not secret:
+            raise ValueError(
+                "JWT_SECRET_KEY 环境变量未配置，认证服务无法初始化。请在 .env 中注入安全密钥。"
+            )
+        return secret
 
     @classmethod
     def hash_password(cls, password: str) -> str:
-        """SHA-256 + salt 密码哈希"""
-        salt = secrets.token_hex(16)
-        pw_hash = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-        return f"sha256${salt}${pw_hash}"
+        """bcrypt 密码哈希（cost=12）。新密码一律走 bcrypt。"""
+        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("ascii")
 
     @classmethod
     def verify_password(cls, password: str, password_hash: str) -> bool:
-        """验证密码"""
-        try:
-            algo, salt, stored_hash = password_hash.split("$", 2)
-            if algo != "sha256":
-                return False
-            computed = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-            return hmac.compare_digest(computed, stored_hash)
-        except (ValueError, AttributeError):
+        """验证密码 — 双轨制: bcrypt 新哈希 + 遗留 sha256$salt$hash 兼容"""
+        if not password_hash:
             return False
+        try:
+            # 新轨: bcrypt
+            if password_hash.startswith(("$2a$", "$2b$", "$2y$")):
+                return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("ascii"))
+            # 旧轨: sha256$salt$hash（遗留数据，登录成功后静默升级）
+            if password_hash.startswith("sha256$"):
+                algo, salt, stored_hash = password_hash.split("$", 2)
+                if algo != "sha256":
+                    return False
+                computed = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+                return hmac.compare_digest(computed.encode("ascii"), stored_hash.encode("ascii"))
+        except (ValueError, AttributeError, UnicodeError):
+            return False
+        return False
+
+    @staticmethod
+    def password_needs_rehash(password_hash: str) -> bool:
+        """遗留 SHA-256 哈希需要在下次成功登录时静默升级为 bcrypt"""
+        return bool(password_hash and password_hash.startswith("sha256$"))
 
     # ── 密码安全策略 ──
 
@@ -151,9 +167,7 @@ class AuthService:
                 return None, f"账户已锁定，请{minutes}分钟后重试"
 
         # ── 查询用户 ──
-        result = await db.execute(
-            select(User).where(User.username == username, User.is_active == True)
-        )
+        result = await db.execute(select(User).where(User.username == username, User.is_active))
         user = result.scalar_one_or_none()
 
         if not user:
@@ -167,6 +181,15 @@ class AuthService:
         # ── 登录成功: 清除失败计数 ──
         if redis:
             await redis.delete(f"login_fails:{username}", f"login_locked:{username}")
+
+        # ── 静默升级: 遗留 SHA-256 哈希 → bcrypt（明文仅此刻可用）──
+        if cls.password_needs_rehash(user.password_hash):
+            try:
+                user.password_hash = cls.hash_password(password)
+                logger.info(f"密码哈希静默升级为 bcrypt: {username}")
+            except Exception as e:
+                # 升级失败不影响登录，下次再试
+                logger.error(f"密码哈希升级失败 ({username}): {e}")
 
         # 更新最后登录时间
         user.last_login = datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
@@ -273,7 +296,7 @@ class OrgService:
     async def get_grades(db: AsyncSession, school_id: int) -> list[Grade]:
         result = await db.execute(
             select(Grade)
-            .where(Grade.school_id == school_id, Grade.is_active == True)
+            .where(Grade.school_id == school_id, Grade.is_active)
             .order_by(Grade.sort_order)
         )
         return list(result.scalars().all())
@@ -284,7 +307,7 @@ class OrgService:
     ) -> list[Class]:
         stmt = select(Class).where(
             Class.school_id == school_id,
-            Class.is_active == True,
+            Class.is_active,
         )
         if grade_id:
             stmt = stmt.where(Class.grade_id == grade_id)
@@ -424,7 +447,7 @@ class OrgService:
             )
             .join(Grade, Class.grade_id == Grade.id)
             .outerjoin(User, Class.head_teacher_id == User.id)
-            .where(Class.school_id == school_id, Class.is_active == True)
+            .where(Class.school_id == school_id, Class.is_active)
         )
         if grade_id:
             stmt = stmt.where(Class.grade_id == grade_id)
@@ -451,7 +474,7 @@ class OrgService:
         result = await db.execute(
             select(SchoolModule.module_code).where(
                 SchoolModule.school_id == school_id,
-                SchoolModule.enabled == True,
+                SchoolModule.enabled,
             )
         )
         return [row[0] for row in result.all()]

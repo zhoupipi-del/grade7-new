@@ -74,3 +74,9 @@ check_and_import.py
 
 # --- Misc junk files ---
 " + str(e))*
+
+# --- Environment / Secrets (NEVER commit real .env) ---
+.env
+.env.local
+.env.production
+*.env.bak

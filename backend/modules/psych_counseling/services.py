@@ -20,20 +20,13 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # ── 加密引擎配置 ──
-# 从环境变量加载 Fernet key; 缺省生成警告级别临时密钥(仅开发环境)
-_FERNET_KEY = os.getenv(
-    "PSY_ENCRYPTION_KEY",
-    os.getenv("WINGS_ENCRYPTION_KEY", ""),
-)
+# 从环境变量加载 Fernet key; 生产环境必须配置，缺失则拒绝启动
+_FERNET_KEY = os.getenv("PSY_ENCRYPTION_KEY") or os.getenv("WINGS_ENCRYPTION_KEY")
 if not _FERNET_KEY:
-    # 开发环境兜底: 使用固定种子生成 key (生产必须手动注入!)
-    import base64
-    import hashlib
-
-    _seed = os.getenv("SECRET_KEY", "wings3-dev-fallback")
-    _raw = hashlib.sha256(_seed.encode()).digest()
-    _FERNET_KEY = base64.urlsafe_b64encode(_raw)
-
+    raise ValueError(
+        "PSY_ENCRYPTION_KEY 或 WINGS_ENCRYPTION_KEY 环境变量未配置，"
+        "心理咨询加密引擎无法初始化。请在 .env 中注入合法 Fernet key。"
+    )
 _fernet = Fernet(_FERNET_KEY.encode() if isinstance(_FERNET_KEY, str) else _FERNET_KEY)
 
 
@@ -68,10 +61,10 @@ async def _check_counselor_role(
     stmt = (
         select(TeacherRoleAssignment)
         .where(
-            TeacherRoleAssignment.user_id == user_id,
+            TeacherRoleAssignment.teacher_user_id == user_id,
             TeacherRoleAssignment.school_id == school_id,
             TeacherRoleAssignment.role_type == COUNSELOR_ROLE,
-            TeacherRoleAssignment.is_active == True,
+            TeacherRoleAssignment.is_active,
             and_(
                 or_(
                     TeacherRoleAssignment.expires_at.is_(None),
@@ -277,11 +270,16 @@ async def list_appointments(
     slot_id: int = None,
     limit: int = 50,
     offset: int = 0,
+    student_ids: set = None,
 ) -> tuple:
-    """查询预约列表(分页)"""
+    """查询预约列表(分页)。student_ids: 学生归属范围过滤(None=不限)"""
     conditions = [PsyAppointment.school_id == school_id]
     if student_id:
         conditions.append(PsyAppointment.student_id == student_id)
+    if student_ids is not None:
+        if not student_ids:
+            return [], 0
+        conditions.append(PsyAppointment.student_id.in_(student_ids))
     if status:
         conditions.append(PsyAppointment.status == status)
     if source:
@@ -411,11 +409,14 @@ async def get_consult_record(
     record_id: int,
     user_role: str,
     user_id: int,
+    requester_student_id: int = None,
+    allowed_student_ids: set = None,
 ) -> dict:
     """
     获取咨询记录 — 按角色决定是否解密正文。
     counselor/ms_admin → 完整原文
     其他 → 脱敏摘要
+    allowed_student_ids: 学生归属范围(None=不限)，越界一律视为不存在
     """
     stmt = select(PsyConsultRecord).where(
         PsyConsultRecord.id == record_id,
@@ -424,6 +425,15 @@ async def get_consult_record(
     res = await db.execute(stmt)
     record = res.scalar_one_or_none()
     if not record:
+        raise ValueError("咨询记录不存在")
+
+    # P0-1: 学生/家长只能访问绑定学生本人的咨询记录，
+    # 防止同校用户猜 ID 越权读取他人敏感元数据 (risk_level/is_crisis/referral 等)
+    if requester_student_id is not None and record.student_id != requester_student_id:
+        raise ValueError("咨询记录不存在")
+
+    # P0-2: 班主任/年级组长等按学生归属范围过滤，越界视为不存在
+    if allowed_student_ids is not None and record.student_id not in allowed_student_ids:
         raise ValueError("咨询记录不存在")
 
     # 解密权限判断
@@ -476,11 +486,16 @@ async def list_consult_records(
     is_crisis: bool = None,
     limit: int = 50,
     offset: int = 0,
+    student_ids: set = None,
 ) -> tuple:
-    """查询咨询记录列表(分页) — 不含解密正文"""
+    """查询咨询记录列表(分页) — 不含解密正文。student_ids: 学生归属范围过滤(None=不限)"""
     conditions = [PsyConsultRecord.school_id == school_id]
     if student_id:
         conditions.append(PsyConsultRecord.student_id == student_id)
+    if student_ids is not None:
+        if not student_ids:
+            return [], 0
+        conditions.append(PsyConsultRecord.student_id.in_(student_ids))
     if counselor_id:
         conditions.append(PsyConsultRecord.counselor_id == counselor_id)
     if risk_level:
@@ -528,7 +543,7 @@ async def get_counselor_stats(
     crisis_res = await db.execute(
         select(func.count(PsyConsultRecord.id)).where(
             base_cond,
-            PsyConsultRecord.is_crisis == True,
+            PsyConsultRecord.is_crisis,
         )
     )
     crisis_count = crisis_res.scalar() or 0
@@ -537,7 +552,7 @@ async def get_counselor_stats(
     referral_res = await db.execute(
         select(func.count(PsyConsultRecord.id)).where(
             base_cond,
-            PsyConsultRecord.is_referred == True,
+            PsyConsultRecord.is_referred,
         )
     )
     referral_count = referral_res.scalar() or 0

@@ -155,6 +155,7 @@ async def lifespan(app: FastAPI):
     # ── Phase 2 教研铁三角：集体备课 + 听课评课 + 教研活动 (100%合围) ──
     import modules.research_lesson_prep.models  # noqa: F401
     import modules.research_observation.models  # noqa: F401
+    import modules.research_profile.models  # noqa: F401  (纯聚合，不建表)
     import modules.risk_models.models  # noqa: F401
 
     # ── P0 新模块：学籍 + 班级管理（数据铁三角）──
@@ -193,7 +194,7 @@ async def lifespan(app: FastAPI):
             from sqlalchemy import select
 
             # 查询所有活跃学校
-            schools_result = await session.execute(select(School).where(School.is_active == True))
+            schools_result = await session.execute(select(School).where(School.is_active))
             schools = schools_result.scalars().all()
 
             # 收集所有学校的启用模块并集（全局路由注册）
@@ -202,7 +203,7 @@ async def lifespan(app: FastAPI):
                 mods_result = await session.execute(
                     select(SchoolModule.module_code).where(
                         SchoolModule.school_id == school.id,
-                        SchoolModule.enabled == True,
+                        SchoolModule.enabled,
                     )
                 )
                 all_enabled_modules.update(row[0] for row in mods_result.all())
@@ -214,7 +215,7 @@ async def lifespan(app: FastAPI):
 
             # ── 全局路由注册 + 级联配置解析（委托给 module_loader）──
             if all_enabled_modules:
-                results = await module_loader.load_for_school(
+                await module_loader.load_for_school(
                     school_id=0,  # sentinel: 全局路由注册（进程级不可拆分）
                     db_session=session,
                     fastapi_app=app,
@@ -223,7 +224,7 @@ async def lifespan(app: FastAPI):
                 )
             else:
                 # Fallback: 至少加载 school_id=1
-                results = await module_loader.load_for_school(
+                await module_loader.load_for_school(
                     school_id=1,
                     db_session=session,
                     fastapi_app=app,
@@ -397,7 +398,15 @@ async def _seed_default_data():
         if not admin:
             import secrets as _secrets
 
-            admin_pw = _secrets.token_urlsafe(12)
+            # 安全修复: 优先使用 INITIAL_ADMIN_PASSWORD 环境变量（运维可控），
+            # 未配置则回退为随机生成（不打印、首登强制改密）——不引入新启动失败模式
+            admin_pw = os.environ.get("INITIAL_ADMIN_PASSWORD") or ""
+            if admin_pw:
+                pw_error = AuthService.validate_password_strength(admin_pw, "admin")
+                if pw_error:
+                    raise RuntimeError(f"INITIAL_ADMIN_PASSWORD 不满足密码强度要求: {pw_error}")
+            else:
+                admin_pw = _secrets.token_urlsafe(12)
             admin = User(
                 username="admin",
                 password_hash=AuthService.hash_password(admin_pw),
@@ -412,7 +421,9 @@ async def _seed_default_data():
             session.add(admin)
             await session.commit()
             logger.info("=" * 60)
-            logger.info(f"默认管理员已创建: admin / {admin_pw}")
+            logger.info(
+                "默认管理员已创建（随机初始密码已静默生成，未打印至日志；首次登录强制改密）"
+            )
             logger.info("⚠️  请立即登录并修改此密码！首次登录将强制要求改密。")
             logger.info("=" * 60)
         else:
@@ -623,6 +634,78 @@ async def _seed_default_data():
             await session.commit()
             logger.info("默认模块已配置: lineage (已启用)")
 
+        # ── research_profile 模块 ──────────────────────
+        result = await session.execute(
+            select(SchoolModule).where(
+                SchoolModule.school_id == 1,
+                SchoolModule.module_code == "research_profile",
+            )
+        )
+        sm = result.scalar_one_or_none()
+        if not sm:
+            sm = SchoolModule(
+                school_id=1,
+                module_code="research_profile",
+                enabled=True,
+            )
+            session.add(sm)
+            await session.commit()
+            logger.info("默认模块已配置: research_profile (已启用)")
+
+        # ── research_lesson_prep 模块 ──────────────────────
+        result = await session.execute(
+            select(SchoolModule).where(
+                SchoolModule.school_id == 1,
+                SchoolModule.module_code == "research_lesson_prep",
+            )
+        )
+        sm = result.scalar_one_or_none()
+        if not sm:
+            sm = SchoolModule(
+                school_id=1,
+                module_code="research_lesson_prep",
+                enabled=True,
+            )
+            session.add(sm)
+            await session.commit()
+            logger.info("默认模块已配置: research_lesson_prep (已启用)")
+
+        # ── research_observation 模块 ──────────────────────
+        result = await session.execute(
+            select(SchoolModule).where(
+                SchoolModule.school_id == 1,
+                SchoolModule.module_code == "research_observation",
+            )
+        )
+        sm = result.scalar_one_or_none()
+        if not sm:
+            sm = SchoolModule(
+                school_id=1,
+                module_code="research_observation",
+                enabled=True,
+            )
+            session.add(sm)
+            await session.commit()
+            logger.info("默认模块已配置: research_observation (已启用)")
+
+        # ── research_activities 模块 ──────────────────────
+        result = await session.execute(
+            select(SchoolModule).where(
+                SchoolModule.school_id == 1,
+                SchoolModule.module_code == "research_activities",
+            )
+        )
+        sm = result.scalar_one_or_none()
+        if not sm:
+            sm = SchoolModule(
+                school_id=1,
+                module_code="research_activities",
+                enabled=True,
+            )
+            session.add(sm)
+            await session.commit()
+            logger.info("默认模块已配置: research_activities (已启用)")
+
 
 # ═══════════════════════════════════════════════════════════════
 # FastAPI 应用实例
@@ -750,7 +833,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "app:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104 # 后端服务需被 Nginx 反代访问，绑定 0.0.0.0 为预期；外部暴露由 Nginx + 安全组控制
         port=8000,
         reload=os.environ.get("ENV") == "development",
         log_level="info",

@@ -81,6 +81,69 @@ async def _get_student_name(db: AsyncSession, student_id: int) -> str:
     return row or "未知"
 
 
+# ── 权限守卫: 学生归属校验 (写侧 IDOR 防御) ──
+
+
+async def _allowed_student_ids(
+    db: AsyncSession,
+    current_user: User,
+) -> set[int] | None:
+    """返回当前用户可访问的学生ID集合；None 表示本校全量权限。"""
+    role = (current_user.role or "").lower()
+
+    if role in {"ms_admin", "counselor"}:
+        return None
+
+    if role == "grade_leader":
+        if not current_user.grade_id:
+            raise HTTPException(status_code=403, detail="年级组长账号未绑定年级")
+        stmt = select(Student.id).where(
+            Student.school_id == current_user.school_id,
+            Student.grade_id == current_user.grade_id,
+        )
+    elif role == "class_teacher":
+        if not current_user.class_id:
+            raise HTTPException(status_code=403, detail="班主任账号未绑定班级")
+        stmt = select(Student.id).where(
+            Student.school_id == current_user.school_id,
+            Student.class_id == current_user.class_id,
+        )
+    elif role in {"parent", "student"}:
+        if not current_user.bound_student_id:
+            raise HTTPException(status_code=403, detail="当前账号未绑定学生")
+        stmt = select(Student.id).where(
+            Student.school_id == current_user.school_id,
+            Student.id == current_user.bound_student_id,
+        )
+    else:
+        raise HTTPException(status_code=403, detail="当前角色无权访问学生数据")
+
+    res = await db.execute(stmt)
+    return {row[0] for row in res.all()}
+
+
+async def _assert_student_access(
+    db: AsyncSession,
+    current_user: User,
+    student_id: int,
+) -> set[int] | None:
+    """断言当前用户可操作目标学生，否则 404（不泄露存在性）"""
+    allowed = await _allowed_student_ids(db, current_user)
+    if allowed is not None and student_id not in allowed:
+        raise HTTPException(status_code=404, detail="学生记录不存在")
+
+    # 即使是管理员，也必须确认目标学生属于当前学校
+    exists = await db.scalar(
+        select(Student.id).where(
+            Student.id == student_id,
+            Student.school_id == current_user.school_id,
+        )
+    )
+    if not exists:
+        raise HTTPException(status_code=404, detail="学生记录不存在")
+    return allowed
+
+
 # ── 权限守卫: 心理老师角色 ──
 
 
@@ -184,7 +247,7 @@ async def api_update_slot_status(
 ):
     """锁定/解锁时段"""
     try:
-        slot = await update_slot_status(
+        await update_slot_status(
             db=db,
             school_id=current_user.school_id,
             slot_id=slot_id,
@@ -235,6 +298,8 @@ async def api_create_appointment(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="当前角色无预约权限",
         )
+    # P0-2: 写侧 IDOR 防御 — 校验目标学生在申请人权限范围内
+    await _assert_student_access(db, current_user, payload.student_id)
     try:
         apt = await create_appointment(
             db=db,
@@ -276,11 +341,17 @@ async def api_list_appointments(
     current_user: User = Depends(get_current_user),
 ):
     """查询预约列表 — 心理老师/管理员看全部, 其他看自己的"""
-    # 非特权角色只能看自己的预约
+    # P0-1: 学生/家长强制只看绑定学生本人，防止越权读取他人预约 (IDOR 防御)
     role = (current_user.role or "").lower()
-    if role not in {"ms_admin", "counselor", "grade_leader"} and not student_id:
-        # 学生/家长看不到全校预约列表，请用 /appointments/my
-        pass
+    if role in {"student", "parent"}:
+        student_id = current_user.bound_student_id
+        if not student_id:
+            return AppointmentListResponse(status="success", appointments=[], total=0)
+
+    # P0-2: 班主任/年级组长限定本班/本年级学生范围 (读侧 IDOR 防御)
+    allowed_student_ids = await _allowed_student_ids(db, current_user)
+    if student_id is not None:
+        await _assert_student_access(db, current_user, student_id)
 
     appointments, total = await list_appointments(
         db=db,
@@ -291,6 +362,7 @@ async def api_list_appointments(
         slot_id=slot_id,
         limit=limit,
         offset=offset,
+        student_ids=allowed_student_ids if student_id is None else None,
     )
 
     items = []
@@ -337,9 +409,12 @@ async def api_my_appointments(
             raise HTTPException(status_code=400, detail="未绑定学生")
     elif role == "class_teacher":
         # 班主任: 查自己class的所有学生
-        pass  # student_id=None → 按applicant_id查
+        pass  # student_id=None → 后续按班级过滤
     else:
-        pass
+        # 学生视角: 仅看绑定学生本人 (P0-1 归属修复, 原 student_id=None 会返回全校预约)
+        student_id = current_user.bound_student_id
+        if not student_id:
+            return AppointmentListResponse(status="success", appointments=[], total=0)
 
     appointments, total = await list_appointments(
         db=db,
@@ -358,7 +433,7 @@ async def api_my_appointments(
             Student.school_id == current_user.school_id,
         )
         class_res = await db.execute(class_stmt)
-        class_student_ids = set(row[0] for row in class_res.all())
+        class_student_ids = {row[0] for row in class_res.all()}
         appointments = [a for a in appointments if a.student_id in class_student_ids]
         total = len(appointments)
 
@@ -404,6 +479,15 @@ async def api_get_appointment(
     a = res.scalar_one_or_none()
     if not a:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="预约记录不存在")
+
+    # P0-1: 学生/家长仅可查看绑定学生本人的预约，防止同校 IDOR 越权读取
+    role = (current_user.role or "").lower()
+    if role in {"student", "parent"}:
+        if not current_user.bound_student_id or a.student_id != current_user.bound_student_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="预约记录不存在",
+            )
 
     slot = await get_slot(db, current_user.school_id, a.slot_id)
     return AppointmentResponse(
@@ -518,6 +602,18 @@ async def api_list_consult_records(
     current_user: User = Depends(get_current_user),
 ):
     """咨询记录列表 — 元数据可见, 正文需单个查询解密"""
+    # P0-1: 学生/家长强制只看绑定学生本人，防止越权读取他人咨询记录 (IDOR 防御)
+    role = (current_user.role or "").lower()
+    if role in {"student", "parent"}:
+        student_id = current_user.bound_student_id
+        if not student_id:
+            return ConsultRecordListResponse(status="success", records=[], total=0)
+
+    # P0-2: 班主任/年级组长限定本班/本年级学生范围 (读侧 IDOR 防御)
+    allowed_student_ids = await _allowed_student_ids(db, current_user)
+    if student_id is not None:
+        await _assert_student_access(db, current_user, student_id)
+
     records, total = await list_consult_records(
         db=db,
         school_id=current_user.school_id,
@@ -527,6 +623,7 @@ async def api_list_consult_records(
         is_crisis=is_crisis,
         limit=limit,
         offset=offset,
+        student_ids=allowed_student_ids if student_id is None else None,
     )
     items = []
     for r in records:
@@ -560,6 +657,15 @@ async def api_get_consult_record(
     current_user: User = Depends(get_current_user),
 ):
     """获取单条咨询记录 — 按角色自动解密/脱敏"""
+    role = (current_user.role or "").lower()
+    # P0-1: 学生/家长仅可查看绑定学生本人的咨询记录，防止同校 IDOR 越权
+    requester_student_id = current_user.bound_student_id if role in {"student", "parent"} else None
+    # P0-2: 班主任/年级组长仅可查本班/本年级学生的记录 (读侧 IDOR 防御)
+    allowed_student_ids = (
+        await _allowed_student_ids(db, current_user)
+        if role in {"class_teacher", "grade_leader"}
+        else None
+    )
     try:
         data = await get_consult_record(
             db=db,
@@ -567,6 +673,8 @@ async def api_get_consult_record(
             record_id=record_id,
             user_role=current_user.role,
             user_id=current_user.id,
+            requester_student_id=requester_student_id,
+            allowed_student_ids=allowed_student_ids,
         )
         return ConsultRecordResponse(
             id=data["id"],
@@ -605,6 +713,8 @@ async def api_student_consult_history(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="仅教师和管理员可查看学生咨询历史",
         )
+    # P0-2: 班主任/年级组长仅可查本班/本年级学生 (读侧 IDOR 防御)
+    await _assert_student_access(db, current_user, student_id)
     records, total = await list_consult_records(
         db=db,
         school_id=current_user.school_id,

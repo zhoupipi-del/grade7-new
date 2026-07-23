@@ -1,17 +1,26 @@
 repos:
   - repo: local
     hooks:
-      # Lint 检查 (阻断提交)
+      # Lint 检查 (阻断提交，自动修复可修项)
       - id: ruff
         name: ruff check
-        entry: ruff check --fix --exit-non-zero-on-fix
+        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/ruff.exe check --fix --exit-non-zero-on-fix
         language: system
         types: [python]
         pass_filenames: true
       # 格式化 (自动修正)
       - id: ruff-format
         name: ruff format
-        entry: ruff format
+        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/ruff.exe format
         language: system
         types: [python]
         pass_filenames: true
+      # 安全静态扫描 (仅扫本次提交的文件，中高危阻断)
+      # -ll = 仅报告 MEDIUM+HIGH 严重度，避免历史代码噪声干扰新提交
+      - id: bandit
+        name: bandit security scan
+        entry: C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/bandit.exe -ll
+        language: system
+        types: [python]
+        pass_filenames: true
+        exclude: '^(tests?/|.*/migrations/|.*/archive/|.*/deprecated/)'
