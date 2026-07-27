@@ -46,7 +46,7 @@
         <el-table-column prop="risk_level" label="当前风险" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.risk_level" :type="riskTagType(row.risk_level)" size="small">
-              {{ RISK_LABELS[row.risk_level] || row.risk_level }}
+              {{ riskLabel(row.risk_level) }}
             </el-tag>
             <span v-else class="no-risk">未筛查</span>
           </template>
@@ -134,7 +134,7 @@
           <div class="result-item">
             <span>风险等级</span>
             <el-tag :type="riskTagType(submitResult.risk_level)" size="large">
-              {{ RISK_LABELS[submitResult.risk_level] || submitResult.risk_level }}
+              {{ riskLabel(submitResult.risk_level) }}
             </el-tag>
           </div>
         </div>
@@ -171,7 +171,7 @@ const answers = ref<Record<string, number>>({})
 const currentPage = ref(1)
 const pageSize = 10
 const submitting = ref(false)
-const submitResult = ref<any>({})
+const submitResult = ref<{ total_score: number; risk_level: RiskLevel; survey_id: number } | Record<string, never>>({})
 
 const scoreOptions = [
   { value: 1, label: '1-无' },
@@ -208,9 +208,14 @@ function selectStudent(row: any) {
   selectedStudent.value = row
 }
 
-function riskTagType(level: string) {
-  const map: Record<string, string> = { low: 'success', medium: 'warning', high: 'danger', critical: 'danger' }
+function riskTagType(level: string): 'success' | 'warning' | 'info' | 'danger' {
+  const map: Record<string, 'success' | 'warning' | 'danger'> = { low: 'success', medium: 'warning', high: 'danger', critical: 'danger' }
   return map[level] || 'info'
+}
+
+function riskLabel(level: string | null | undefined): string {
+  if (!level) return '--'
+  return (RISK_LABELS as Record<string, string>)[level] || level
 }
 
 function scoreColor(score: number) {

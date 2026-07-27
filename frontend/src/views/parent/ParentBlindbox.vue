@@ -236,9 +236,9 @@ function rarityCN(rarity: string): string {
   return map[rarity] ?? rarity
 }
 
-function rarityTagType(rarity: string): string {
-  const map: Record<string, string> = {
-    legendary: 'warning', epic: '', rare: 'info', common: '',
+function rarityTagType(rarity: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' {
+  const map: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
+    legendary: 'warning', epic: 'primary', rare: 'info', common: 'primary',
   }
   return map[rarity] ?? 'info'
 }

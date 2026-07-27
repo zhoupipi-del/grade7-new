@@ -71,6 +71,9 @@
       <el-tab-pane label="教研活动" name="activity">
         <ActivityTab v-if="loaded.activity" />
       </el-tab-pane>
+      <el-tab-pane label="教师画像" name="profile">
+        <TeacherProfileCard v-if="loaded.profile" />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -81,12 +84,13 @@ import { Document, View, Calendar } from '@element-plus/icons-vue'
 import LessonPrepTab from './components/LessonPrepTab.vue'
 import ObservationTab from './components/ObservationTab.vue'
 import ActivityTab from './components/ActivityTab.vue'
+import TeacherProfileCard from './components/TeacherProfileCard.vue'
 import * as lpApi from '@/api/researchLessonPrep'
 import * as obsApi from '@/api/researchObservation'
 import * as actApi from '@/api/researchActivities'
 
 const activeTab = ref('lesson')
-const loaded = reactive({ lesson: true, observation: false, activity: false })
+const loaded = reactive({ lesson: true, observation: false, activity: false, profile: false })
 
 const planStats = ref<lpApi.DashboardStats | null>(null)
 const obsStats = ref<obsApi.DashboardStats | null>(null)
@@ -107,6 +111,7 @@ function onTabChange(name: string | number) {
   const key = String(name)
   if (key === 'observation') loaded.observation = true
   if (key === 'activity') loaded.activity = true
+  if (key === 'profile') loaded.profile = true
 }
 
 onMounted(loadAllDashboards)
