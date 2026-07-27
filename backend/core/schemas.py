@@ -8,11 +8,14 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 
-class UserRoleEnum(str, Enum):
+class UserRoleEnum(str, Enum):  # noqa: UP042 — 保持 str+Enum 兼容 Python<3.11,不改 StrEnum
     MS_ADMIN = "ms_admin"
     GRADE_LEADER = "grade_leader"
     CLASS_TEACHER = "class_teacher"
     TEACHER = "teacher"
+    COUNSELOR = "counselor"
+    GROUP_ADMIN = "group_admin"
+    BRANCH_ADMIN = "branch_admin"
     PARENT = "parent"
     STUDENT = "student"
 

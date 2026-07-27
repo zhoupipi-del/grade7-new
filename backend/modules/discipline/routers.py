@@ -21,6 +21,7 @@ Phase 4 — 家校申诉:
   POST   /api/v1/discipline/appeals/{id}/review     复核申诉（ACCEPTED/REJECTED）
 """
 
+import hmac
 import os
 from datetime import date
 
@@ -502,8 +503,12 @@ async def check_escalation_trigger(
 # Phase 4: 家校申诉 Webhook + 申诉管理 API
 # ═══════════════════════════════════════════════════════════════
 
-# Webhook Secret — 从环境变量读取，默认值仅用于开发
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "change-me-in-production")
+# Webhook Secret — 从环境变量读取，必须配置否则拒绝启动
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
+if not WEBHOOK_SECRET:
+    raise ValueError(
+        "WEBHOOK_SECRET 环境变量未配置，申诉 Webhook 安全校验无法初始化。请在 .env 中注入安全密钥。"
+    )
 
 
 @router.post("/webhooks/appeal", status_code=201)
@@ -532,8 +537,13 @@ async def webhook_create_appeal(
       }
     """
     # ── X-Webhook-Secret 校验 ──
+    # 用 bytes 比较：compare_digest 的 str 分支仅支持纯 ASCII 密钥，
+    # 密钥含非 ASCII 字符会直接 TypeError → 500。两边 .encode() 与 Python
+    # 版本无关（3.3+ 的 str 分支本就支持 ASCII），不可当"版本兼容垫片"删掉。
     webhook_secret = request.headers.get("X-Webhook-Secret", "")
-    if not webhook_secret or webhook_secret != WEBHOOK_SECRET:
+    if not webhook_secret or not hmac.compare_digest(
+        webhook_secret.encode("utf-8"), WEBHOOK_SECRET.encode("utf-8")
+    ):
         raise HTTPException(status_code=401, detail="无效的 Webhook Secret")
 
     # ── 根据 school_id 查询──
