@@ -10,7 +10,7 @@ import hmac
 import logging
 import os
 import re
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
@@ -130,7 +130,7 @@ class AuthService:
     @classmethod
     def create_token(cls, user: User) -> str:
         """签发 JWT access token"""
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         payload = {
             "sub": str(user.id),
             "username": user.username,
