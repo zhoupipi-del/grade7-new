@@ -3,22 +3,60 @@
    =========================== */
 
 :root {
-  /* Sidebar theme */
+  /* ===== Sidebar theme ===== */
   --wings-sidebar-bg: #1f2c3f;
   --wings-sidebar-text: #bfcbd9;
-  --wings-sidebar-active: #409eff;
+  --wings-sidebar-active: #1e6091;   /* 对齐品牌主色（原 #409eff） */
 
-  /* Header */
+  /* ===== Header ===== */
   --wings-header-height: 60px;
   --wings-sidebar-width: 240px;
   --wings-sidebar-collapsed-width: 64px;
 
-  /* Brand colors */
-  --wings-primary: #409eff;
+  /* ===== Brand colors（对齐 Element 主色，避免双色源） ===== */
+  --wings-primary: #1e6091;
   --wings-success: #67c23a;
   --wings-warning: #e6a23c;
   --wings-danger: #f56c6c;
   --wings-info: #909399;
+
+  /* ===== WINGS 品牌 token（接入 Element Plus 变量 · Direction A） ===== */
+  /* 主色 + 9 级梯度（否则 hover/禁用/选中态仍是出厂蓝） */
+  --el-color-primary:        #1e6091;
+  --el-color-primary-light-3:#6290b2;
+  --el-color-primary-light-5:#8eb0c8;
+  --el-color-primary-light-7:#bccfde;
+  --el-color-primary-light-8:#d2dfe9;
+  --el-color-primary-light-9:#e8eff4;
+  --el-color-primary-dark-2: #184d74;
+
+  /* 语义色底色 */
+  --el-color-success-light-9:#f0f9eb;
+  --el-color-warning-light-9:#fdf6ec;
+  --el-color-danger-light-9: #fef0f0;
+  --el-color-error-light-9:  #fef0f0;
+  --el-color-info-light-9:    #f4f4f5;
+
+  /* 文本 / 边框 / 背景 */
+  --el-text-color-primary:   #1f2933;
+  --el-text-color-regular:   #3e4c59;
+  --el-text-color-secondary: #52606d;
+  --el-text-color-placeholder:#9aa5b1;
+  --el-border-color:         #e4e9f0;
+  --el-border-color-light:   #eef2f7;
+  --el-bg-color-page:        #f0f2f5;
+
+  /* 圆角（卡片 8 / 控件 6 / 胶囊 20） */
+  --el-border-radius-base:  8px;
+  --el-border-radius-small: 6px;
+  --el-border-radius-round: 20px;
+
+  /* 阴影 / 间距（自定义变量，供卡片等覆盖用） */
+  --wings-shadow-card:  0 2px 8px rgba(16,24,40,.06);
+  --wings-shadow-hover: 0 4px 16px rgba(16,24,40,.10);
+  --wings-page-pad:  20px;
+  --wings-gap:        16px;
+  --wings-card-pad:   18px;
 }
 
 * {
@@ -78,4 +116,52 @@ a {
 /* Element Plus overrides */
 .el-menu {
   border-right: none !important;
+}
+
+/* ===== WINGS 统一观感（Batch 3a：卡片 / 表格 / 表单 间距圆角统一） ===== */
+/* 卡片：统一 8px 圆角 + 浅阴影，hover 微抬升 */
+.el-card {
+  border-radius: var(--el-border-radius-base);
+  border-color: var(--el-border-color-light);
+  box-shadow: var(--wings-shadow-card);
+  transition: box-shadow 0.2s ease;
+}
+.el-card:hover {
+  box-shadow: var(--wings-shadow-hover);
+}
+.el-card__body {
+  padding: var(--wings-card-pad);
+}
+.el-card__header {
+  padding: 14px var(--wings-card-pad);
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+/* 表格：统一圆角 + 浅边框 + 浅灰表头 */
+.el-table {
+  border-radius: var(--el-border-radius-base);
+  --el-table-border-color: var(--el-border-color-light);
+  --el-table-header-bg-color: #f7f9fb;
+  --el-table-row-hover-bg-color: var(--el-color-primary-light-9);
+}
+.el-table .el-table__inner-wrapper::before {
+  display: none;
+}
+
+/* 表单：统一控件间距与圆角 */
+.el-form-item {
+  margin-bottom: 18px;
+}
+.el-form--label-top .el-form-item {
+  margin-bottom: 16px;
+}
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border-radius: var(--el-border-radius-small);
+}
+
+/* ===== 图标统一（Batch 3b）：默认 18px，显式 :size 仍可覆盖；颜色随上下文继承 ===== */
+.el-icon {
+  font-size: 18px;
 }

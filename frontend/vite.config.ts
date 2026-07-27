@@ -29,12 +29,9 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api/v1': {
-        target: 'http://127.0.0.1:8000',
+        target: 'https://lijiangschool.online',
         changeOrigin: true,
-      },
-      '/api/v1/auth/login': {
-        target: 'http://127.0.0.1:8000',
-        changeOrigin: true,
+        secure: false,
       },
     },
   },

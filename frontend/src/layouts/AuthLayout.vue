@@ -42,7 +42,7 @@
 .circle-1 {
   width: 400px;
   height: 400px;
-  background: #409eff;
+  background: #1e6091;
   top: -100px;
   right: -100px;
   animation: float 8s ease-in-out infinite;
@@ -51,7 +51,7 @@
 .circle-2 {
   width: 300px;
   height: 300px;
-  background: #67c23a;
+  background: #2a9d8f;
   bottom: -80px;
   left: -80px;
   animation: float 10s ease-in-out infinite reverse;

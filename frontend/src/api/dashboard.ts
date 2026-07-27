@@ -157,26 +157,27 @@ export interface DashboardTrendsResponse {
 // 后端已计算中位数 medians 并为每个学生分配 quadrant Q1-Q4
 
 // 四象限业务语义常量 — 嵌套化 {name, color, desc}，与后端 QUADRANT_LABELS 对齐
-// Tailwind 现代色系：emerald/amber/red/blue 替代 Element Plus 默认色 (#67c23a/#e6a23c/#f56c6c/#409eff)
+// 品牌蓝绿系（同源 WINGS_CHART_COLORS / WINGS_DESIGN_TOKENS.md §7）：
+//   青绿=优良 / 琥珀=警示 / 红=高危 / 中蓝=待提升，避免引入第二色源
 export const QUADRANT_LABELS = {
   Q1: {
     name: '自律学霸区',
-    color: '#10b981',  // emerald — 优良
+    color: '#2a9d8f',  // ② 青绿 — 优良
     desc: '德育高 + 学业高（树立标杆，自主发展）',
   },
   Q2: {
     name: '聪明违纪区',
-    color: '#f59e0b',  // amber — 偏科警示
+    color: '#e6a23c',  // ⑤ 琥珀 — 偏科警示
     desc: '成绩优异但行为偏离（规训介入，引导精力）',
   },
   Q3: {
     name: '高危双困区',
-    color: '#ef4444',  // red — 高危双困
+    color: '#f56c6c',  // ⑥ 红 — 高危双困
     desc: '德育低 + 学业低（级部包联，心理干预）',
   },
   Q4: {
     name: '踏实困顿区',
-    color: '#3b82f6',  // blue — 学业待提升
+    color: '#4f86c6',  // ③ 中蓝 — 学业待提升
     desc: '态度端正但成绩异常（学科协同，唤醒方法）',
   },
 } as const
@@ -811,10 +812,10 @@ export function getDemoAttendanceDashboard(): AttendanceDashboardResponse {
       },
     },
     pie: [
-      { name: '正常出勤', value: 376, color: '#10b981' },
-      { name: '迟到', value: 8, color: '#f59e0b' },
-      { name: '缺勤', value: 5, color: '#ef4444' },
-      { name: '早退', value: 4, color: '#3b82f6' },
+      { name: '正常出勤', value: 376, color: '#1e6091' },
+      { name: '迟到', value: 8, color: '#e6a23c' },
+      { name: '缺勤', value: 5, color: '#f56c6c' },
+      { name: '早退', value: 4, color: '#4f86c6' },
     ],
   }
 }
@@ -862,9 +863,9 @@ export function getDemoRedFlagLeaderboard(): FlagEvaluationItem[] {
 // Display Helpers
 // ═════════════════════════════════════════════════════════════════
 
-/** Campus name → chart color (本部红 / 实验蓝) */
+/** Campus name → chart color (品牌蓝绿系：本部=主色深蓝 / 实验=辅助青绿) */
 export function campusColor(campus: CampusName): string {
-  return campus === '本部校区' ? '#ff7675' : '#0984e3'
+  return campus === '本部校区' ? '#1e6091' : '#2a9d8f'
 }
 
 /** Alert level → el-tag type */

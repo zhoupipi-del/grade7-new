@@ -177,6 +177,15 @@ const ICON_MAP: Record<string, any> = {
   Unlock,
 }
 
+// ─── 工具：hex → rgba（品牌色派生面积渐变，避免手写第二色源） ─────
+const hexToRgba = (hex: string, alpha: number): string => {
+  const v = hex.replace('#', '')
+  const r = parseInt(v.substring(0, 2), 16)
+  const g = parseInt(v.substring(2, 4), 16)
+  const b = parseInt(v.substring(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 // ─── 响应式数据 (从 API 契约层获取) ─────────────────────────────
 const kpiMetrics = ref<KpiMetric[]>([])
 const alertStream = ref<AlertItem[]>([])
@@ -326,18 +335,15 @@ const stopAlertPolling = () => {
 const initRadarChart = () => {
   if (!radarChartRef.value) return
   if (!radarChart) {
-    radarChart = echarts.init(radarChartRef.value)
+    radarChart = echarts.init(radarChartRef.value, 'wings')
   }
 
   const seriesData = radarSeries.value.map(s => {
     const color = campusColor(s.name)
-    const rgba = s.name === '本部校区'
-      ? 'rgba(255, 118, 117, 0.25)'
-      : 'rgba(9, 132, 227, 0.18)'
     return {
       value: s.values,
       name: s.name,
-      areaStyle: { color: rgba },
+      areaStyle: { color: hexToRgba(color, 0.22) },
       lineStyle: { color, width: 2.5 },
       itemStyle: { color },
       symbolSize: 6,
@@ -360,9 +366,7 @@ const initRadarChart = () => {
           color: ['rgba(245, 247, 250, 0.6)', 'rgba(236, 240, 245, 0.6)'],
         },
       },
-      axisLine: { lineStyle: { color: '#dcdfe6' } },
-      splitLine: { lineStyle: { color: '#e4e7ed' } },
-      axisName: { color: '#606266', fontSize: 13, fontWeight: 500 },
+      axisName: { fontSize: 13, fontWeight: 500 },
       center: ['50%', '52%'],
       radius: '68%',
     },
@@ -378,7 +382,7 @@ const initRadarChart = () => {
 const initTrendChart = () => {
   if (!trendChartRef.value) return
   if (!trendChart) {
-    trendChart = echarts.init(trendChartRef.value)
+    trendChart = echarts.init(trendChartRef.value, 'wings')
   }
 
   // Use first series dates as x-axis, fallback to empty
@@ -386,12 +390,6 @@ const initTrendChart = () => {
 
   const series = trendSeries.value.map(s => {
     const color = campusColor(s.name)
-    const rgbaStart = s.name === '本部校区'
-      ? 'rgba(255, 118, 117, 0.25)'
-      : 'rgba(9, 132, 227, 0.2)'
-    const rgbaEnd = s.name === '本部校区'
-      ? 'rgba(255, 118, 117, 0)'
-      : 'rgba(9, 132, 227, 0)'
     return {
       name: s.name,
       type: 'line',
@@ -402,8 +400,8 @@ const initTrendChart = () => {
       symbolSize: 8,
       areaStyle: {
         color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: rgbaStart },
-          { offset: 1, color: rgbaEnd },
+          { offset: 0, color: hexToRgba(color, 0.25) },
+          { offset: 1, color: hexToRgba(color, 0) },
         ]),
       },
     }
@@ -417,17 +415,13 @@ const initTrendChart = () => {
       type: 'category',
       boundaryGap: false,
       data: dates,
-      axisLine: { lineStyle: { color: '#909399' } },
-      axisLabel: { color: '#606266' },
     },
     yAxis: {
       type: 'value',
       name: 'RDI 指数',
       min: 0,
       max: 4,
-      splitLine: { lineStyle: { type: 'dashed', color: '#e4e7ed' } },
-      axisLabel: { color: '#606266' },
-      nameTextStyle: { color: '#909399' },
+      splitLine: { lineStyle: { type: 'dashed' } },
     },
     series,
   }
@@ -520,7 +514,7 @@ onBeforeUnmount(() => {
 .kpi-danger .kpi-icon { background: rgba(245, 108, 108, 0.12); color: #f56c6c; }
 .kpi-warning .kpi-icon { background: rgba(230, 162, 60, 0.12); color: #e6a23c; }
 .kpi-success .kpi-icon { background: rgba(103, 194, 58, 0.12); color: #67c23a; }
-.kpi-primary .kpi-icon { background: rgba(64, 158, 255, 0.12); color: #409eff; }
+.kpi-primary .kpi-icon { background: rgba(30, 96, 145, 0.12); color: #1e6091; }
 
 .kpi-content {
   flex: 1;
@@ -593,7 +587,7 @@ onBeforeUnmount(() => {
 }
 
 .panel-title .el-icon {
-  color: #409eff;
+  color: #1e6091;
 }
 
 .legend-inline {
@@ -612,8 +606,8 @@ onBeforeUnmount(() => {
   margin-right: 2px;
 }
 
-.legend-benbu { background: #ff7675; }
-.legend-shiyan { background: #0984e3; }
+.legend-benbu { background: #1e6091; }
+.legend-shiyan { background: #2a9d8f; }
 
 /* ═══ 告警流 ═══ */
 .alert-stream {

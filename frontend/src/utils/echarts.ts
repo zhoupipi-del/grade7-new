@@ -11,7 +11,7 @@
  * Components: Title, Tooltip, Legend, Grid, Radar, DataZoom, MarkLine
  */
 
-import { use } from 'echarts/core'
+import { use, registerTheme } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { RadarChart, LineChart, BarChart, PieChart, ScatterChart, FunnelChart } from 'echarts/charts'
 import {
@@ -25,6 +25,10 @@ import {
   MarkPointComponent,
   ToolboxComponent,
 } from 'echarts/components'
+import wingsTheme from './echartsTheme'
+
+// 注册 WINGS 品牌图表主题（与 WINGS_DESIGN_TOKENS.md §7 同源）
+registerTheme('wings', wingsTheme)
 
 use([
   CanvasRenderer,

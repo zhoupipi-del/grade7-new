@@ -163,9 +163,9 @@ const periodLabel = computed(() => {
 
 const rateColor = computed(() => {
   const r = dashboardData.value.attendance_rate
-  if (r >= 97) return '#10b981'
-  if (r >= 93) return '#f59e0b'
-  return '#ef4444'
+  if (r >= 97) return '#67c23a'
+  if (r >= 93) return '#e6a23c'
+  return '#f56c6c'
 })
 
 const lateTrendDir = computed<'up' | 'down' | 'flat'>(() => {
@@ -214,7 +214,7 @@ const anomalyTypeLabel = (type: string): string => {
 const initPieChart = () => {
   if (!pieChartRef.value) return
   if (pieChart) pieChart.dispose()
-  pieChart = echarts.init(pieChartRef.value)
+  pieChart = echarts.init(pieChartRef.value, 'wings')
 
   const option: echarts.EChartsCoreOption = {
     tooltip: {
@@ -226,7 +226,7 @@ const initPieChart = () => {
       bottom: 0,
       itemWidth: 8,
       itemHeight: 8,
-      textStyle: { fontSize: 11, color: '#606266' },
+      textStyle: { fontSize: 11 },
     },
     series: [
       {
@@ -323,16 +323,16 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 20px;
   padding: 12px 16px;
-  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  background: linear-gradient(135deg, #f0f9eb 0%, #e8f5e0 100%);
   border-radius: 10px;
-  border: 1px solid #d1fae5;
+  border: 1px solid #d6ecc4;
   transition: opacity 0.3s;
 }
 
 .att-rate-card.rate-offline {
   opacity: 0.6;
-  background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
-  border-color: #fde68a;
+  background: linear-gradient(135deg, #fdf6ec 0%, #fbf0db 100%);
+  border-color: #f5dca0;
 }
 
 .rate-ring {
@@ -405,18 +405,18 @@ onBeforeUnmount(() => {
 }
 
 .anomaly-late {
-  background: rgba(245, 158, 11, 0.08);
-  border-color: rgba(245, 158, 11, 0.2);
+  background: rgba(230, 162, 60, 0.08);
+  border-color: rgba(230, 162, 60, 0.2);
 }
 
 .anomaly-absent {
-  background: rgba(239, 68, 68, 0.08);
-  border-color: rgba(239, 68, 68, 0.2);
+  background: rgba(245, 108, 108, 0.08);
+  border-color: rgba(245, 108, 108, 0.2);
 }
 
 .anomaly-leave {
-  background: rgba(59, 130, 246, 0.08);
-  border-color: rgba(59, 130, 246, 0.2);
+  background: rgba(79, 134, 198, 0.08);
+  border-color: rgba(79, 134, 198, 0.2);
 }
 
 .anomaly-icon {
@@ -429,9 +429,9 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.anomaly-late .anomaly-icon { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
-.anomaly-absent .anomaly-icon { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-.anomaly-leave .anomaly-icon { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+.anomaly-late .anomaly-icon { background: rgba(230, 162, 60, 0.15); color: #e6a23c; }
+.anomaly-absent .anomaly-icon { background: rgba(245, 108, 108, 0.15); color: #f56c6c; }
+.anomaly-leave .anomaly-icon { background: rgba(79, 134, 198, 0.15); color: #4f86c6; }
 
 .anomaly-body {
   flex: 1;
@@ -460,8 +460,8 @@ onBeforeUnmount(() => {
   gap: 1px;
 }
 
-.anomaly-late .anomaly-trend { color: #f59e0b; }
-.anomaly-absent .anomaly-trend { color: #ef4444; }
+.anomaly-late .anomaly-trend { color: #e6a23c; }
+.anomaly-absent .anomaly-trend { color: #f56c6c; }
 
 /* ═══ 饼图 ═══ */
 .pie-container {
@@ -497,7 +497,7 @@ onBeforeUnmount(() => {
 }
 
 .alert-title .el-icon {
-  color: #ef4444;
+  color: #f56c6c;
 }
 
 .alert-list {
@@ -532,13 +532,13 @@ onBeforeUnmount(() => {
 }
 
 .alert-danger {
-  border-left-color: #ef4444;
-  background: rgba(239, 68, 68, 0.04);
+  border-left-color: #f56c6c;
+  background: rgba(245, 108, 108, 0.04);
 }
 
 .alert-warning {
-  border-left-color: #f59e0b;
-  background: rgba(245, 158, 11, 0.04);
+  border-left-color: #e6a23c;
+  background: rgba(230, 162, 60, 0.04);
 }
 
 .alert-row-left {
@@ -562,8 +562,8 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.avatar-danger { background: #ef4444; }
-.avatar-warning { background: #f59e0b; }
+.avatar-danger { background: #f56c6c; }
+.avatar-warning { background: #e6a23c; }
 
 .alert-warnings {
   display: flex;

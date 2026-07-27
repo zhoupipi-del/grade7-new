@@ -23,7 +23,7 @@
         class="sidebar-menu"
         background-color="#1f2c3f"
         text-color="#bfcbd9"
-        active-text-color="#409eff"
+        active-text-color="#1e6091"
       >
         <el-sub-menu
           v-for="group in visibleGroups"
@@ -753,7 +753,7 @@ onMounted(() => {
 }
 
 .empty-link {
-  color: #409eff;
+  color: #1e6091;
   text-decoration: none;
 }
 
@@ -790,7 +790,7 @@ onMounted(() => {
 }
 
 .collapse-btn:hover {
-  color: #409eff;
+  color: #1e6091;
 }
 
 .school-highlight {
@@ -830,7 +830,7 @@ onMounted(() => {
 }
 
 .user-avatar {
-  background-color: #409eff;
+  background-color: #1e6091;
   color: #fff;
   font-weight: 600;
 }

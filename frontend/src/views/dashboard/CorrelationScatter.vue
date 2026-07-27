@@ -252,7 +252,7 @@ const onSemesterChange = () => {
 const initScatterChart = () => {
   if (!scatterChartRef.value) return
   if (!scatterChart) {
-    scatterChart = echarts.init(scatterChartRef.value)
+    scatterChart = echarts.init(scatterChartRef.value, 'wings')
   }
 
   const mMed = medians.value.moral_median
@@ -296,7 +296,6 @@ const initScatterChart = () => {
         symbol: 'none',
         lineStyle: {
           type: 'dashed',
-          color: '#909399',
           width: 1.5,
         },
         label: {
@@ -307,7 +306,6 @@ const initScatterChart = () => {
             if (params.name === 'mathMed') return `学业中位 ${aMed.toFixed(1)}`
             return ''
           },
-          color: '#606266',
           fontSize: 11,
         },
         data: [
@@ -319,8 +317,8 @@ const initScatterChart = () => {
       markArea: code === 'Q3' ? {
         silent: true,
         itemStyle: {
-          color: 'rgba(239, 68, 68, 0.06)',
-          borderColor: 'rgba(239, 68, 68, 0.2)',
+          color: 'rgba(245, 108, 108, 0.06)',
+          borderColor: 'rgba(245, 108, 108, 0.2)',
           borderWidth: 1,
         },
         data: [[
@@ -346,8 +344,8 @@ const initScatterChart = () => {
             ${d.student_name}
           </div>
           <div style="font-size:12px;color:#606266;line-height:1.8;">
-            <div>德育量化分：<b style="color:#3b82f6">${d.value[0].toFixed(1)}</b></div>
-            <div>学业平均分：<b style="color:#10b981">${d.value[1].toFixed(1)}</b></div>
+            <div>德育量化分：<b style="color:#1e6091">${d.value[0].toFixed(1)}</b></div>
+            <div>学业平均分：<b style="color:#2a9d8f">${d.value[1].toFixed(1)}</b></div>
             <div style="margin-top:4px;">
               <span style="display:inline-block;padding:1px 6px;border-radius:3px;background:${quadrantColor};color:#fff;font-size:11px;">
                 ${d.quadrant}
@@ -368,7 +366,7 @@ const initScatterChart = () => {
     legend: {
       show: true,
       bottom: 0,
-      textStyle: { color: '#606266', fontSize: 12 },
+      fontSize: 12,
       itemWidth: 12,
       itemHeight: 12,
       icon: 'circle',
@@ -385,24 +383,20 @@ const initScatterChart = () => {
       name: '德育量化总分',
       nameLocation: 'middle',
       nameGap: 32,
-      nameTextStyle: { color: '#303133', fontSize: 13, fontWeight: 600 },
+      nameTextStyle: { fontSize: 13, fontWeight: 600 },
       min: 0,
       max: 100,
-      splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } },
-      axisLine: { lineStyle: { color: '#dcdfe6' } },
-      axisLabel: { color: '#606266' },
+      splitLine: { lineStyle: { type: 'dashed' } },
     },
     yAxis: {
       type: 'value',
       name: '学业平均分',
       nameLocation: 'middle',
       nameGap: 42,
-      nameTextStyle: { color: '#303133', fontSize: 13, fontWeight: 600 },
+      nameTextStyle: { fontSize: 13, fontWeight: 600 },
       min: 0,
       max: 100,
-      splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } },
-      axisLine: { lineStyle: { color: '#dcdfe6' } },
-      axisLabel: { color: '#606266' },
+      splitLine: { lineStyle: { type: 'dashed' } },
     },
     series,
   }
@@ -462,7 +456,7 @@ onBeforeUnmount(() => {
 }
 
 .panel-title .el-icon {
-  color: #409eff;
+  color: #1e6091;
 }
 
 .title-sub {
@@ -625,11 +619,11 @@ onBeforeUnmount(() => {
 }
 
 .legend-x {
-  background: linear-gradient(90deg, #3b82f6, #10b981);
+  background: linear-gradient(90deg, #1e6091, #2a9d8f);
 }
 
 .legend-y {
-  background: linear-gradient(90deg, #10b981, #f59e0b);
+  background: linear-gradient(90deg, #2a9d8f, #e6a23c);
 }
 
 .legend-dash {
