@@ -23,7 +23,7 @@
         class="sidebar-menu"
         background-color="#1f2c3f"
         text-color="#bfcbd9"
-        active-text-color="#1e6091"
+        active-text-color="#ffffff"
       >
         <el-sub-menu
           v-for="group in visibleGroups"
@@ -689,7 +689,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, #1e6091 0%, #184d74 100%);
 }
 
 .logo-icon {
@@ -715,6 +715,50 @@ onMounted(() => {
 
 .sidebar-menu:not(.el-menu--collapse) {
   width: 240px;
+}
+
+/* ── 品牌化菜单项 ── */
+.sidebar-menu :deep(.el-menu-item),
+.sidebar-menu :deep(.el-sub-menu__title) {
+  height: 44px;
+  line-height: 44px;
+  border-radius: 8px;
+  margin: 4px 10px;
+  color: #bfcbd9;
+  transition: all 0.2s ease;
+}
+
+.sidebar-menu :deep(.el-sub-menu__title) {
+  font-weight: 600;
+}
+
+/* hover：浅白底 + 白字 */
+.sidebar-menu :deep(.el-menu-item:hover),
+.sidebar-menu :deep(.el-sub-menu__title:hover) {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+}
+
+/* 激活态：主色填充 + 白字 + 左侧白条 */
+.sidebar-menu :deep(.el-menu-item) {
+  position: relative;
+}
+.sidebar-menu :deep(.el-menu-item.is-active) {
+  background: #1e6091 !important;
+  color: #fff !important;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(30, 96, 145, 0.45);
+}
+.sidebar-menu :deep(.el-menu-item.is-active)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 22px;
+  background: #fff;
+  border-radius: 0 4px 4px 0;
 }
 
 .menu-title-text {

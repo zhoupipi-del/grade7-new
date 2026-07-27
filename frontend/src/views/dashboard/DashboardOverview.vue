@@ -1,5 +1,16 @@
 <template>
   <div class="dashboard-container" v-loading="pageLoading">
+    <!-- ═══ 页面头部 ═══ -->
+    <div class="page-header">
+      <div class="page-header-main">
+        <h2 class="page-header-title">指挥舱看板</h2>
+        <p class="page-header-sub">德育风险全景 · 实时态势感知</p>
+      </div>
+      <div class="page-header-meta">
+        <el-tag type="primary" effect="plain" round>数据周期：近 6 观测窗</el-tag>
+      </div>
+    </div>
+
     <!-- ═══ 顶层：四象 KPI 指挥指标卡 ═══ -->
     <el-row :gutter="20" class="kpi-row">
       <el-col :span="6" v-for="metric in kpiMetrics" :key="metric.key">
@@ -480,6 +491,31 @@ onBeforeUnmount(() => {
   padding: 4px;
 }
 
+/* ═══ 页面头部 ═══ */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 20px;
+}
+.page-header-main {
+  min-width: 0;
+}
+.page-header-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1f2933;
+  margin: 0 0 4px;
+}
+.page-header-sub {
+  font-size: 13px;
+  color: #909399;
+  margin: 0;
+}
+.page-header-meta {
+  flex-shrink: 0;
+}
+
 /* ═══ KPI 指标卡 ═══ */
 .kpi-row {
   margin-bottom: 20px;
@@ -515,6 +551,15 @@ onBeforeUnmount(() => {
 .kpi-warning .kpi-icon { background: rgba(230, 162, 60, 0.12); color: #e6a23c; }
 .kpi-success .kpi-icon { background: rgba(103, 194, 58, 0.12); color: #67c23a; }
 .kpi-primary .kpi-icon { background: rgba(30, 96, 145, 0.12); color: #1e6091; }
+
+/* 顶部强调色条，强化语义区分 */
+.kpi-card {
+  border-top: 3px solid transparent;
+}
+.kpi-danger { border-top-color: #f56c6c; }
+.kpi-warning { border-top-color: #e6a23c; }
+.kpi-success { border-top-color: #67c23a; }
+.kpi-primary { border-top-color: #1e6091; }
 
 .kpi-content {
   flex: 1;
