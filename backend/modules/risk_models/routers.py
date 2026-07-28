@@ -14,12 +14,14 @@ modules/risk_models/routers.py — 风险预警雷达 API 路由
 
 import logging
 
-from core.models import User, UserRole
+from core.models import Class, Student, User, UserRole, get_local_now
 from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .explainer import ExplainerService
+from .models import RiskWarning
 from .schemas import (
     AsyncCalculateRequest,
     AsyncScanClassRequest,
@@ -109,6 +111,277 @@ async def get_risk_dashboard(
     )
 
     return RiskDashboardOut(**dashboard)
+
+
+# ── 四维风险看板聚合 (dashboard-metrics) ──
+
+
+def _band_of(rdi_score: float, psych_veto: bool) -> str:
+    """将学生风险状态映射到 σ 区间 (veto/watch/warning/normal)"""
+    if psych_veto or rdi_score >= 3.0:
+        return "veto"
+    if rdi_score >= 2.0:
+        return "warning"
+    if rdi_score >= 1.0:
+        return "watch"
+    return "normal"
+
+
+async def _aggregate_dashboard_metrics(
+    db: AsyncSession,
+    school_id: int,
+    class_id: int | None,
+    grade_id: int | None,
+    limit_events: int,
+) -> dict:
+    """
+    聚合四维风险看板 (dashboard-metrics) 数据。
+
+    数据源: risk_warnings(active) + Student + Class。
+    每个学生在 scope 内只取最新一条活跃预警, 避免重复计数。
+    """
+    stmt = (
+        select(
+            RiskWarning,
+            Student.name.label("student_name"),
+            Student.student_no,
+            Class.name.label("class_name"),
+        )
+        .join(Student, RiskWarning.student_id == Student.id)
+        .outerjoin(Class, RiskWarning.class_id == Class.id)
+        .where(RiskWarning.school_id == school_id)
+        .where(RiskWarning.status == "active")
+    )
+    if class_id is not None:
+        stmt = stmt.where(RiskWarning.class_id == class_id)
+    if grade_id is not None:
+        stmt = stmt.where(RiskWarning.grade_id == grade_id)
+    stmt = stmt.order_by(RiskWarning.warned_at.desc())
+    rows = (await db.execute(stmt)).all()
+
+    # 每学生取最新一条预警 (rows 已按 warned_at desc)
+    students: dict[int, dict] = {}
+    for rw, s_name, s_no, c_name in rows:
+        if rw.student_id in students:
+            continue
+        students[rw.student_id] = {
+            "student_id": rw.student_id,
+            "student_name": s_name or f"学生{rw.student_id}",
+            "student_no": s_no,
+            "class_id": rw.class_id,
+            "class_name": c_name,
+            "rdi_score": float(rw.rdi_score),
+            "risk_level": rw.risk_level,
+            "behavior_deviation": float(rw.behavior_deviation or 0.0),
+            "attendance_deviation": float(rw.attendance_deviation or 0.0),
+            "score_deviation": float(rw.score_deviation or 0.0),
+            "psych_deviation": float(getattr(rw, "psych_deviation", 0.0) or 0.0),
+            "psych_veto_triggered": bool(getattr(rw, "psych_veto_triggered", False) or False),
+            "veto_dimension": getattr(rw, "veto_dimension", None),
+            "is_escalating": bool(rw.is_escalating or False),
+            "trigger_event_type": rw.trigger_event_type,
+            "warned_at": rw.warned_at,
+            "top_dimension": RiskMonitorService._determine_top_dimension(
+                rw.behavior_deviation or 0.0,
+                rw.attendance_deviation or 0.0,
+                rw.score_deviation or 0.0,
+                getattr(rw, "psych_deviation", 0.0) or 0.0,
+            ),
+        }
+
+    # σ 漏斗 + 风险等级分布
+    sigma_funnel = {"normal": 0, "watch": 0, "warning": 0, "veto": 0}
+    by_risk_level = {"normal": 0, "attention": 0, "intervention": 0}
+    for s in students.values():
+        sigma_funnel[_band_of(s["rdi_score"], s["psych_veto_triggered"])] += 1
+        if s["risk_level"] in by_risk_level:
+            by_risk_level[s["risk_level"]] += 1
+
+    # 雷达 avg/max (四维度偏离)
+    dims = ["behavior", "attendance", "score", "psych"]
+    dev_keys = ["behavior_deviation", "attendance_deviation", "score_deviation", "psych_deviation"]
+    sums = [0.0] * 4
+    mx = [0.0] * 4
+    n = len(students)
+    for s in students.values():
+        for i, k in enumerate(dev_keys):
+            v = abs(s[k])
+            sums[i] += v
+            if v > mx[i]:
+                mx[i] = v
+    avg = [round(sums[i] / n, 2) if n else 0.0 for i in range(4)]
+    mx = [round(mx[i], 2) for i in range(4)]
+
+    # top 风险学生 (按 rdi desc, 取前 10)
+    top = sorted(students.values(), key=lambda x: x["rdi_score"], reverse=True)[:10]
+    top_risk_students = [
+        {
+            "student_id": s["student_id"],
+            "student_name": s["student_name"],
+            "student_no": s["student_no"],
+            "class_name": s["class_name"] or "",
+            "rdi_score": round(s["rdi_score"], 2),
+            "risk_level": s["risk_level"],
+            "behavior_deviation": round(s["behavior_deviation"], 2),
+            "attendance_deviation": round(s["attendance_deviation"], 2),
+            "score_deviation": round(s["score_deviation"], 2),
+            "psych_deviation": round(s["psych_deviation"], 2),
+            "top_dimension": s["top_dimension"],
+            "psych_veto_triggered": s["psych_veto_triggered"],
+            "veto_dimension": s["veto_dimension"],
+            "is_escalating": s["is_escalating"],
+        }
+        for s in top
+    ]
+
+    # 事件流 (每学生最新预警, 按 warned_at desc, 限制条数)
+    event_stream = []
+    for s in sorted(students.values(), key=lambda x: x["warned_at"] or "", reverse=True)[
+        :limit_events
+    ]:
+        if s["psych_veto_triggered"]:
+            risk_color = "black"
+            rec_action = "psych_intervention"
+        elif s["rdi_score"] >= 2.0:
+            risk_color = "red"
+            rec_action = "intervention_plan"
+        elif s["rdi_score"] >= 1.5:
+            risk_color = "orange"
+            rec_action = "monitor"
+        elif s["rdi_score"] >= 1.0:
+            risk_color = "yellow"
+            rec_action = "monitor"
+        else:
+            risk_color = "green"
+            rec_action = "monitor"
+        if s["is_escalating"] and risk_color not in ("black", "red"):
+            rec_action = "heart_to_heart"
+        event_stream.append(
+            {
+                "student_id": s["student_id"],
+                "student_name": s["student_name"],
+                "student_no": s["student_no"],
+                "class_name": s["class_name"] or "",
+                "rdi_score": round(s["rdi_score"], 2),
+                "risk_level": s["risk_level"],
+                "risk_color": risk_color,
+                "psych_deviation": round(s["psych_deviation"], 2),
+                "psych_veto_triggered": s["psych_veto_triggered"],
+                "veto_dimension": s["veto_dimension"],
+                "trigger_factor": s["trigger_event_type"] or "manual",
+                "warned_at": s["warned_at"].isoformat() if s["warned_at"] else None,
+                "recommended_action": rec_action,
+            }
+        )
+
+    # 班级热力图
+    class_heatmap = await _aggregate_class_heatmap(db, school_id, class_id, grade_id, students)
+
+    # 在读学生总数 (按范围)
+    total_q = select(func.count(Student.id)).where(Student.school_id == school_id)
+    if class_id is not None:
+        total_q = total_q.where(Student.class_id == class_id)
+    if grade_id is not None:
+        total_q = total_q.where(Student.grade_id == grade_id)
+    total_students = (await db.execute(total_q)).scalar() or 0
+
+    return {
+        "radar": {"dimensions": dims, "avg": avg, "max": mx},
+        "sigma_funnel": sigma_funnel,
+        "event_stream": event_stream,
+        "top_risk_students": top_risk_students,
+        "class_heatmap": class_heatmap,
+        "summary": {
+            "total_students": total_students,
+            "at_risk_count": len(students),
+            "by_risk_level": by_risk_level,
+        },
+        "generated_at": get_local_now().isoformat(),
+    }
+
+
+async def _aggregate_class_heatmap(
+    db: AsyncSession,
+    school_id: int,
+    class_id: int | None,
+    grade_id: int | None,
+    students: dict[int, dict],
+) -> list[dict]:
+    """各班学生总数 + σ 区间分布 (normal = 总数 - 非 normal 预警学生数)"""
+    total_q = (
+        select(Class.id, Class.name, func.count(Student.id).label("cnt"))
+        .join(Student, Student.class_id == Class.id)
+        .where(Student.school_id == school_id)
+    )
+    if class_id is not None:
+        total_q = total_q.where(Student.class_id == class_id)
+    if grade_id is not None:
+        total_q = total_q.where(Student.grade_id == grade_id)
+    total_q = total_q.group_by(Class.id, Class.name)
+    class_totals = (await db.execute(total_q)).all()
+
+    band_by_class: dict[int, dict] = {}
+    for s in students.values():
+        cid = s["class_id"]
+        if cid not in band_by_class:
+            band_by_class[cid] = {"watch": 0, "warning": 0, "veto": 0}
+        band = _band_of(s["rdi_score"], s["psych_veto_triggered"])
+        if band in ("watch", "warning", "veto"):
+            band_by_class[cid][band] += 1
+
+    heatmap = []
+    for cid, cname, cnt in class_totals:
+        bands = band_by_class.get(cid, {"watch": 0, "warning": 0, "veto": 0})
+        non_normal = bands["watch"] + bands["warning"] + bands["veto"]
+        heatmap.append(
+            {
+                "class_id": cid,
+                "class_name": cname or f"班级{cid}",
+                "total": cnt,
+                "normal": max(cnt - non_normal, 0),
+                "watch": bands["watch"],
+                "warning": bands["warning"],
+                "veto": bands["veto"],
+            }
+        )
+    heatmap.sort(key=lambda x: x["class_id"])
+    return heatmap
+
+
+@router.get("/dashboard-metrics")
+async def get_dashboard_metrics(
+    class_id: int | None = Query(None, description="班级ID (班主任自动限制本班)"),
+    grade_id: int | None = Query(None, description="年级ID (级组长自动限制本年级)"),
+    limit_events: int = Query(20, description="事件流返回条数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取四维风险看板聚合数据 (dashboard-metrics)
+
+    供 RDI 风险看板页 (RdiDashboard.vue) 使用。聚合 risk_warnings(active) + Student + Class。
+
+    权限:
+      - class_teacher: 自动限制本班
+      - grade_leader: 自动限制本年级
+      - ms_admin: 看全校
+    """
+    if current_user.role not in [UserRole.CLASS_TEACHER, UserRole.GRADE_LEADER, UserRole.MS_ADMIN]:
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    if current_user.role == UserRole.CLASS_TEACHER:
+        if not class_id:
+            class_id = getattr(current_user, "class_id", None)
+        if not class_id:
+            raise HTTPException(status_code=400, detail="班主任缺少班级信息")
+    elif current_user.role == UserRole.GRADE_LEADER:
+        if not grade_id:
+            grade_id = getattr(current_user, "grade_id", None)
+
+    metrics = await _aggregate_dashboard_metrics(
+        db, current_user.school_id, class_id, grade_id, limit_events
+    )
+    return metrics
 
 
 # ── 风险监控面板 ──

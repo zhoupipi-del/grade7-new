@@ -123,7 +123,7 @@ export interface BlindboxHistoryResponse {
 // API 函数
 // ═══════════════════════════════════════════════════
 
-const BASE = '/api/v1/habit_cards'
+const BASE = '/habit_cards'
 
 /** 获取卡牌模板库 */
 export function getTemplates(schoolId: number) {

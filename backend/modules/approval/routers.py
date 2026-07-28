@@ -95,6 +95,13 @@ def _map_chain_nodes(
       pending + node_index == current_step → pending
       pending + node_index != current_step → waiting
     """
+    # 防御: 旧数据 chain_config 可能是 list 而非 dict，归一化为标准结构
+    if isinstance(chain_config, list):
+        chain_config = {
+            "nodes": chain_config,
+            "total_timeout_hours": 48,
+            "approval_mode": "serial_and",
+        }
     nodes = chain_config.get("nodes", [])
     result = []
 
@@ -145,8 +152,15 @@ def _build_ticket_title(event_type: str, student_name: str) -> str:
     return f"{student_name} {label}审批"
 
 
-def _calculate_deadline(created_at, chain_config: dict) -> str:
+def _calculate_deadline(created_at, chain_config: dict | list) -> str:
     """计算截止时间 = 创建时间 + 总超时小时数"""
+    # 防御: 旧数据 chain_config 可能是 list 而非 dict
+    if isinstance(chain_config, list):
+        chain_config = {
+            "nodes": chain_config,
+            "total_timeout_hours": 48,
+            "approval_mode": "serial_and",
+        }
     if not created_at:
         return ""
     total_hours = chain_config.get("total_timeout_hours", 48)
@@ -323,6 +337,13 @@ async def get_tickets(
     tickets = []
     for ar, student_name, school_name in rows:
         chain = ar.chain_config or {}
+        # 防御: 旧数据 chain_config 可能是 list 而非 dict
+        if isinstance(chain, list):
+            chain = {
+                "nodes": chain,
+                "total_timeout_hours": 48,
+                "approval_mode": "serial_and",
+            }
         nodes = _map_chain_nodes(chain, ar.current_step or 0)
         title = _build_ticket_title(ar.event_type, student_name or "未知学生")
 

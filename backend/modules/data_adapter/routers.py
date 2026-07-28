@@ -10,7 +10,7 @@ Data Adapter 路由层
 
 import json
 
-from core.models import User, UserRole
+from core.models import Class, Student, User, UserRole
 from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import and_, func, select
@@ -551,6 +551,112 @@ async def get_exam_alerts(
             }
             for a in alerts
         ],
+    }
+
+
+# ============================================================
+# AI 处方全景中心 — 按考试聚合弱科诊断处方 (分页 + 多维筛选)
+# ============================================================
+
+
+@router.get("/prescriptions")
+async def list_prescriptions(
+    exam_id: int = Query(..., description="大考ID (必填)"),
+    page: int = Query(1, ge=1, description="页码 (从1开始)"),
+    page_size: int = Query(20, ge=1, le=200, description="每页条数"),
+    subject_code: str | None = Query(None, description="学科代码筛选"),
+    risk_level: str | None = Query(None, description="red/yellow/green (按 Z-Score 阈值映射)"),
+    student_name: str | None = Query(None, description="学生姓名模糊匹配"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    AI 处方全景中心 — 按考试聚合弱科诊断处方 (分页 + 多维筛选)
+
+    数据来源: student_weakness_prescriptions
+              JOIN student_risk_alerts (取 exam_id)
+              JOIN Student / Class (取姓名与班级)。
+
+    多租户: 仅返回当前 school_id 下的处方。
+
+    注意: student_weakness_prescriptions 表在基线迁移中已 DROP 掉
+    weekly_plan_json / habit_diagnosis / emotion_anchor / parent_guide 四列,
+    这些字段如实返回 null (前端已对 null 容错)。
+    """
+    school_id = current_user.school_id
+
+    base = (
+        select(
+            StudentWeaknessPrescription,
+            Student.name.label("student_name"),
+            Class.name.label("class_name"),
+        )
+        .join(StudentRiskAlert, StudentWeaknessPrescription.alert_id == StudentRiskAlert.id)
+        .join(Student, StudentWeaknessPrescription.student_id == Student.id)
+        .outerjoin(Class, Student.class_id == Class.id)
+        .where(StudentWeaknessPrescription.school_id == school_id)
+        .where(StudentRiskAlert.exam_id == exam_id)
+    )
+
+    if subject_code:
+        base = base.where(StudentWeaknessPrescription.subject_code == subject_code)
+    if student_name:
+        base = base.where(Student.name.like(f"%{student_name}%"))
+    if risk_level:
+        # 前端映射 (PrescriptionCenter.vue): red z<=-1.5, yellow z<=-1.0, green z>-1.0
+        if risk_level == "red":
+            base = base.where(StudentWeaknessPrescription.z_score <= -1.5)
+        elif risk_level == "yellow":
+            base = base.where(
+                and_(
+                    StudentWeaknessPrescription.z_score <= -1.0,
+                    StudentWeaknessPrescription.z_score > -1.5,
+                )
+            )
+        elif risk_level == "green":
+            base = base.where(StudentWeaknessPrescription.z_score > -1.0)
+
+    # 总数 (基于同一筛选条件的子查询)
+    count_q = select(func.count()).select_from(base.subquery())
+    total = (await db.execute(count_q)).scalar() or 0
+
+    # 分页 (按 z_score asc, 最差学科在前)
+    page_q = (
+        base.order_by(StudentWeaknessPrescription.z_score.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    rows = (await db.execute(page_q)).all()
+
+    prescriptions = [
+        {
+            "id": p.id,
+            "alert_id": p.alert_id,
+            "student_id": p.student_id,
+            "student_name": s_name or f"学生{p.student_id}",
+            "class_name": c_name or "",
+            "subject_code": p.subject_code,
+            "raw_score": float(p.raw_score) if p.raw_score is not None else None,
+            "scaled_score": float(p.scaled_score) if p.scaled_score is not None else None,
+            "z_score": float(p.z_score) if p.z_score is not None else None,
+            "weakness_analysis": p.weakness_analysis,
+            "action_prescription": p.action_prescription,
+            "habit_diagnosis": None,
+            "emotion_anchor": None,
+            "weekly_plan_json": None,
+            "parent_guide": None,
+            "model_metadata": p.model_metadata,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p, s_name, c_name in rows
+    ]
+
+    return {
+        "status": "success",
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "prescriptions": prescriptions,
     }
 
 

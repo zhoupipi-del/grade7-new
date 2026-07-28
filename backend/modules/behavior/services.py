@@ -223,7 +223,7 @@ class BehaviorService:
                 #    penalty_override 传 PolicyEngine 精确扣分 (base_penalty)
                 from modules.evaluation.services import EvaluationService
 
-                log = await EvaluationService.apply_deduction(
+                await EvaluationService.apply_deduction(
                     db=db,
                     student_id=student.id,
                     class_id=student.class_id,
@@ -567,7 +567,14 @@ class BehaviorService:
         db: AsyncSession, appeal_id: int, status: str, comment: str, reviewer_id: int
     ) -> DisciplineAppeal | None:
         """班主任/年级组长/德育处审核申诉"""
-        appeal = await db.scalar(select(DisciplineAppeal).where(DisciplineAppeal.id == appeal_id))
+        appeal = await db.scalar(
+            select(DisciplineAppeal)
+            .options(
+                selectinload(DisciplineAppeal.student),
+                selectinload(DisciplineAppeal.reviewer),
+            )
+            .where(DisciplineAppeal.id == appeal_id)
+        )
         if not appeal or appeal.status != "pending":
             return None
 
@@ -602,6 +609,10 @@ class BehaviorService:
 
         stmt = (
             select(DisciplineAppeal)
+            .options(
+                selectinload(DisciplineAppeal.student),
+                selectinload(DisciplineAppeal.reviewer),
+            )
             .where(*conditions)
             .order_by(DisciplineAppeal.created_at.desc())
             .offset(offset)

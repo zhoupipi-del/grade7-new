@@ -317,15 +317,21 @@ def _format_record(r) -> dict:
 
 
 def _format_appeal(a) -> dict:
+    """安全格式化申诉，容错关系未加载 (避免异步上下文 MissingGreenlet 触发 500)"""
+    try:
+        student_name = a.student.name if a.student else None
+        reviewer_name = a.reviewer.display_name if a.reviewer else None
+    except Exception:
+        student_name = reviewer_name = None
     return {
         "id": a.id,
         "discipline_id": a.discipline_id,
         "student_id": a.student_id,
-        "student_name": a.student.name if a.student else None,
+        "student_name": student_name,
         "reason": a.reason,
         "status": a.status,
         "review_comment": a.review_comment,
-        "reviewer_name": a.reviewer.display_name if a.reviewer else None,
+        "reviewer_name": reviewer_name,
         "reviewed_at": a.reviewed_at.isoformat() if a.reviewed_at else None,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
