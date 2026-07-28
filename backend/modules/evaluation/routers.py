@@ -512,13 +512,13 @@ async def get_positive_score_ranking(
     # 权限控制：非 MS_ADMIN 只能查看自己管理的范围
     if current_user.role != UserRole.MS_ADMIN:
         if current_user.role == UserRole.GRADE_LEADER:
-            # TODO: 获取当前用户管理的年级ID
+            # 级组长仅看本年级：取当前用户绑定的 grade_id（User.grade_id 同表列，必加载）
             if not grade_id:
-                grade_id = 1  # 临时硬编码，实际应从用户属性获取
+                grade_id = current_user.grade_id
         elif current_user.role == UserRole.CLASS_TEACHER:
-            # TODO: 获取当前用户管理的班级ID
+            # 班主任仅看本班：取当前用户绑定的 class_id（User.class_id 同表列，必加载）
             if not class_id:
-                class_id = 1  # 临时硬编码，实际应从用户属性获取
+                class_id = current_user.class_id
 
     ranking = await EvaluationService.get_positive_score_ranking(
         db=db,

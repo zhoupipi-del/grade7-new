@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+.venv*/          # 覆盖 .venv_migration 等（2026-07-23 整改：原 .venv/ 匹配不到带后缀的）
 .env
 *.tar.gz
+prod_snapshot/   # 未提交 diff 证据，禁止误提交（2026-07-23 整改）

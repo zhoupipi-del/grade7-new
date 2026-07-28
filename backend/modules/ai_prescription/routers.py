@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from celery.result import AsyncResult
+from core.models import User
 from core.routers import UserRole, get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from modules.ai_prescription.aggregator import AIPrescriptionAggregator
@@ -161,7 +162,10 @@ async def create_student_intervention(
     response_model=TaskStatusOut,
     summary="轮询 AI 任务状态",
 )
-async def poll_task_status(task_id: str):
+async def poll_task_status(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """
     轮询 Celery 任务状态
     - PENDING：排队中

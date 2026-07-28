@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Index,
     Integer,
     String,
     Text,
@@ -87,3 +88,38 @@ class ParentBlindboxLog(Base, SchoolMixin):
     card_id = Column(BigInteger, nullable=False)
     opened_at = Column(DateTime, default=get_local_now)
     shared_to = Column(String(40), comment="裂变追踪: wechat_moments")
+
+
+class ParentMeetingLetter(Base, SchoolMixin):
+    """见字如面 · 家长会书信表 (家校纽带黄金事件源)
+
+    业务流程:
+      1. 学生在 Wings 系统内写一封信 (status=sent)
+      2. 家长在家长会现场拆盲盒阅读 (status=read)
+      3. 家长现场回信 (status=replied) → 触发 moral.parent_meeting_letter 事件
+      → Growth Timeline 写入 GOLDEN_BOND 事件 + 班主任德育活跃度加权
+    """
+
+    __tablename__ = "parent_meeting_letters"
+    __table_args__ = (
+        Index("idx_pml_student", "student_id"),
+        Index("idx_pml_parent", "parent_user_id"),
+        Index("idx_pml_status", "letter_status"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    student_id = Column(BigInteger, nullable=False, comment="学生ID")
+    parent_user_id = Column(BigInteger, nullable=False, comment="家长用户ID")
+    meeting_id = Column(String(60), nullable=True, comment="家长会批次标识, 如 2026_05_29_grade7")
+    letter_content = Column(Text, nullable=True, comment="孩子写给家长的信 (加密存储)")
+    reply_content = Column(Text, nullable=True, comment="家长回信内容 (加密存储)")
+    letter_status = Column(
+        String(20),
+        default="sent",
+        nullable=False,
+        comment="sent(孩子已写) / read(家长已读) / replied(已回信)",
+    )
+    sent_at = Column(DateTime, default=get_local_now, comment="孩子写信时间")
+    read_at = Column(DateTime, nullable=True, comment="家长阅读时间")
+    replied_at = Column(DateTime, nullable=True, comment="家长回信时间")
+    created_at = Column(DateTime, default=get_local_now)

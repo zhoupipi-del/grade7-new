@@ -28,7 +28,7 @@ import time
 from datetime import date, datetime, timedelta
 
 # 导入 PolicyEngine 读取配置
-from core.models import Class, Student, get_local_now
+from core.models import Class, Student, User, UserRole
 from modules.attendance.models import AttendanceRecord
 from modules.behavior.models import DisciplineRecord
 from modules.evaluation.models import StudentScore
@@ -39,6 +39,7 @@ from .models import (
     PsychSurvey,
     RiskBaseline,
     RiskWarning,
+    WarningFeedback,
 )
 
 logger = logging.getLogger(__name__)
@@ -604,7 +605,6 @@ class RiskDeviationIndexCalculator:
         """SQL查询1: 一次性获取学生信息 + 三维度偏差数据"""
         # 计算时间窗口
         short_start = date.today() - timedelta(days=window_short)
-        medium_start = date.today() - timedelta(days=window_medium)
 
         # === 1. 获取学生信息 ===
         student_query = select(Student).where(
@@ -945,7 +945,7 @@ class RiskDeviationIndexCalculator:
                             baseline_type=btype,
                             window_days=window_days,
                             mean_value=mean_val,
-                            std_value=std_value,
+                            std_value=std_val,
                             sample_size=window_days,
                         )
                     )
@@ -1051,6 +1051,34 @@ class RiskDeviationIndexCalculator:
 # =============================================================================
 
 
+def _build_warning_out(rw, s_name, s_no, c_name) -> dict:
+    """将 RiskWarning 行组装为 RiskWarningOut 兼容字典 (规避 ORM lazy-load)"""
+    return {
+        "id": rw.id,
+        "student_id": rw.student_id,
+        "student_name": s_name,
+        "student_no": s_no,
+        "class_id": rw.class_id,
+        "class_name": c_name,
+        "grade_id": rw.grade_id,
+        "rdi_score": rw.rdi_score,
+        "risk_level": rw.risk_level,
+        "behavior_deviation": rw.behavior_deviation or 0.0,
+        "attendance_deviation": rw.attendance_deviation or 0.0,
+        "score_deviation": rw.score_deviation or 0.0,
+        "psych_deviation": getattr(rw, "psych_deviation", 0.0) or 0.0,
+        "psych_veto_triggered": getattr(rw, "psych_veto_triggered", False) or False,
+        "veto_dimension": getattr(rw, "veto_dimension", None),
+        "ewma_trend": rw.ewma_trend or 0.0,
+        "is_escalating": rw.is_escalating or False,
+        "status": rw.status,
+        "warned_at": rw.warned_at,
+        "expires_at": rw.expires_at,
+        "trigger_event_type": rw.trigger_event_type,
+        "handler_name": None,
+    }
+
+
 class RiskWarningService:
     """风险预警服务 — CRUD + 批量计算 (v3.1 四维版)"""
 
@@ -1099,21 +1127,319 @@ class RiskWarningService:
         return warning
 
     @staticmethod
+    async def list_warnings(
+        db: AsyncSession,
+        school_id: int,
+        current_user: "User",
+        status: str | None = None,
+        risk_level: str | None = None,
+        days: int = 7,
+    ) -> list[dict]:
+        """查询风险预警列表 — 按状态/风险等级/时间窗过滤 + 多租户与班主任/级组长范围限制
+
+        返回带 student_name / class_name 的字典列表 (对齐 RiskWarningOut, 避免 ORM lazy-load)
+        """
+        cutoff = get_local_now() - timedelta(days=days)
+        query = (
+            select(
+                RiskWarning,
+                Student.name.label("student_name"),
+                Student.student_no,
+                Class.name.label("class_name"),
+            )
+            .join(Student, RiskWarning.student_id == Student.id)
+            .outerjoin(Class, RiskWarning.class_id == Class.id)
+            .where(RiskWarning.school_id == school_id)
+            .where(RiskWarning.warned_at >= cutoff)
+        )
+        if status:
+            query = query.where(RiskWarning.status == status)
+        if risk_level:
+            query = query.where(RiskWarning.risk_level == risk_level)
+
+        # 范围限制: 班主任仅本班, 级组长仅本年级, 德育处全校
+        if current_user.role == UserRole.CLASS_TEACHER:
+            cid = getattr(current_user, "class_id", None)
+            if cid:
+                query = query.where(RiskWarning.class_id == cid)
+        elif current_user.role == UserRole.GRADE_LEADER:
+            gid = getattr(current_user, "grade_id", None)
+            if gid:
+                query = query.where(RiskWarning.grade_id == gid)
+
+        query = query.order_by(RiskWarning.warned_at.desc())
+        result = await db.execute(query)
+        rows = result.all()
+
+        warnings = []
+        for rw, s_name, s_no, c_name in rows:
+            warnings.append(
+                {
+                    "id": rw.id,
+                    "student_id": rw.student_id,
+                    "student_name": s_name,
+                    "student_no": s_no,
+                    "class_id": rw.class_id,
+                    "class_name": c_name,
+                    "grade_id": rw.grade_id,
+                    "rdi_score": rw.rdi_score,
+                    "risk_level": rw.risk_level,
+                    "behavior_deviation": rw.behavior_deviation or 0.0,
+                    "attendance_deviation": rw.attendance_deviation or 0.0,
+                    "score_deviation": rw.score_deviation or 0.0,
+                    "psych_deviation": getattr(rw, "psych_deviation", 0.0) or 0.0,
+                    "psych_veto_triggered": getattr(rw, "psych_veto_triggered", False) or False,
+                    "veto_dimension": getattr(rw, "veto_dimension", None),
+                    "ewma_trend": rw.ewma_trend or 0.0,
+                    "is_escalating": rw.is_escalating or False,
+                    "status": rw.status,
+                    "warned_at": rw.warned_at,
+                    "expires_at": rw.expires_at,
+                    "trigger_event_type": rw.trigger_event_type,
+                    "handler_name": None,
+                }
+            )
+        return warnings
+
+    @staticmethod
+    async def handle_warning(
+        db: AsyncSession,
+        school_id: int,
+        current_user: "User",
+        warning_id: int,
+        action: str,
+        note: str | None = None,
+    ) -> dict:
+        """处置风险预警 — 校验归属 + 写反馈记录 + 更新预警状态 (调用方负责 commit)"""
+        warning = (
+            await db.execute(
+                select(RiskWarning).where(
+                    RiskWarning.id == warning_id,
+                    RiskWarning.school_id == school_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not warning:
+            raise ValueError(f"预警不存在: id={warning_id}")
+
+        # 归属校验: 班主任只能处置本班, 级组长只能处置本年级
+        if current_user.role == UserRole.CLASS_TEACHER:
+            if warning.class_id != getattr(current_user, "class_id", None):
+                raise PermissionError("无权处置其他班级的预警")
+        elif current_user.role == UserRole.GRADE_LEADER:
+            if warning.grade_id != getattr(current_user, "grade_id", None):
+                raise PermissionError("无权处置其他年级的预警")
+
+        status_map = {
+            "heart_to_heart": "handled",
+            "talk_to_parent": "handled",
+            "intervention_plan": "handled",
+            "dismiss": "false_positive",
+        }
+        new_status = status_map.get(action, "handled")
+
+        warning.status = new_status
+        warning.handled_by = current_user.id
+        warning.handled_at = get_local_now()
+        warning.handling_note = note
+
+        feedback = WarningFeedback(
+            warning_id=warning.id,
+            teacher_id=current_user.id,
+            action_taken=action,
+            action_detail=note,
+        )
+        db.add(feedback)
+        await db.flush()
+        return {
+            "status": "success",
+            "message": "预警已处置",
+            "warning_id": warning.id,
+            "new_status": new_status,
+        }
+
+    @staticmethod
+    async def get_baseline(
+        db: AsyncSession,
+        school_id: int,
+        student_id: int,
+        baseline_type: str,
+        window_days: int = 30,
+    ) -> dict:
+        """查询学生行为基线 (真实统计值, 缺失则返回空占位)"""
+        row = (
+            await db.execute(
+                select(RiskBaseline).where(
+                    RiskBaseline.school_id == school_id,
+                    RiskBaseline.student_id == student_id,
+                    RiskBaseline.baseline_type == baseline_type,
+                    RiskBaseline.window_days == window_days,
+                )
+            )
+        ).scalar_one_or_none()
+        if not row:
+            return {
+                "student_id": student_id,
+                "baseline_type": baseline_type,
+                "window_days": window_days,
+                "mean": None,
+                "std": None,
+                "sample_size": 0,
+                "ewma": None,
+            }
+        return {
+            "student_id": student_id,
+            "baseline_type": baseline_type,
+            "window_days": window_days,
+            "mean": row.mean_value,
+            "std": row.std_value,
+            "sample_size": row.sample_size,
+            "ewma": row.ewma_value,
+        }
+
+    @staticmethod
     async def get_dashboard(
         db: AsyncSession,
         school_id: int,
         class_id: int | None = None,
         grade_id: int | None = None,
     ) -> dict:
-        """获取风险看板数据"""
-        return {
-            "total_students": 0,
-            "at_risk_count": 0,
-            "by_risk_level": {},
-            "recent_warnings": [],
-            "escalating_cases": [],
-            "class_risk_ranking": [],
+        """
+        获取风险看板聚合数据 (v3.2 — 真实多租户聚合, 彻底替代全零空壳)
+
+        聚合口径 (均反映当前真实状态, 不做时间窗截断):
+          - total_students: 当前租户/班级/年级在读学生总数
+          - at_risk_count: 当前有活跃(active)预警的去重学生数
+          - by_risk_level: 去重学生按其最新活跃预警的 risk_level 分布
+          - pending_warnings: 待处理(active)预警数
+          - high_risk_count: 高危(intervention)预警数
+          - handled_count / handled_rate: 已闭环(handled/false_positive)数 及 闭环率
+              = 已闭环 / (在办 active + 已闭环) × 100%
+          - dimensions: 活跃预警按"最大偏离维度"分布 (behavior/attendance/score/psych)
+          - recent_warnings: 最近 10 条活跃预警
+          - escalating_cases: 升级通道中的活跃预警 (上限 30)
+          - class_risk_ranking: 各班级风险学生数排行
+
+        范围过滤 (class_id/grade_id) 由调用方依据角色收敛后传入, 此处只做安全聚合。
+        """
+        logger.info(
+            f"📊 计算租户[school_id={school_id}]风险看板 (class_id={class_id}, grade_id={grade_id})"
+        )
+
+        def _rw_scope(stmt):
+            s = stmt.where(RiskWarning.school_id == school_id)
+            if class_id is not None:
+                s = s.where(RiskWarning.class_id == class_id)
+            if grade_id is not None:
+                s = s.where(RiskWarning.grade_id == grade_id)
+            return s
+
+        # 1. 在读学生总数 (按范围)
+        total_q = select(func.count(Student.id)).where(Student.school_id == school_id)
+        if class_id is not None:
+            total_q = total_q.where(Student.class_id == class_id)
+        if grade_id is not None:
+            total_q = total_q.where(Student.grade_id == grade_id)
+        total_students = (await db.execute(total_q)).scalar() or 0
+
+        # 2. 活跃预警 (带学生/班级名) — 当前在办, 不做时间窗截断
+        active_q = (
+            select(
+                RiskWarning,
+                Student.name.label("student_name"),
+                Student.student_no,
+                Class.name.label("class_name"),
+            )
+            .join(Student, RiskWarning.student_id == Student.id)
+            .outerjoin(Class, RiskWarning.class_id == Class.id)
+            .where(RiskWarning.school_id == school_id)
+            .where(RiskWarning.status == "active")
+        )
+        active_q = _rw_scope(active_q)
+        active_rows = (await db.execute(active_q.order_by(RiskWarning.warned_at.desc()))).all()
+
+        # 3. 已闭环预警数 (handled / false_positive), 同范围 — 用于闭环率
+        handled_q = _rw_scope(
+            select(func.count(RiskWarning.id)).where(
+                RiskWarning.status.in_(["handled", "false_positive"])
+            )
+        )
+        handled_count = (await db.execute(handled_q)).scalar() or 0
+
+        # 4. 派生聚合 (rows 已按 warned_at desc, 每学生首个出现即最新预警)
+        at_risk_students: dict[int, dict] = {}
+        by_risk_level = {"normal": 0, "attention": 0, "intervention": 0}
+        dimensions = {"behavior": 0, "attendance": 0, "score": 0, "psych": 0}
+        recent_warnings: list[dict] = []
+        escalating_cases: list[dict] = []
+        high_risk_count = 0
+
+        for rw, s_name, s_no, c_name in active_rows:
+            if rw.student_id not in at_risk_students:
+                at_risk_students[rw.student_id] = {
+                    "class_id": rw.class_id,
+                    "class_name": c_name,
+                    "risk_level": rw.risk_level,
+                }
+                if rw.risk_level in by_risk_level:
+                    by_risk_level[rw.risk_level] += 1
+
+            # 维度分布: 取最大偏离维度
+            devs = {
+                "behavior": abs(rw.behavior_deviation or 0.0),
+                "attendance": abs(rw.attendance_deviation or 0.0),
+                "score": abs(rw.score_deviation or 0.0),
+                "psych": abs(getattr(rw, "psych_deviation", 0.0) or 0.0),
+            }
+            dimensions[max(devs, key=devs.get)] += 1
+
+            if rw.risk_level == "intervention":
+                high_risk_count += 1
+
+            if len(recent_warnings) < 10:
+                recent_warnings.append(_build_warning_out(rw, s_name, s_no, c_name))
+            if rw.is_escalating:
+                escalating_cases.append(_build_warning_out(rw, s_name, s_no, c_name))
+
+        # 班级风险排行 (按去重学生计数, 避免单生多预警重复计入)
+        class_stats: dict[int, dict] = {}
+        for stu in at_risk_students.values():
+            cid = stu["class_id"]
+            if cid not in class_stats:
+                class_stats[cid] = {
+                    "class_id": cid,
+                    "class_name": stu["class_name"] or f"班级{cid}",
+                    "at_risk_count": 0,
+                }
+            class_stats[cid]["at_risk_count"] += 1
+        class_risk_ranking = sorted(
+            class_stats.values(), key=lambda x: x["at_risk_count"], reverse=True
+        )
+
+        at_risk_count = len(at_risk_students)
+        pending_warnings = len(active_rows)
+        # 闭环率 = 已闭环 / (在办 + 已闭环) × 100%
+        handled_rate = round((handled_count / max(1, pending_warnings + handled_count)) * 100, 1)
+
+        dashboard = {
+            "total_students": total_students,
+            "at_risk_count": at_risk_count,
+            "by_risk_level": by_risk_level,
+            "recent_warnings": recent_warnings,
+            "escalating_cases": escalating_cases[:30],
+            "class_risk_ranking": class_risk_ranking,
+            # v3.2 扩展聚合指标 (真实聚合, 替代空壳)
+            "pending_warnings": pending_warnings,
+            "high_risk_count": high_risk_count,
+            "handled_count": handled_count,
+            "handled_rate": handled_rate,
+            "dimensions": dimensions,
         }
+        logger.info(
+            f"✅ 风险看板聚合完成: 学生{total_students}人, 风险{at_risk_count}人, "
+            f"高危{high_risk_count}, 闭环率{handled_rate}%"
+        )
+        return dashboard
 
 
 # =============================================================================

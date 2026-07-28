@@ -116,7 +116,7 @@ class GrowthAggregationPipeline:
             student_id, school_id
         )
         psych_score, psych_risk_level = await self._fetch_psychology_data(student_id, school_id)
-        activity_count = await self._fetch_activity_data(student_id)
+        activity_count = await self._fetch_activity_data(student_id, school_id)
 
         # ── Step 2: 归一化五维得分 ──
         academic_score = self._compute_academic_score(exam_avg, gap_critical_ratio)
@@ -365,6 +365,7 @@ class GrowthAggregationPipeline:
             crit_result = await self.db.execute(
                 select(func.count(KnowledgeGap.id)).where(
                     KnowledgeGap.student_id == student_id,
+                    KnowledgeGap.school_id == school_id,
                     KnowledgeGap.gap_level == "critical",
                 )
             )
@@ -372,7 +373,10 @@ class GrowthAggregationPipeline:
 
             # 总斷层数
             total_result = await self.db.execute(
-                select(func.count(KnowledgeGap.id)).where(KnowledgeGap.student_id == student_id)
+                select(func.count(KnowledgeGap.id)).where(
+                    KnowledgeGap.student_id == student_id,
+                    KnowledgeGap.school_id == school_id,
+                )
             )
             total_gaps = total_result.scalar() or 0
 
@@ -536,7 +540,7 @@ class GrowthAggregationPipeline:
 
         return psych_score, risk_level_str
 
-    async def _fetch_activity_data(self, student_id: int) -> int:
+    async def _fetch_activity_data(self, student_id: int, school_id: int) -> int:
         """
         活动数据采集 — 教研/课外活动参与次数
 
@@ -548,7 +552,8 @@ class GrowthAggregationPipeline:
 
             result = await self.db.execute(
                 select(func.count(ActivityParticipant.id)).where(
-                    ActivityParticipant.student_id == student_id
+                    ActivityParticipant.student_id == student_id,
+                    ActivityParticipant.school_id == school_id,
                 )
             )
             return result.scalar() or 0

@@ -12,19 +12,38 @@ Phase 2A 重构：kombu.Exchange + Queue 显式声明，多队列物理隔离。
 强绑定 Docker Redis 6379 的 DB 2/3（与旧 Flask DB 0 完全隔离）。
 """
 
+import logging
 import os
 
 from celery import Celery
 from celery.schedules import crontab
 from kombu import Exchange, Queue
 
+logger = logging.getLogger(__name__)
+
 # ── Redis 连接 ──
 # DB 2: broker（任务队列）  DB 3: result_backend（结果存储）
 # 与旧 grade7-new 的 DB 0 完全物理隔离，互不干扰
 REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = os.getenv("REDIS_PORT", "6379")
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/2")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", f"redis://{REDIS_HOST}:{REDIS_PORT}/3")
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+
+# 优先使用显式 CELERY_BROKER_URL（含完整认证），其次用 REDIS_PASSWORD 动态组装
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL")
+if not CELERY_BROKER_URL:
+    if REDIS_PASSWORD:
+        CELERY_BROKER_URL = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/2"
+    else:
+        CELERY_BROKER_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/2"
+        logger.warning("[SECURITY] REDIS_PASSWORD 未设置，Celery broker 连接无密码保护！")
+
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND")
+if not CELERY_RESULT_BACKEND:
+    if REDIS_PASSWORD:
+        CELERY_RESULT_BACKEND = f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/3"
+    else:
+        CELERY_RESULT_BACKEND = f"redis://{REDIS_HOST}:{REDIS_PORT}/3"
+        logger.warning("[SECURITY] REDIS_PASSWORD 未设置，Celery result backend 连接无密码保护！")
 
 celery_engine = Celery(
     "wings3_reports",

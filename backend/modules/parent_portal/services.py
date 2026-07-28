@@ -78,7 +78,7 @@ async def verify_parent_binding(
 
     # 查询学生对象（后续聚合查询需要）
     result = await db.execute(
-        select(Student).where(Student.id == requested_student_id, Student.is_active == True)
+        select(Student).where(Student.id == requested_student_id, Student.is_active)
     )
     student = result.scalar_one_or_none()
     if not student:
@@ -409,7 +409,7 @@ class ParentPortalService:
                 .where(
                     Notification.recipient_id == parent_user.id,
                     Notification.school_id == parent_user.school_id,
-                    Notification.is_read == False,
+                    Notification.is_read.is_(False),
                 )
             )
             unread_notifications = notif_result.scalar() or 0
@@ -571,6 +571,12 @@ class FeedbackService:
             from fastapi import HTTPException
 
             raise HTTPException(status_code=403, detail="无权查看其他家长的反馈")
+
+        # P1-8: 非家长角色（教师/管理员）必须同校，防止跨校 IDOR 读取他人学校反馈
+        if user_role != UserRole.PARENT and feedback.school_id != current_user.school_id:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=403, detail="无权查看其他学校的反馈")
 
         return fill_labels(FeedbackItem.model_validate(feedback))
 

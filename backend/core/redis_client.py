@@ -63,6 +63,12 @@ async def init_redis() -> aioredis.Redis:
     password = os.getenv("REDIS_PASSWORD", "")
     db = int(os.getenv("REDIS_EVENT_DB", "1"))
 
+    if not password:
+        logger.warning(
+            "[SECURITY] REDIS_PASSWORD 未设置，Redis 事件总线连接无密码保护！"
+            "请在生产环境 .env 中配置 REDIS_PASSWORD。"
+        )
+
     # 构建连接 URL
     auth_part = f":{password}@" if password else ""
     url = f"redis://{auth_part}{host}:{port}/{db}"

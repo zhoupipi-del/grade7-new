@@ -76,19 +76,34 @@ async def calculate_rdi(
 
 @router.get("/dashboard", response_model=RiskDashboardOut)
 async def get_risk_dashboard(
-    class_id: int | None = Query(None, description="班级ID (班主任必填)"),
-    grade_id: int | None = Query(None, description="年级ID (级组长必填)"),
+    class_id: int | None = Query(None, description="班级ID (班主任自动限制本班)"),
+    grade_id: int | None = Query(None, description="年级ID (级组长自动限制本年级)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    获取风险看板数据
+    获取风险看板数据 (v3.2 — 真实多租户聚合)
 
     权限:
-      - class_teacher: 看本班
-      - grade_leader: 看全年级
+      - class_teacher: 自动限制本班
+      - grade_leader: 自动限制本年级
       - ms_admin: 看全校
     """
+    # 权限守卫
+    if current_user.role not in [UserRole.CLASS_TEACHER, UserRole.GRADE_LEADER, UserRole.MS_ADMIN]:
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    # 权限联动: 角色自动收敛管辖范围 (对接第二步动态身份解析)
+    if current_user.role == UserRole.CLASS_TEACHER:
+        if not class_id:
+            class_id = getattr(current_user, "class_id", None)
+        if not class_id:
+            raise HTTPException(status_code=400, detail="班主任缺少班级信息")
+    elif current_user.role == UserRole.GRADE_LEADER:
+        if not grade_id:
+            grade_id = getattr(current_user, "grade_id", None)
+    # ms_admin 不限制
+
     dashboard = await RiskWarningService.get_dashboard(
         db, current_user.school_id, class_id, grade_id
     )
@@ -154,8 +169,13 @@ async def list_warnings(
 
     默认返回最近7天的活跃预警
     """
-    # TODO: 实现查询逻辑
-    return []
+    # 默认查活跃预警; 班主任/级组长按归属范围自动收缩
+    if status is None:
+        status = "active"
+    warnings = await RiskWarningService.list_warnings(
+        db, current_user.school_id, current_user, status, risk_level, days
+    )
+    return [RiskWarningOut(**w) for w in warnings]
 
 
 # ── 处置预警 ──
@@ -182,8 +202,18 @@ async def handle_warning(
     if current_user.role not in [UserRole.CLASS_TEACHER, UserRole.GRADE_LEADER]:
         raise HTTPException(status_code=403, detail="权限不足")
 
-    # TODO: 实现处置逻辑
-    return {"status": "success", "message": "预警已处置"}
+    try:
+        result = await RiskWarningService.handle_warning(
+            db, current_user.school_id, current_user, warning_id, action, note
+        )
+        await db.commit()
+        return result
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        await db.rollback()
+        raise HTTPException(status_code=403, detail=str(e))
 
 
 # ── 基线查询 ──
@@ -201,8 +231,10 @@ async def get_baselines(
 
     返回: 均值、标准差、样本量、EWMA值
     """
-    # TODO: 实现基线查询
-    return {}
+    baseline = await RiskWarningService.get_baseline(
+        db, current_user.school_id, student_id, baseline_type
+    )
+    return baseline
 
 
 @router.post("/baselines/warmup")

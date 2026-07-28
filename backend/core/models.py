@@ -49,6 +49,7 @@ class UserRole(str, enum.Enum):
     GRADE_LEADER = "grade_leader"  # 年级组长
     CLASS_TEACHER = "class_teacher"  # 班主任
     TEACHER = "teacher"  # 普通教师
+    COUNSELOR = "counselor"  # 心理教师/咨询师
     PARENT = "parent"  # 家长
     STUDENT = "student"  # 学生
 

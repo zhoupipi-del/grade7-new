@@ -336,6 +336,15 @@ class RiskDashboardOut(BaseModel):
         dict
     ]  # [{"class_id": 1, "class_name": "2501", "at_risk_count": 5}, ...]
 
+    # v3.2 扩展聚合指标 (真实多租户聚合, 替代空壳; 均为可选默认值, 向后兼容)
+    pending_warnings: int = 0  # 待处理(active)预警数
+    high_risk_count: int = 0  # 高危(intervention)预警数
+    handled_count: int = 0  # 已闭环(handled/false_positive)预警数
+    handled_rate: float = 0.0  # 闭环率 (%)
+    dimensions: dict = Field(
+        default_factory=dict
+    )  # 各维度(最大偏离)分布 {"behavior": x, "attendance": y, "score": z, "psych": w}
+
     model_config = {"from_attributes": True}
 
 

@@ -138,6 +138,7 @@ async def lifespan(app: FastAPI):
     import modules.grades.models  # noqa: F401
     import modules.growth.analytics  # noqa: F401  (德育量化工单表: moral_education_ledger)
     import modules.growth.models  # noqa: F401  (P0双表: timeline_events + periodical_snapshots)
+    import modules.habit_cards.models  # noqa: F401  (家长信+习惯卡: 5表, create_all建4, DDL补1)
 
     # ── Phase 3 教务板块：作业管理 + 错题断层漏斗 ──
     import modules.homework_mgmt.models  # noqa: F401

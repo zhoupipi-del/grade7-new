@@ -8,6 +8,7 @@ modules/reports/pdf_utils.py — ReportLab + matplotlib 双引擎 PDF 报告生�
 import io
 import os
 import platform
+import secrets
 from datetime import datetime
 
 import matplotlib
@@ -85,7 +86,7 @@ def _ensure_chinese_font():
     if _font_registered:
         return
 
-    for name, path in _FONT_PATHS.items():
+    for _name, path in _FONT_PATHS.items():
         if os.path.exists(path):
             try:
                 pdfmetrics.registerFont(TTFont(name, path))
@@ -109,7 +110,7 @@ def _setup_matplotlib_chinese():
     global _matplotlib_setup_done
     if _matplotlib_setup_done:
         return
-    for name, path in _FONT_PATHS.items():
+    for _name, path in _FONT_PATHS.items():
         if path != "__cid__" and os.path.exists(path):
             try:
                 fm.fontManager.addfont(path)
@@ -196,11 +197,11 @@ def _init_styles():
     else:
         font_body = "Helvetica"
 
-    # 楷体（评语用）
-    if "SimKai" in registered:
-        font_kai = "SimKai"
-    else:
-        font_kai = font_body
+    # 楷体（评语用）— 暂未启用，预留
+    # if "SimKai" in registered:
+    #     font_kai = "SimKai"
+    # else:
+    #     font_kai = font_body
 
     _STYLES["title"] = ParagraphStyle(
         "RPT_Title",
@@ -326,7 +327,7 @@ def generate_radar_chart(dim_scores: dict, dpi: int = 120) -> io.BytesIO:
     ax.spines["polar"].set_visible(False)
     ax.grid(True, alpha=0.3, linestyle="--")
 
-    for angle, val in zip(angles[:-1], values):
+    for angle, val in zip(angles[:-1], values, strict=False):
         ax.annotate(
             f"{val:.0f}",
             xy=(angle, val),
@@ -335,9 +336,12 @@ def generate_radar_chart(dim_scores: dict, dpi: int = 120) -> io.BytesIO:
             fontsize=7,
             fontweight="bold",
             color=CHART_COLORS[0],
-            bbox=dict(
-                boxstyle="round,pad=0.15", facecolor="white", edgecolor=CHART_COLORS[0], alpha=0.8
-            ),
+            bbox={
+                "boxstyle": "round,pad=0.15",
+                "facecolor": "white",
+                "edgecolor": CHART_COLORS[0],
+                "alpha": 0.8,
+            },
         )
 
     buf = io.BytesIO()
@@ -370,7 +374,7 @@ def generate_class_scores_bar(students: list, dpi: int = 120) -> io.BytesIO:
 
     bars = ax.bar(range(len(names)), scores, color=colors_bar, edgecolor="white", linewidth=0.5)
 
-    for bar, val in zip(bars, scores):
+    for bar, val in zip(bars, scores, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 1,
@@ -441,7 +445,7 @@ def generate_flag_history_chart(flag_history: list, dpi: int = 120) -> io.BytesI
     markers = ["D" if f else "o" for f in has_flags]
     sizes = [14 if f else 8 for f in has_flags]
 
-    for i, (xi, yi) in enumerate(zip(x, scores_val)):
+    for i, (xi, yi) in enumerate(zip(x, scores_val, strict=False)):
         ax.plot(
             xi,
             yi,
@@ -456,7 +460,7 @@ def generate_flag_history_chart(flag_history: list, dpi: int = 120) -> io.BytesI
 
     ax.plot(x, scores_val, color=MPL_DARK, linewidth=1.5, alpha=0.5, zorder=1)
 
-    for i, (xi, yi) in enumerate(zip(x, scores_val)):
+    for i, (xi, yi) in enumerate(zip(x, scores_val, strict=False)):
         ax.annotate(
             f"{yi:.1f}",
             (xi, yi),
@@ -716,9 +720,10 @@ def generate_class_moral_report_pdf(report_data: dict) -> tuple:
     # ── 编译 PDF ──
     doc.build(story)
 
-    # 文件名
+    # 文件名（随机 token 防猜测下载，P0-5 防御纵深）
     safe_name = class_name.replace("/", "_").replace("\\", "_")
-    filename = f"{safe_name}_德育报告_{semester.replace('-', '_')}.pdf"
+    rand = secrets.token_hex(6)
+    filename = f"{safe_name}_德育报告_{semester.replace('-', '_')}_{rand}.pdf"
 
     buf.seek(0)
     return buf.getvalue(), filename
@@ -818,7 +823,8 @@ def generate_student_report_pdf(report_data: dict) -> tuple:
     doc.build(story)
 
     safe_name = student.get("name", "学生").replace("/", "_")
-    filename = f"{safe_name}_德育报告单.pdf"
+    rand = secrets.token_hex(6)
+    filename = f"{safe_name}_德育报告单_{rand}.pdf"
 
     buf.seek(0)
     return buf.getvalue(), filename

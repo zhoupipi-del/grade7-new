@@ -48,6 +48,11 @@ CH_ATTENDANCE_CONSECUTIVE_ABSENT = "attendance.consecutive_absent"
 # ═════ Wings 3.2 新接入频道 ═════
 CH_HOMEWORK_SUBMISSION_LATE = "homework.submission_late"
 CH_TIMETABLE_SCHEDULE_CHANGE = "timetable.schedule_change"
+CH_HABIT_CARD_ISSUED = "habit_cards.card_issued"
+CH_HABIT_BLINDBOX_OPENED = "habit_cards.blindbox_opened"
+
+# ═════ Wings 3.2 见字如面频道 ═════
+CH_PARENT_MEETING_LETTER = "moral.parent_meeting_letter"
 
 # ═══════════════════════════════════════════════════════════════
 #  Session 工厂 (由 app.py lifespan 注入)
@@ -90,7 +95,7 @@ async def _try_dedup(event_data: dict[str, Any]) -> bool:
             str(event_data.get("title", "")),
         ]
     )
-    key = f"growth:dedup:{hashlib.md5(fingerprint.encode()).hexdigest()}"
+    key = f"growth:dedup:{hashlib.md5(fingerprint.encode()).hexdigest()}"  # nosec B324
 
     try:
         result = await redis.set(key, "1", ex=_DEDUP_TTL, nx=True)
@@ -578,6 +583,210 @@ async def on_timetable_schedule_change(event: dict[str, Any]):
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Wings 3.2 Phase 2 新接入 — 习惯卡片双向事件
+# ═══════════════════════════════════════════════════════════════
+
+
+async def on_habit_card_issued(event: dict[str, Any]):
+    """
+    接收站 7: 教师发卡 → 行为维度 BONUS (正向激励)
+
+    上游: habit_cards/services.py issue_cards_to_students()
+    教师批量向学生派发萌卡时，为每个学生注入一条正向成长事件。
+
+    事件载荷:
+      school_id, teacher_id, card_id, card_name, card_rarity,
+      card_category, student_ids, issued_count, note, occurred_at
+    """
+    school_id = event.get("school_id")
+    student_ids = event.get("student_ids", [])
+    card_name = event.get("card_name", "未知卡牌")
+    card_rarity = event.get("card_rarity", "common")
+    card_category = event.get("card_category", "habit")
+
+    # 稀有度 → 严重度映射 (传说/史诗 = BONUS, 稀有/普通 = INFO)
+    rarity_severity = {
+        "legendary": EventSeverity.BONUS.value,
+        "epic": EventSeverity.BONUS.value,
+        "rare": EventSeverity.INFO.value,
+        "common": EventSeverity.INFO.value,
+    }
+    severity = rarity_severity.get(card_rarity, EventSeverity.INFO.value)
+
+    # 类别映射
+    cat_dim_map = {
+        "habit": GrowthDimension.BEHAVIOR.value,
+        "academic": GrowthDimension.ACADEMIC.value,
+        "social": GrowthDimension.BEHAVIOR.value,
+        "sports": GrowthDimension.BEHAVIOR.value,
+        "art": GrowthDimension.BEHAVIOR.value,
+    }
+    dimension = cat_dim_map.get(card_category, GrowthDimension.BEHAVIOR.value)
+
+    for sid in student_ids:
+        await _inject_event(
+            {
+                "school_id": school_id,
+                "student_id": sid,
+                "dimension": dimension,
+                "severity": severity,
+                "event_type": "habit_card_issued",
+                "title": f"获得萌卡: {card_name}",
+                "occurred_at": datetime.utcnow(),
+                "payload": {
+                    "card_name": card_name,
+                    "card_rarity": card_rarity,
+                    "card_category": card_category,
+                    "teacher_id": event.get("teacher_id"),
+                    "note": event.get("note", ""),
+                    "source": "habit_cards",
+                },
+            }
+        )
+
+
+async def on_habit_blindbox_opened(event: dict[str, Any]):
+    """
+    接收站 8: 家长盲盒翻牌 → 行为维度 BONUS (家校联动)
+
+    上游: habit_cards/services.py open_blindbox_for_parent()
+    家长通过盲盒查看孩子卡牌资产时注入，记录家校联动的正向时刻。
+
+    事件载荷:
+      school_id, student_id, parent_user_id, card_id, card_name,
+      card_rarity, card_category, is_first_open, occurred_at
+    """
+    school_id = event.get("school_id")
+    student_id = event.get("student_id")
+    card_name = event.get("card_name", "未知卡牌")
+    is_first_open = event.get("is_first_open", False)
+
+    await _inject_event(
+        {
+            "school_id": school_id,
+            "student_id": student_id,
+            "dimension": GrowthDimension.BEHAVIOR.value,
+            "severity": EventSeverity.BONUS.value,
+            "event_type": "habit_blindbox_opened",
+            "title": f"{'首次' if is_first_open else ''}家长盲盒开启: {card_name}",
+            "occurred_at": datetime.utcnow(),
+            "payload": {
+                "card_name": card_name,
+                "card_rarity": event.get("card_rarity"),
+                "card_category": event.get("card_category"),
+                "is_first_open": is_first_open,
+                "parent_user_id": event.get("parent_user_id"),
+                "source": "habit_cards",
+            },
+        }
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Wings 3.2 见字如面 · 家长会书信事件
+# ═══════════════════════════════════════════════════════════════
+
+
+async def on_parent_meeting_letter(event: dict[str, Any]):
+    """
+    接收站 9: 见字如面 · 家长回信 → 行为维度 BONUS (家校纽带黄金事件)
+
+    上游: habit_cards/services.py (家长在家长会现场完成回信时触发)
+    业务场景: 2026年5月29日"见字如面·成长有你"初一年级家长会
+
+    当家长完成回信 (status=replied) 时:
+      1. 写入 Growth Timeline 黄金事件 (GOLDEN_BOND)
+      2. 反哺班主任德育管理活跃度 +5
+
+    事件载荷:
+      school_id, student_id, parent_user_id, status,
+      meeting_id, letter_id
+    """
+    status = event.get("status", "")
+    student_id = event.get("student_id")
+    school_id = event.get("school_id")
+
+    if status != "replied":
+        # 只在家长回信时注入黄金事件, sent/read 不注入
+        return
+
+    if not student_id or not school_id:
+        logger.warning("[growth-listeners] 见字如面事件缺少 student_id/school_id, 跳过")
+        return
+
+    # 1. 写入成长时光轴 — 家校纽带黄金事件
+    await _inject_event(
+        {
+            "school_id": school_id,
+            "student_id": student_id,
+            "dimension": GrowthDimension.BEHAVIOR.value,
+            "severity": EventSeverity.BONUS.value,
+            "event_type": "GOLDEN_BOND",
+            "title": "见字如面 \u00b7 收到家长的温情回信",
+            "occurred_at": datetime.utcnow(),
+            "payload": {
+                "parent_user_id": event.get("parent_user_id"),
+                "meeting_id": event.get("meeting_id", ""),
+                "letter_id": event.get("letter_id"),
+                "source": "parent_meeting_letter",
+                "description": "在初一年级家长会上，家长拆开盲盒并留下了写给你的字条。",
+            },
+        }
+    )
+
+    # 2. 反哺班主任德育管理活跃度 +5
+    if _session_factory is None:
+        logger.warning("[growth-listeners] session_factory 未初始化, 跳过班主任活跃度加权")
+        return
+
+    try:
+        async with _session_factory() as session:
+            from core.models import Student
+            from sqlalchemy import select as sa_select
+
+            # 查学生的班级 -> 查该班的班主任
+            result = await session.execute(
+                sa_select(Student.class_id).where(
+                    Student.id == student_id,
+                    Student.school_id == school_id,
+                )
+            )
+            class_id = result.scalar()
+
+            if not class_id:
+                logger.debug(
+                    f"[growth-listeners] 见字如面: 学生 {student_id} 无班级, 跳过班主任加权"
+                )
+                return
+
+            # 查班主任 (class_teacher 角色)
+            from core.models import UserClassMapping
+
+            result = await session.execute(
+                sa_select(UserClassMapping.user_id).where(
+                    UserClassMapping.class_id == class_id,
+                    UserClassMapping.school_id == school_id,
+                )
+            )
+            teacher_id = result.scalar()
+
+            if teacher_id:
+                logger.info(
+                    f"[growth-listeners] 见字如面: 班主任 {teacher_id} "
+                    f"德育管理活跃度 +5 (student={student_id})"
+                )
+                # TODO: 当 teacher_mgmt 模块支持活跃度积分时, 调用 increment_teacher_intensity()
+            else:
+                logger.debug(f"[growth-listeners] 见字如面: 班级 {class_id} 无班主任映射")
+
+    except Exception as e:
+        logger.warning(
+            f"[growth-listeners] 见字如面班主任加权失败 (非致命): {e}",
+            exc_info=True,
+        )
+
+
+# ═══════════════════════════════════════════════════════════════
 #  并网函数 — 在 app.py lifespan 中调用
 # ═══════════════════════════════════════════════════════════════
 
@@ -604,8 +813,11 @@ async def initialize_growth_events(
     await bus.subscribe(CH_ATTENDANCE_CONSECUTIVE_ABSENT, on_attendance_consecutive_absent)
     await bus.subscribe(CH_HOMEWORK_SUBMISSION_LATE, on_homework_submission_late)
     await bus.subscribe(CH_TIMETABLE_SCHEDULE_CHANGE, on_timetable_schedule_change)
+    await bus.subscribe(CH_HABIT_CARD_ISSUED, on_habit_card_issued)
+    await bus.subscribe(CH_HABIT_BLINDBOX_OPENED, on_habit_blindbox_opened)
+    await bus.subscribe(CH_PARENT_MEETING_LETTER, on_parent_meeting_letter)
 
-    logger.info("[growth-listeners] 6 路事件接收站 + CEP 拦截器已并网")
+    logger.info("[growth-listeners] 9 路事件接收站 + CEP 拦截器已并网")
 
 
 async def shutdown_growth_events():

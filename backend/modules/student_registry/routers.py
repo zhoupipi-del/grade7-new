@@ -9,13 +9,17 @@ modules/student_registry/routers.py — 学籍管理 API 路由
 
 import logging
 
+from core.access import get_student_or_403
 from core.models import User, UserRole
 from core.routers import get_current_user, get_db, require_role, verify_school_access
 from fastapi import APIRouter, Depends, HTTPException, Query
+from modules.student_registry.rollover import RolloverEngine, RolloverError
 from modules.student_registry.schemas import (
     BatchImportResult,
     PaginatedStudents,
     RegistryStatsOut,
+    RolloverRequest,
+    RolloverResult,
     StatusChangeCreate,
     StatusChangeOut,
     StudentCreate,
@@ -89,11 +93,20 @@ async def get_student(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """学籍详情"""
+    """
+    学籍详情（含 PII：身份证/住址/父母电话）
+
+    2026-07-24 整改：原实现只有 verify_school_access（学校级），
+    本校任意账号顺序枚举 id 即可逐条拖走全部学籍 PII。
+    改为行级归属校验：越权请求在触碰 PII 之前即被拦截（404/403）。
+    """
+    # 归属校验放在取数之前 —— 越权请求不触碰 PII 数据
+    await get_student_or_403(db, current_user, student_id)
+
     result = await StudentRegistryService.get_student(db, student_id)
     if not result:
         raise HTTPException(status_code=404, detail="学生不存在")
-    # 多租户校验
+    # 纵深防御：保留学校级校验（归属校验已含此层，双重保险）
     verify_school_access(result["school_id"], current_user)
     return result
 
@@ -274,3 +287,39 @@ async def get_stats(
     """学籍统计（在校/休学/转出等 + 同步来源分布）"""
     stats = await StudentRegistryService.get_stats(db, current_user.school_id)
     return stats
+
+
+# ═══════════════════════════════════════════════════════════════
+# 新学年滚动晋升（仅 ms_admin）
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.post("/rollover", response_model=RolloverResult)
+async def rollover(
+    body: RolloverRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.MS_ADMIN)),
+):
+    """
+    新学年滚动晋升 — 毕业出档 + 年级晋升 + 新生导入（可选）。
+
+    - 仅 ms_admin 可调用。
+    - 单事务原子操作；异常自动回滚，成功自动提交。
+    - 幂等：rollover_lock(school_id, school_year) 唯一约束拦截重复/并发。
+    - dry_run=True 仅做预检与计数，不写入任何数据。
+    """
+    try:
+        result = await RolloverEngine.run(
+            db,
+            current_user.school_id,
+            current_user,
+            school_year=body.school_year,
+            dry_run=body.dry_run,
+            freshmen=body.freshmen,
+            note=body.note,
+        )
+        return result
+    except RolloverError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

@@ -11,6 +11,7 @@ from datetime import datetime
 
 import httpx
 from core.db_utils import require_db_url
+from core.event_bus import EventBus
 from modules.habit_cards.models import (
     CardTransaction,
     HabitCard,
@@ -22,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # ── DeepSeek 配置 (与 ai_prescription/tasks.py 一致) ──
 LLM_API_URL = os.getenv("LLM_API_URL", "https://api.deepseek.com/v1/chat/completions")
-LLM_API_KEY = os.getenv("LLM_API_KEY", "sk-xxxxxxxxxxxxxxxxxxxxxxxx")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 
 
@@ -47,7 +48,7 @@ async def issue_cards_to_students(
     card_res = await db.execute(
         select(HabitCard).where(
             HabitCard.id == card_id,
-            HabitCard.is_active == True,
+            HabitCard.is_active,
             HabitCard.school_id == school_id,
         )
     )
@@ -117,6 +118,23 @@ async def issue_cards_to_students(
         transactions_added += 1
 
     await db.commit()
+
+    # ── EventBus: 发卡事件泵入成长时间线 + CEP 复合检测 ──
+    EventBus().publish(
+        "habit_cards.card_issued",
+        {
+            "school_id": school_id,
+            "teacher_id": teacher_id,
+            "card_id": card_id,
+            "card_name": card.card_name,
+            "card_rarity": card.card_rarity,
+            "card_category": card.card_category,
+            "student_ids": student_ids,
+            "issued_count": transactions_added,
+            "note": note,
+            "occurred_at": now.isoformat(),
+        },
+    )
 
     # ── CEP 卡片沉默检测: 后台异步，不阻塞提交返回 ──
     silent_students: list[tuple[int, int]] = []
@@ -207,6 +225,22 @@ async def open_blindbox_for_parent(
     )
     db.add(blind_log)
     await db.commit()
+
+    # ── EventBus: 盲盒开启事件泵入成长时间线 ──
+    EventBus().publish(
+        "habit_cards.blindbox_opened",
+        {
+            "school_id": school_id,
+            "student_id": student_id,
+            "parent_user_id": parent_user_id,
+            "card_id": card.id,
+            "card_name": card.card_name,
+            "card_rarity": card.card_rarity,
+            "card_category": card.card_category,
+            "is_first_open": is_first_open,
+            "occurred_at": datetime.now().isoformat(),
+        },
+    )
 
     # 生成 AI 表彰信
     ai_result = await generate_ai_praise_letter(db, student_id, school_id)
@@ -452,6 +486,22 @@ async def _cep_habit_card_silence(
                     _select(User.display_name).where(User.id == teacher_id)
                 )
                 teacher_name = teacher_result.scalar() or "未知教师"
+
+                # ── Wings 3.2: 分布式冷却锁 — 3天内同一学生不重复告警 ──
+                COOLDOWN_TTL = 259_200  # 3 天
+                redis = get_redis()
+                if redis:
+                    cooldown_key = f"wings:cep:lock:habit_silence:{sid}"
+                    try:
+                        acquired = await redis.set(cooldown_key, "1", ex=COOLDOWN_TTL, nx=True)
+                    except Exception:
+                        acquired = False  # Redis 异常 → 放行（宁重复不丢失）
+                    if not acquired:
+                        _log.info(
+                            "[CEP-HABIT] 冷却锁未获取, 3天内已触发过 | student=%s",
+                            sid,
+                        )
+                        continue
 
                 title = f"卡片沉默预警: {student.name} 已 {gap_days} 天未获萌卡"
 

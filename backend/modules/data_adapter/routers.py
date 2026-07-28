@@ -10,8 +10,8 @@ Data Adapter 路由层
 
 import json
 
-from core.models import User
-from core.routers import get_current_user, get_db
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,7 +90,11 @@ async def list_templates(
 # ============================================================
 
 
-@router.post("/upload-scores", response_model=UploadScoresResponse)
+@router.post(
+    "/upload-scores",
+    response_model=UploadScoresResponse,
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER))],
+)
 async def upload_scores(
     file: UploadFile = File(...),
     template_code: str | None = Form(None),
@@ -331,7 +335,11 @@ async def list_tasks(
 # ============================================================
 
 
-@router.post("/preview", response_model=PreviewResponse)
+@router.post(
+    "/preview",
+    response_model=PreviewResponse,
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER))],
+)
 async def preview_cleaning(
     file: UploadFile = File(...),
     template_code: str | None = Form(None),
@@ -434,7 +442,10 @@ async def get_exam_zscore_heatmap_matrix(
 # ============================================================
 
 
-@router.post("/exams/{exam_id}/rdi-analysis")
+@router.post(
+    "/exams/{exam_id}/rdi-analysis",
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER))],
+)
 async def trigger_rdi_analysis(
     exam_id: int,
     current_user: User = Depends(get_current_user),

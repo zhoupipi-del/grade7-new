@@ -17,6 +17,7 @@ from datetime import date, datetime
 
 import httpx
 from core.db_utils import require_db_url
+from core.event_bus import EventBus
 from core.models import Class, Student, get_local_now
 from modules.psych_screening.models import (
     InterventionRecord,
@@ -315,6 +316,22 @@ async def submit_survey(
 
     await db.commit()
 
+    # ── EventBus: 心理风险变更事件泵入成长时间线 ──
+    EventBus().publish(
+        "psych.risk_changed",
+        {
+            "school_id": school_id,
+            "student_id": student_id,
+            "previous_level": prev_risk,
+            "current_level": risk_level,
+            "total_score": result["total_score"],
+            "source": "psych_screening",
+            "trigger": "submit_survey",
+            "survey_id": survey.id,
+            "occurred_at": get_local_now().isoformat(),
+        },
+    )
+
     # ── CEP 风险升级检测: 后台异步，不阻塞提交返回 ──
     new_risk = risk_level
     if _is_risk_escalation(prev_risk, new_risk):
@@ -395,6 +412,22 @@ async def _cep_psych_risk_escalation(
             risk_labels = {"low": "低风险", "medium": "中风险", "high": "高风险"}
             prev_label = risk_labels.get(prev_risk, "未知") if prev_risk else "首次筛查"
             new_label = risk_labels.get(new_risk, new_risk)
+
+            # ── Wings 3.2: 分布式冷却锁 — 3天内同一学生不重复告警 ──
+            COOLDOWN_TTL = 259_200  # 3 天
+            redis = get_redis()
+            if redis:
+                cooldown_key = f"wings:cep:lock:psych_escalation:{student_id}"
+                try:
+                    acquired = await redis.set(cooldown_key, "1", ex=COOLDOWN_TTL, nx=True)
+                except Exception:
+                    acquired = False  # Redis 异常 → 放行（宁重复不丢失）
+                if not acquired:
+                    logger.info(
+                        "[CEP-PSYCH] 冷却锁未获取, 3天内已触发过 | student=%s",
+                        student_id,
+                    )
+                    return
 
             title = f"心理风险升级: {student_name} {prev_label}→{new_label} (MSSMHS-55: {total_score}分)"
 
@@ -588,7 +621,7 @@ async def list_assessments(
         func.sum(func.if_(MentalHealthAssessment.risk_level == "high", 1, 0)),
         func.sum(func.if_(MentalHealthAssessment.risk_level == "medium", 1, 0)),
         func.sum(func.if_(MentalHealthAssessment.risk_level == "low", 1, 0)),
-        func.sum(func.if_(MentalHealthAssessment.need_intervention == True, 1, 0)),
+        func.sum(func.if_(MentalHealthAssessment.need_intervention, 1, 0)),
     ).where(*conditions)
     stats_result = await db.execute(stats_stmt)
     stats_row = stats_result.one()
@@ -639,6 +672,22 @@ async def create_assessment(
     db.add(assessment)
     await db.commit()
     await db.refresh(assessment)
+
+    # ── EventBus: 心理评估创建 → 成长时间线 ──
+    EventBus().publish(
+        "psych.risk_changed",
+        {
+            "school_id": school_id,
+            "student_id": assessment.student_id,
+            "previous_level": None,
+            "current_level": assessment.risk_level,
+            "source": "psych_screening",
+            "trigger": "create_assessment",
+            "assessment_id": assessment.id,
+            "occurred_at": get_local_now().isoformat(),
+        },
+    )
+
     return assessment
 
 
@@ -654,6 +703,9 @@ async def update_assessment(
     assessment = assessment.scalar_one_or_none()
     if not assessment:
         raise ValueError(f"Assessment {assessment_id} not found")
+
+    # 记录变更前的风险等级
+    prev_risk_level = assessment.risk_level
 
     for field in [
         "assessment_type",
@@ -671,6 +723,24 @@ async def update_assessment(
     assessment.updated_at = get_local_now()
     await db.commit()
     await db.refresh(assessment)
+
+    # ── EventBus: 风险等级变更 → 成长时间线 ──
+    new_risk = data.get("risk_level")
+    if new_risk is not None and new_risk != prev_risk_level:
+        EventBus().publish(
+            "psych.risk_changed",
+            {
+                "school_id": assessment.school_id,
+                "student_id": assessment.student_id,
+                "previous_level": prev_risk_level,
+                "current_level": new_risk,
+                "source": "psych_screening",
+                "trigger": "update_assessment",
+                "assessment_id": assessment.id,
+                "occurred_at": get_local_now().isoformat(),
+            },
+        )
+
     return assessment
 
 
@@ -708,10 +778,9 @@ async def get_dimension_aggregation(
     conditions = [
         PsychSurvey.school_id == school_id,
         PsychSurvey.survey_type == "MSSMHS-55",
-        PsychSurvey.is_valid == True,
+        PsychSurvey.is_valid,
         PsychSurvey.verify_status == "VERIFIED",
         PsychSurvey.dimension_scores.isnot(None),
-        PsychSurvey.dimension_scores != None,
     ]
     if grade_id:
         conditions.append(PsychSurvey.grade_id == grade_id)
@@ -902,10 +971,9 @@ async def run_ai_analysis(
     conditions = [
         PsychSurvey.school_id == school_id,
         PsychSurvey.survey_type == "MSSMHS-55",
-        PsychSurvey.is_valid == True,
+        PsychSurvey.is_valid,
         PsychSurvey.verify_status == "VERIFIED",
         PsychSurvey.dimension_scores.isnot(None),
-        PsychSurvey.dimension_scores != None,
     ]
     if grade_id:
         conditions.append(PsychSurvey.grade_id == grade_id)
@@ -1028,7 +1096,7 @@ async def sync_surveys_to_assessments(
     conditions = [
         PsychSurvey.school_id == school_id,
         PsychSurvey.survey_type == "MSSMHS-55",
-        PsychSurvey.is_valid == True,
+        PsychSurvey.is_valid,
         PsychSurvey.verify_status == "VERIFIED",
         PsychSurvey.total_score >= 120,
     ]
@@ -1257,6 +1325,23 @@ async def followup_intervention(
     rec.updated_at = get_local_now()
     await db.commit()
     await db.refresh(rec)
+
+    # ── EventBus: 干预完成 → 成长时间线 ──
+    EventBus().publish(
+        "psych.risk_changed",
+        {
+            "school_id": rec.school_id,
+            "student_id": rec.student_id,
+            "previous_level": rec.mh_risk_before,
+            "current_level": rec.mh_risk_after,
+            "source": "psych_screening",
+            "trigger": "followup_intervention",
+            "intervention_id": rec.id,
+            "effect_rating": rec.effect_rating,
+            "occurred_at": get_local_now().isoformat(),
+        },
+    )
+
     return rec
 
 
@@ -1341,7 +1426,7 @@ async def search_students(
     limit: int = 50,
 ) -> list[dict]:
     """按权限 scope 搜索学生"""
-    conditions = [Student.school_id == school_id, Student.is_active == True]
+    conditions = [Student.school_id == school_id, Student.is_active]
     if grade_id:
         conditions.append(Student.grade_id == grade_id)
     if class_id:
@@ -1402,7 +1487,7 @@ async def get_dashboard_stats(
     # 问卷统计
     survey_conds = [
         PsychSurvey.school_id == school_id,
-        PsychSurvey.is_valid == True,
+        PsychSurvey.is_valid,
         PsychSurvey.verify_status == "VERIFIED",
     ]
     if grade_id:
@@ -1452,7 +1537,7 @@ async def get_dashboard_stats(
         "need_intervention": (
             await db.execute(
                 select(func.count(MentalHealthAssessment.id)).where(
-                    *assessment_conds, MentalHealthAssessment.need_intervention == True
+                    *assessment_conds, MentalHealthAssessment.need_intervention
                 )
             )
         ).scalar()
