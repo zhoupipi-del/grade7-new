@@ -1,6 +1,6 @@
 {
-  "pass": 28,
-  "fail": 2,
+  "pass": 30,
+  "fail": 0,
   "details": [
     {
       "case_id": "TC-01",
@@ -348,10 +348,10 @@
       "role": "teacher",
       "binding": "无管理域",
       "expected": "403",
-      "actual_status": 200,
+      "actual_status": 403,
       "record_count": null,
       "out_of_scope_leak": "无",
-      "verdict": "FAIL"
+      "verdict": "PASS"
     },
     {
       "case_id": "TC-24",
@@ -374,10 +374,10 @@
       "role": "student",
       "binding": "无管理域",
       "expected": "403",
-      "actual_status": 200,
+      "actual_status": 403,
       "record_count": null,
       "out_of_scope_leak": "无",
-      "verdict": "FAIL"
+      "verdict": "PASS"
     },
     {
       "case_id": "TC-26",

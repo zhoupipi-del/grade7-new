@@ -1,0 +1,50 @@
+[
+  {
+    "role_account": "ms_admin",
+    "path": "GET /discipline/drafts",
+    "status": 200,
+    "total": 1,
+    "items": 1,
+    "verdict": "OK"
+  },
+  {
+    "role_account": "ms_admin",
+    "path": "GET /discipline/escalation-trigger/1",
+    "status": 200,
+    "serious_count": 3,
+    "triggered": true,
+    "verdict": "OK"
+  },
+  {
+    "role_account": "grade_leader",
+    "path": "GET /discipline/drafts",
+    "status": 200,
+    "total": 1,
+    "items": 1,
+    "verdict": "OK"
+  },
+  {
+    "role_account": "grade_leader",
+    "path": "GET /discipline/escalation-trigger/1",
+    "status": 200,
+    "serious_count": 3,
+    "triggered": true,
+    "verdict": "OK"
+  },
+  {
+    "role_account": "class_teacher",
+    "path": "GET /discipline/drafts",
+    "status": 200,
+    "total": 1,
+    "items": 1,
+    "verdict": "OK"
+  },
+  {
+    "role_account": "class_teacher",
+    "path": "GET /discipline/escalation-trigger/1",
+    "status": 200,
+    "serious_count": 3,
+    "triggered": true,
+    "verdict": "OK"
+  }
+]

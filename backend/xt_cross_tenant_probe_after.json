@@ -1,0 +1,54 @@
+[
+  {
+    "role_account": "student",
+    "path": "/discipline/escalation-trigger/5",
+    "target_student_school_id": 3,
+    "caller_school_id": 1,
+    "status": 403,
+    "verdict": "BLOCKED"
+  },
+  {
+    "role_account": "parent",
+    "path": "/discipline/escalation-trigger/5",
+    "target_student_school_id": 3,
+    "caller_school_id": 1,
+    "status": 403,
+    "verdict": "BLOCKED"
+  },
+  {
+    "role_account": "teacher",
+    "path": "/discipline/escalation-trigger/5",
+    "target_student_school_id": 3,
+    "caller_school_id": 1,
+    "status": 403,
+    "verdict": "BLOCKED"
+  },
+  {
+    "role_account": "class_teacher",
+    "path": "/discipline/escalation-trigger/5",
+    "target_student_school_id": 3,
+    "caller_school_id": 1,
+    "status": 403,
+    "verdict": "BLOCKED"
+  },
+  {
+    "role_account": "grade_leader",
+    "path": "/discipline/escalation-trigger/5",
+    "target_student_school_id": 3,
+    "caller_school_id": 1,
+    "status": 403,
+    "verdict": "BLOCKED"
+  },
+  {
+    "role_account": "ms_admin",
+    "path": "/discipline/escalation-trigger/5",
+    "target_student_school_id": 3,
+    "caller_school_id": 1,
+    "status": 200,
+    "triggered": false,
+    "serious_count": 0,
+    "evidence_count": 0,
+    "evidence_desc_sample": [],
+    "verdict": "NO_DATA"
+  }
+]

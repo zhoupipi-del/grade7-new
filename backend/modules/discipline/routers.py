@@ -26,8 +26,8 @@ import logging
 import os
 from datetime import date
 
-from core.models import User, UserRole
-from core.routers import get_current_user, get_db, require_role
+from core.models import Student, User, UserRole
+from core.routers import get_current_user, get_db, require_role, verify_entity_ownership
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -447,7 +447,12 @@ async def sanction_stats(
 # ═══════════════════════════════════════════════════════════════
 
 
-@router.get("/drafts")
+@router.get(
+    "/drafts",
+    dependencies=[
+        Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER))
+    ],
+)
 async def list_drafts(
     class_id: int | None = None,
     grade_id: int | None = None,
@@ -460,21 +465,28 @@ async def list_drafts(
     """
     草稿列表 — DRAFT_PENDING 状态
 
-    自动按角色过滤:
-      - 班主任: 只看自己班级
-      - 年级组长: 看全年级
-      - 德育处: 看全校
+    角色收口（W3-BE-RBAC-002 修复 R1-a/b/c）:
+      MS_ADMIN: 全校范围
+      GRADE_LEADER: 仅本人负责年级
+      CLASS_TEACHER: 仅本人负责班级
+
+    PARENT / STUDENT / TEACHER / COUNSELOR / GROUP_ADMIN / BRANCH_ADMIN → 403
     """
-    # 角色自动过滤: 班主任只看自己班级
-    _cid = class_id
-    if current_user.role == UserRole.CLASS_TEACHER:
-        _cid = _cid or current_user.class_id
+    user_role = current_user.role
+    if isinstance(user_role, str):
+        user_role = UserRole(user_role)
+
+    # 数据范围强制绑定 — 不可被客户端查询参数扩大
+    if user_role == UserRole.CLASS_TEACHER:
+        class_id = current_user.class_id  # 强制绑定到本人班级
+    elif user_role == UserRole.GRADE_LEADER:
+        grade_id = current_user.grade_id  # 强制绑定到本人年级
 
     offset = (page - 1) * per_page
     records, total = await DisciplineService.list_drafts(
         db,
         current_user.school_id,
-        class_id=_cid,
+        class_id=class_id,
         grade_id=grade_id,
         student_id=student_id,
         limit=per_page,
@@ -570,7 +582,12 @@ async def discard_draft(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/escalation-trigger/{student_id}")
+@router.get(
+    "/escalation-trigger/{student_id}",
+    dependencies=[
+        Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER))
+    ],
+)
 async def check_escalation_trigger(
     student_id: int,
     db: AsyncSession = Depends(get_db),
@@ -579,12 +596,19 @@ async def check_escalation_trigger(
     """
     滑窗判定检查 — 查看学生是否触发30天/3次严重违纪红线
 
+    角色收口（W3-BE-RBAC-002 修复 R2-a/b）:
+      仅 MS_ADMIN / GRADE_LEADER / CLASS_TEACHER 可访问；
+      学生归属权校验（Router 层）+ 服务层 school_id 过滤（Service 层）双保险。
+
     返回:
       - triggered: 是否触发升级
       - evidence: 铁证快照
       - blocked_reason: 未触发原因
     """
-    return await DisciplineService.detect_escalation_trigger(db, student_id)
+    # 归属权校验 — 跨租户 student_id 直接 404/403，不进入服务层
+    await verify_entity_ownership(db, Student, student_id, current_user, "学生不存在")
+
+    return await DisciplineService.detect_escalation_trigger(db, student_id, current_user.school_id)
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -10,6 +10,8 @@ BASE = "http://127.0.0.1:8000/api/v1"
 CREDS = pathlib.Path("C:/Users/Administrator/.wings3_audit_accounts.json")
 
 xt_student_id = int(sys.argv[1])
+xt_school_id = int(sys.argv[2]) if len(sys.argv) > 2 else 2
+OUT = sys.argv[3] if len(sys.argv) > 3 else "xt_cross_tenant_probe.json"
 
 data = json.loads(CREDS.read_text(encoding="utf-8"))
 accounts = data["accounts"]  # dict: 短名 -> {username, password, role}
@@ -29,7 +31,7 @@ def login(username: str) -> str | None:
 
 
 results = []
-for user in ["student", "parent", "teacher", "class_teacher", "grade_leader"]:
+for user in ["student", "parent", "teacher", "class_teacher", "grade_leader", "ms_admin"]:
     tok = login(user)
     if not tok:
         results.append({"role_account": user, "error": "LOGIN_FAILED"})
@@ -42,7 +44,7 @@ for user in ["student", "parent", "teacher", "class_teacher", "grade_leader"]:
     entry = {
         "role_account": user,
         "path": f"/discipline/escalation-trigger/{xt_student_id}",
-        "target_student_school_id": 2,
+        "target_student_school_id": xt_school_id,
         "caller_school_id": 1,
         "status": r.status_code,
     }
@@ -62,6 +64,4 @@ for user in ["student", "parent", "teacher", "class_teacher", "grade_leader"]:
     results.append(entry)
 
 print(json.dumps(results, ensure_ascii=False, indent=2))
-pathlib.Path("xt_cross_tenant_probe.json").write_text(
-    json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
-)
+pathlib.Path(OUT).write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")

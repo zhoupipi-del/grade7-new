@@ -1,12 +1,14 @@
 # W3-BE-RBAC-002 动态验收结果报告
 
-> 生成时间：2026-07-31 00:5x（本地）
+> 生成时间：2026-07-31 00:5x（首版验收） / 2026-07-31 02:3x（补丁回归增补）
 > 验收对象：**FastAPI「Wings 3.0」`backend/`**（非 Flask `grade7-new/`）
-> 报告状态：**结论为「不予关闭」**
+> 报告状态：**补丁已实施并回归全绿 → 建议关闭**
 
 ---
 
 ## 一、结论摘要
+
+### 1.1 首版验收（补丁前）
 
 | 项 | 结果 |
 |---|---|
@@ -15,11 +17,26 @@
 | 全端点 × 低权限角色探针 | **20 端点 × 6 低权限角色 = 120 组合，12 组穿透** |
 | 跨租户追加取证 | **5 / 5 低权限账号读到外校学生违纪明细** |
 | 残留缺陷 | **R1（3 项子缺陷）+ R2（2 项子缺陷）= 5 项** |
-| **W3-BE-RBAC-002 状态** | 🔴 **OPEN（不予关闭）** |
+| 首版状态 | 🔴 **OPEN（不予关闭）** |
 
-**不予关闭的理由**：在原修复未覆盖的两个端点上，仍存在**可实证的处分数据越权**——
+**当时不予关闭的理由**：在原修复未覆盖的两个端点上，仍存在**可实证的处分数据越权**——
 ① 一处泄漏**未生效的内部处分草稿全字段**（含年级组长/审批人意见、铁证快照），危害等级高于已生效处分；
 ② 另一处服务层**完全没有 `school_id` 条件**，构成**跨租户读泄漏**，直接违反项目既定的多租户双保险约定。详见第六节。
+
+### 1.2 补丁后回归（本轮，2026-07-31 02:2x–02:3x）
+
+经用户授权后实施第九节全部 5 项补丁（角色范围取「德育处 + 年级组长 + 班主任」，与 `escalation/{student_id}` 一致），并在同一隔离环境完成回归：
+
+| 回归项 | 补丁前 | 补丁后 |
+|---|---|---|
+| 自动化用例 `test_rbac_sanctions.py` | 28/30 | **30 / 30 通过，0 失败** |
+| 穿透矩阵 `probe_discipline_matrix.py` | 12 组穿透 | **0 组穿透**（20 端点 × 6 低权限角色全 403） |
+| 跨租户越权 `escalation-trigger` | 5/5 泄漏 | **6 / 6 无泄漏**（5 个 403 + MS_ADMIN 到达服务层但 `serious_count=0`） |
+| 正向不误伤（前端调用面） | — | **3 角色 × 2 端点 = 6/6 HTTP 200** |
+| 同租户滑窗不误杀 | — | **`serious_count=3`、`triggered=true` 正常命中** |
+| Hook 链路（behavior→discipline） | — | **草稿正常孵化，日志无 Hook 异常** |
+| 隔离库数据残留 | — | **已还原基线**：`schools=1 / students=3 / discipline_records=0 / sanctions=4` |
+| **W3-BE-RBAC-002 状态** | 🔴 OPEN | 🟢 **回归全绿，建议关闭**（详见第十三节） |
 
 ---
 
@@ -154,7 +171,10 @@ GET /discipline/escalation-trigger/{sid}      teacher=200 counselor=200 parent=2
 
 ---
 
-## 六、残留缺陷（W3-BE-RBAC-002 不予关闭的依据）
+## 六、残留缺陷（首版「不予关闭」的依据）
+
+> ✅ **本节 5 项缺陷（R1-a/b/c、R2-a/b）已于 2026-07-31 全部修复并回归全绿，取证见第十三节。**
+> 以下内容保留首版原文，作为缺陷复现与修复前后对照的存档。
 
 ### 🔴 R1 — `GET /api/v1/discipline/drafts` 处分草稿箱越权（高危）
 
@@ -282,9 +302,9 @@ docstring 声称「年级组长：看全年级」，实现中对 GRADE_LEADER **
 
 ---
 
-## 九、建议补丁（**未实施，待确认**）
+## 九、补丁方案（**已于 2026-07-31 实施，见第十三节回归**）
 
-两处修复均为单文件、与现有写法一致的最小改动，但**会改变现有行为**（当前前端 `frontend/src/api/behavior.ts:303/328` 有调用），依据「影响现有功能时停手确认」的铁律，**已停手等待指令**。
+两处修复均为单文件、与现有写法一致的最小改动，但**会改变现有行为**（当前前端 `frontend/src/api/behavior.ts:303/328` 有调用），依据「影响现有功能时停手确认」的铁律，首版报告**停手等待指令**；用户确认「全部实施 + 回归」「角色范围＝德育处 + 年级组长 + 班主任」后落地。
 
 ```python
 # modules/discipline/routers.py  —— R1
@@ -399,7 +419,7 @@ rm C:/Users/Administrator/.wings3_audit_secrets.env
 
 ---
 
-## 十二、最终判定
+## 十二、首版判定（补丁前，存档）
 
 > **W3-BE-RBAC-002：不予关闭（OPEN）**
 >
@@ -407,5 +427,92 @@ rm C:/Users/Administrator/.wings3_audit_secrets.env
 > 但 `drafts`（R1，3 条子缺陷）与 `escalation-trigger`（R2，2 条子缺陷）两处越权仍可实证复现：
 > 前者泄漏内部处分草稿全字段（含审批意见与铁证快照），后者服务层无 `school_id` 条件、已实测**跨租户读到外校学生违纪明细**。
 > 建议：将 R1（a/b/c）与 R2（a/b）共 5 项补入本 Finding 后重新修复并回归，全绿方可关闭。
+
+---
+
+## 十三、补丁实施与回归验收（2026-07-31 02:2x–02:3x）
+
+### 13.1 实际改动清单（3 文件，业务源码）
+
+| # | 文件 | 改动 | 对应缺陷 |
+|---|---|---|---|
+| 1 | `backend/modules/discipline/routers.py` | `import`：新增 `Student`、`verify_entity_ownership` | R2-a 前置 |
+| 2 | 同上 · `list_drafts` | 加 `dependencies=[Depends(require_role(MS_ADMIN, GRADE_LEADER, CLASS_TEACHER))]`；`UserRole(user_role)` 归一化；`CLASS_TEACHER → class_id = current_user.class_id`（**去掉 `or`**）；新增 `elif GRADE_LEADER → grade_id = current_user.grade_id` | R1-a / R1-b / R1-c |
+| 3 | 同上 · `check_escalation_trigger` | 加同款 `require_role` 三角色闸门；调用前 `await verify_entity_ownership(db, Student, student_id, current_user, "学生不存在")`；改为传 `current_user.school_id` | R2-a |
+| 4 | `backend/modules/discipline/services.py` · `detect_escalation_trigger` | 签名新增**必填** `school_id: int`；违纪查询 `WHERE BehaviorRecord.school_id == school_id`；幂等守卫同步加 `DisciplineSanction.school_id == school_id` | R2-b |
+| 5 | `backend/modules/behavior/services.py:103` | 调用点同步：`detect_escalation_trigger(db, student.id, student.school_id)` | R2-b 调用面 |
+
+**调用面完备性**：全仓 `grep` 复核 `detect_escalation_trigger` 在运行时代码中仅上述 2 处调用（`discipline/routers.py`、`behavior/services.py`），无 Celery 任务、无事件总线订阅者。其余命中均为归档快照（`.workbuddy/outputs/`、`audit_pkg/wings3_source/`）或历史一次性补丁脚本 `patch_multi_tenant.py`（锚点字符串已失效，不在运行路径）。
+
+### 13.2 反向回归（越权必须被挡）
+
+| 项目 | 方法 | 结果 |
+|---|---|---|
+| 30 例授权用例 | `test_rbac_sanctions.py` | **30/30 PASS**（TC-23 TEACHER 读草稿箱、TC-25 STUDENT 读升级检测由 FAIL 转 PASS） |
+| 穿透矩阵 | `probe_discipline_matrix.py` | 20 端点 × 6 低权限角色 = **120 组合全 403，穿透数 0** |
+| 跨租户越权 | 重新播种外校（`school_id=3`、`student_id=5`、3 条严重违纪）后 `_probe_xt_http.py 5 3` | 见下表 |
+
+跨租户探针结果（`backend/xt_cross_tenant_probe_after.json`）：
+
+| 调用者 | 补丁前 | 补丁后 | 拦截层 |
+|---|---|---|---|
+| STUDENT | 200 + 明细泄漏 | **403** | Router 角色闸门 |
+| PARENT | 200 + 明细泄漏 | **403** | Router 角色闸门 |
+| TEACHER | 200 + 明细泄漏 | **403** | Router 角色闸门 |
+| CLASS_TEACHER | 200 + 明细泄漏 | **403** | Router 归属校验 |
+| GRADE_LEADER | 200 + 明细泄漏 | **403** | Router 归属校验 |
+| MS_ADMIN | — | **200 但 `serious_count=0`、`evidence=[]`** | **Service 层 `school_id` 过滤** |
+
+> ⚠️ MS_ADMIN 这一行是 R2-b 服务层补丁**必要性的直接证据**：`verify_entity_ownership` 对 MS_ADMIN 全局放行（既有设计，18/18 基线不可动），若只改 Router，MS_ADMIN 路径仍会读到外校明细；服务层 `WHERE school_id` 是唯一挡住它的闸门。这正是「多租户双保险」约定的意义。
+
+### 13.3 正向回归（既有功能不得误伤）
+
+前端实际调用面为 `frontend/src/api/behavior.ts:303`（`GET /discipline/drafts`）与 `:328`（`GET /discipline/escalation-trigger/{id}`），逐一实测（`backend/positive_regress_after.json`）：
+
+| 角色 | `GET /drafts` | `GET /escalation-trigger/1` |
+|---|---|---|
+| MS_ADMIN | 200，total=1 | 200 |
+| GRADE_LEADER | 200，total=1 | 200 |
+| CLASS_TEACHER | 200，total=1 | 200 |
+
+**同租户滑窗不误杀**：给本校（`school_id=1`）学生补 3 条 30 天内严重违纪后复测，三角色均返回 `serious_count=3`、`triggered=true` —— 证明 `WHERE school_id` 只挡跨租户、不影响正常判定。
+
+**Hook 链路实测**（`backend/hook_regress_after.json`）：`detect_escalation_trigger` 的第二调用点被 `try/except` 包裹（异常只写日志、静默失效），因此必须走真实链路验证。班主任经 `POST /behavior/records` 落库一条 `serious` 违纪后：
+
+- 创建返回 `201`
+- 草稿箱 `total` 由 `1 → 2`（`DRAFT_INCUBATED`）
+- 实例日志：`🔺 处分滑窗自动触发: student_id=1 serious_count=4`
+- 全程无 `处分滑窗Hook异常` 记录
+
+### 13.4 环境与数据还原
+
+回归取证数据已按顺序清理（`discipline_sanctions.behavior_record_id` 外键要求**先删草稿再删违纪记录**，否则 MySQL 1451）：删除 3 条 ST 播种违纪 + 1 条 Hook 违纪 + 1 条 `[累计扣分自动升级]` 派生记录 + 1 条自动孵化草稿 + 外校全部对象。
+
+清理后核验：`schools=1 / students=3 / discipline_records=0 / discipline_sanctions=4`，与首版基线**完全一致**；随后**复跑 30 例用例仍 30/30 通过**，以用例自证基线未被破坏。
+
+### 13.5 新增产物
+
+| 文件 | 用途 |
+|---|---|
+| `backend/_probe_positive_regress.py` / `positive_regress_after.json` | 三管理角色 × 两端点正向回归 |
+| `backend/_probe_same_tenant_seed.py` | 同租户「不误杀」播种 + 幂等清理（含外键顺序处理） |
+| `backend/_probe_hook_regress.py` / `hook_regress_after.json` | behavior→discipline Hook 链路实测 |
+| `backend/xt_cross_tenant_probe_after.json` | 跨租户补丁后取证 |
+
+三个探针脚本均只输出结构化结果，**不打印任何口令**；凭据仍只存于仓库外 `C:/Users/Administrator/.wings3_audit_accounts.json`。
+
+---
+
+## 十四、最终判定
+
+> **W3-BE-RBAC-002：回归全绿，建议关闭（CLOSE）**
 >
-> **同时提请注意**：`W3-ENV-EXPOSE-001`（开机自启的未审计 Flask 服务监听 `0.0.0.0:5000`）等级为高，且完全独立于本 Finding，建议单独立项。
+> 首版验收暴露的 R1（a/b/c）与 R2（a/b）共 5 项残留缺陷已全部修复，改动集中在 3 个业务文件、与既有 `list_sanctions` 写法完全一致，未引入新依赖、未改数据库结构、未改 API 路径与响应结构。
+> 反向回归：30/30 用例通过、120 组穿透探针零穿透、跨租户 6/6 无泄漏。
+> 正向回归：前端两个调用面在三个管理角色下均 200，滑窗判定与自动草稿孵化链路正常。
+> 隔离环境数据已还原基线并以用例自证。
+>
+> **待办（本 Finding 之外）**：
+> - `W3-ENV-EXPOSE-001`（开机自启的未审计 Flask 服务监听 `0.0.0.0:5000`）等级为高，完全独立于本 Finding，建议单独立项。
+> - 本轮补丁位于分支 `audit/w3-be-rbac-002`，**尚未合入 master、尚未上生产**；生产落地需另走部署流程并二次确认。
+> - 审计实例 / 隔离 Redis / 合成账号 / 仓库外凭据文件目前**仍保留**，待指令后按第十一节脚本销毁。
