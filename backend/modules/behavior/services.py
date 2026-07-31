@@ -100,7 +100,9 @@ class BehaviorService:
                 # 延迟导入避免循环依赖（behavior ↔ discipline 双向 import）
                 from modules.discipline.services import DisciplineService
 
-                trigger = await DisciplineService.detect_escalation_trigger(db, student.id)
+                trigger = await DisciplineService.detect_escalation_trigger(
+                    db, student.id, student.school_id
+                )
                 if trigger["triggered"]:
                     await DisciplineService.create_escalation_draft(
                         db,

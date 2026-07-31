@@ -80,7 +80,7 @@ class DisciplineService:
         try:
             level_enum = DisciplineLevel(level)
         except ValueError:
-            valid = [l.value for l in DisciplineLevel]
+            valid = [lv.value for lv in DisciplineLevel]
             raise ValueError(f"无效的处分等级: {level}，有效值: {valid}")
 
         sanction = DisciplineSanction(
@@ -594,12 +594,17 @@ class DisciplineService:
     async def detect_escalation_trigger(
         db: AsyncSession,
         student_id: int,
+        school_id: int,
     ) -> dict:
         """
         30天滑窗规则判定器
 
         SQL 直查 behavior_records 表中:
-          type == "serious" AND incident_date >= 30天前 AND status == "active"
+          school_id == school_id AND type == "serious"
+          AND incident_date >= 30天前 AND status == "active"
+
+        W3-BE-RBAC-002 修复 R2-b: school_id 为必填参数，服务层强制租户过滤，
+        杜绝跨租户 student_id 直读外校违纪明细。
 
         若 ≥3 次严重违纪，返回触发信号 + 铁证快照。
         幂等守卫: 检查是否已存在相同原因 DRAFT_PENDING/PENDING/ACTIVE 处分。
@@ -630,6 +635,7 @@ class DisciplineService:
                 BehaviorRecord.category,
             )
             .where(
+                BehaviorRecord.school_id == school_id,
                 BehaviorRecord.student_id == student_id,
                 BehaviorRecord.type == "serious",
                 BehaviorRecord.status == "active",
@@ -663,6 +669,7 @@ class DisciplineService:
                 select(func.count())
                 .select_from(DisciplineSanction)
                 .where(
+                    DisciplineSanction.school_id == school_id,
                     DisciplineSanction.student_id == student_id,
                     DisciplineSanction.status.in_(
                         [
@@ -913,11 +920,19 @@ class DisciplineService:
         grade_id: int | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
+        class_id: int | None = None,
     ) -> dict:
-        """处分统计概览"""
+        """
+        处分统计概览
+
+        W3-BE-RBAC-002 补充修复: 新增可选 class_id 维度，供 CLASS_TEACHER
+        强制绑定本班范围使用，避免班主任读取全校聚合计数。
+        """
         conditions = [DisciplineSanction.school_id == school_id]
         if grade_id:
             conditions.append(DisciplineSanction.grade_id == grade_id)
+        if class_id:
+            conditions.append(DisciplineSanction.class_id == class_id)
         if start_date:
             conditions.append(DisciplineSanction.punish_date >= start_date)
         if end_date:
