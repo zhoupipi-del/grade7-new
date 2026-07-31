@@ -111,6 +111,7 @@ def _get_scope_params(user: User):
 @router.get("/metadata")
 async def get_metadata(
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """返回模块所用的常量列表 (供前端渲染表单)"""
     return {
@@ -138,6 +139,7 @@ async def list_surveys(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """心理筛查问卷列表 (含统计)"""
     # 权限 scope 覆盖
@@ -235,6 +237,7 @@ async def submit_psych_survey(
     req: SurveySubmitRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """
     提交 MSSMHS-55 心理筛查问卷。
@@ -256,6 +259,7 @@ async def get_dimension_data(
     grade_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """
     MSSMHS-55 十维度聚合数据 (ECharts 雷达图)。
@@ -334,6 +338,7 @@ async def list_psych_assessments(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """心理健康评估列表"""
     scope = _get_scope_params(current_user)
@@ -452,6 +457,7 @@ async def get_assessment_detail(
     assessment_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """心理健康评估详情 (含答题明细+干预记录+辅助数据)"""
     assessment = await db.execute(
@@ -918,8 +924,9 @@ async def list_questions(
     is_active: bool = Query(True),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
-    """问题库列表 (管理员+教师可读)"""
+    """问题库列表 (管理员+心理教师可读)"""
     conditions = [
         MentalHealthQuestion.school_id == current_user.school_id,
     ]

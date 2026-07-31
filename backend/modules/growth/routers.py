@@ -30,7 +30,7 @@ modules/growth/routers.py — 成长时间轴 API 路由
 """
 
 from core.models import Student, User, UserRole
-from core.routers import get_current_user, get_db
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -141,6 +141,7 @@ async def read_growth_timeline(
         None, description="学期过滤，格式: 2025-2026-1（上学期）/ 2025-2026-2（下学期）"
     ),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.PARENT)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -189,6 +190,7 @@ async def read_growth_timeline(
 async def get_my_timeline(
     semester: str | None = Query(None, description="学期过滤"),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.PARENT)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -239,6 +241,7 @@ MGMT_ROLES = [UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER]
 async def growth_dashboard(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """成长档案看板统计"""
     data = await growth_svc.get_growth_dashboard(db, user.school_id)
@@ -250,6 +253,7 @@ async def create_event(
     data: TimelineEventCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """手动注入成长事件（教师/管理员）"""
     await _verify_student_access(data.student_id, user, db)
@@ -271,6 +275,7 @@ async def list_events(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.PARENT)),
 ):
     """列出成长事件，支持维度/级别筛选"""
     filter_student_id = student_id
@@ -299,6 +304,7 @@ async def holistic_profile(
     ),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.PARENT)),
 ):
     """
     全息成长画像 — 自动生成当期快照 + 历史趋势 + 近期事件 + 7路融合时间轴
@@ -323,6 +329,7 @@ async def generate_snapshot(
     data: SnapshotGenerateRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """生成月度/学期成长快照（五维归一化引擎）"""
     await _verify_student_access(data.student_id, user, db)
@@ -344,6 +351,7 @@ async def list_snapshots(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.PARENT)),
 ):
     """列出周期性成长快照"""
     filter_student_id = student_id
@@ -389,6 +397,7 @@ async def update_comment(
     data: TeacherCommentUpdate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """班主任录入期末评语"""
     snap = await growth_svc.update_teacher_comment(
@@ -423,6 +432,7 @@ async def five_dimension_radar(
     student_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.PARENT)),
 ):
     """
     动态五维雷达 — 13路全息事件流 → 5维 Sigmoid 归一化得分。
@@ -454,6 +464,7 @@ async def list_moral_ledger(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.PARENT)),
 ):
     """德育工单列表 — 班主任/年级组长/德育处可用"""
     role = user.role
@@ -491,6 +502,7 @@ async def resolve_moral_ledger(
     note: str | None = Query(None, description="干预说明"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """解除挂牌 — 标记工单为已解决，记录干预说明"""
     role = user.role
@@ -544,6 +556,7 @@ async def get_composite_alert(
     alert_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     获取复合预警详情 — 前端沙箱核心数据源
@@ -594,6 +607,7 @@ async def resolve_composite_alert(
     body: AlertResolveRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     签署处方归档 — 人工微调 → 一键签署

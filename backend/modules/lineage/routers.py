@@ -6,8 +6,8 @@ modules/lineage/routers.py — 血缘追踪 API 端点
 
 import logging
 
-from core.models import User
-from core.routers import get_current_user, get_db, verify_entity_ownership
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role, verify_entity_ownership
 from fastapi import APIRouter, Depends, HTTPException, Query
 from modules.evaluation.models import ScoreLog
 from modules.lineage.schemas import (
@@ -24,7 +24,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("lineage.routers")
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN))],
+)
 
 
 @router.get("/traces/{trace_id}", response_model=CausalChain)

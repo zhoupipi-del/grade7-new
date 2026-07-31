@@ -14,7 +14,7 @@ Phase 3+: 课件管理、分层作业（预留）
 """
 
 from core.models import User, UserRole
-from core.routers import get_current_user, get_db
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +46,7 @@ async def translate_question(
     body: TranslateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.TEACHER)),
 ):
     """
     核心 API：把一道数学应用题逐句翻译成数学表达式。
@@ -76,6 +77,7 @@ async def get_translation_history(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     limit: int = Query(default=20, ge=1, le=100),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.TEACHER)),
 ):
     """获取最近的翻译历史"""
     records = await TranslationService.get_history(
@@ -108,6 +110,7 @@ async def get_class_report_kpi(
     timeRange: str = Query(default="30d", description="时间范围: 7d/30d/semester/all"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     教师端班级 KPI 总览。
@@ -135,6 +138,7 @@ async def get_class_blind_spots(
     timeRange: str = Query(default="30d", description="时间范围: 7d/30d/semester/all"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     审题盲区排行 — 知识点出现频率越高，说明学生在该领域的审题越困难。
@@ -161,6 +165,7 @@ async def get_class_student_usage(
     class_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     学生个体学情下钻 — 包含翻译使用量、最高频知识点盲区、自主学习指数、RDI 风险状态。

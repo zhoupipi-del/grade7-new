@@ -25,8 +25,8 @@ research_lesson_prep/routers.py — 集体备课协同编辑 API 网关
   GET    /dashboard                 教研看板统计
 """
 
-from core.models import User
-from core.routers import get_current_user, get_db
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,11 +38,15 @@ from .models import (
     STATUS_PUBLISHED,
 )
 
-router = APIRouter(tags=["集体备课协同编辑"])
+router = APIRouter(
+    tags=["集体备课协同编辑"],
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.TEACHER))],
+)
 
 # 角色常量
 ROLE_MS_ADMIN = "MS_ADMIN"
 ROLE_GRADE_LEADER = "GRADE_LEADER"
+ROLE_TEACHER = "TEACHER"
 ROLE_CLASS_TEACHER = "CLASS_TEACHER"
 
 
@@ -54,7 +58,7 @@ ROLE_CLASS_TEACHER = "CLASS_TEACHER"
 def _can_create(user: User) -> bool:
     """谁能创建教案"""
     role = user.role.upper() if isinstance(user.role, str) else str(user.role).upper()
-    return role in (ROLE_MS_ADMIN, ROLE_GRADE_LEADER, ROLE_CLASS_TEACHER)
+    return role in (ROLE_MS_ADMIN, ROLE_GRADE_LEADER, ROLE_TEACHER, ROLE_CLASS_TEACHER)
 
 
 def _can_manage_plan(user: User, plan_creator_id: int) -> bool:
@@ -321,6 +325,7 @@ async def api_create_review(
     payload: schemas.ReviewCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """添加批注 (仅REVIEW状态可批注)"""
     if not _can_review(current_user):
@@ -382,6 +387,7 @@ async def api_resolve_review(
     payload: schemas.ReviewResolve,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """标记批注已解决"""
     if not _can_review(current_user):
@@ -456,6 +462,7 @@ async def api_approve_plan(
     plan_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """组长审核通过 (REVIEW → APPROVED)"""
     if not _can_review(current_user):
@@ -480,6 +487,7 @@ async def api_publish_plan(
     plan_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """发布 (APPROVED → PUBLISHED), 锁定当前版本"""
     if not _can_review(current_user):
@@ -505,6 +513,7 @@ async def api_reject_plan(
     payload: schemas.StatusTransition,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """打回草稿 (REVIEW/APPROVED → DRAFT)"""
     if not _can_review(current_user):

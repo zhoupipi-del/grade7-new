@@ -15,7 +15,7 @@ import logging
 
 from core.models import User, UserRole
 from core.redis_client import get_redis
-from core.routers import get_current_user, get_db
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -133,6 +133,7 @@ async def mark_all_read(
 async def stream_composite_alerts(
     request: Request,
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     SSE 实时事件流 — 将 CEP 复合预警毫秒级泵出到前端

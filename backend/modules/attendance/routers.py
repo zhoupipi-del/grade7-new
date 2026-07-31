@@ -15,7 +15,7 @@ V2 扩展: 仪表盘 / 班级排行 / 日历热力图 / 全局视图 / 数据导
 from datetime import date
 
 from core.models import User, UserRole
-from core.routers import get_current_user, get_db
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,6 +67,7 @@ async def batch_record_attendance(
     body: BatchRecordRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     批量录入班级考勤数据。
@@ -106,6 +107,7 @@ async def get_class_attendance(
     end_date: date | None = Query(None, description="日期范围结束 YYYY-MM-DD"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     查询某班级考勤详情。
@@ -147,6 +149,7 @@ async def get_student_attendance(
     days: int = Query(30, ge=1, le=365, description="查询天数"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """查询某学生的考勤历史"""
     records = await AttendanceService.get_student_history(
@@ -168,6 +171,7 @@ async def get_student_calendar(
     student_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     学生考勤日历热力图:
@@ -195,6 +199,7 @@ async def get_attendance_stats(
     end_date: date = Query(..., description="结束日期"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """年级考勤统计概览（按班级汇总）"""
     stats = await AttendanceService.get_grade_summary(
@@ -212,6 +217,7 @@ async def get_anomaly_alerts(
     days: int = Query(7, ge=1, le=60, description="监测天数（≤60）"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
     异常预警 V2: 三类规则
@@ -245,6 +251,7 @@ async def get_dashboard(
     class_id: int | None = Query(None, description="班级过滤"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.PARENT)),
 ):
     """
     考勤仪表盘聚合数据:
@@ -295,6 +302,7 @@ async def get_class_ranking(
     grade_id: int | None = Query(None, description="年级过滤"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
     班级横向对比排行: 按缺勤率降序排序
@@ -329,6 +337,7 @@ async def get_overview(
     end_date: date = Query(..., description="结束日期"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN)),
 ):
     """
     德育处全局考勤视图: 所有年级/班级汇总。
@@ -357,6 +366,7 @@ async def export_attendance(
     end_date: date = Query(..., description="结束日期"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
     导出考勤数据: 返回扁平化记录数组，前端可转为 Excel/CSV。
@@ -390,6 +400,7 @@ async def submit_leave_request(
     body: LeaveSubmitRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.PARENT, UserRole.CLASS_TEACHER, UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """家长提交请假申请"""
     AttendanceService.check_access("submit_leave", current_user)
@@ -417,6 +428,7 @@ async def approve_leave_request(
     body: LeaveApproveRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """班主任/年级组长审批请假"""
     AttendanceService.check_access("approve_leave", current_user)
@@ -450,6 +462,7 @@ async def list_leaves(
     offset: int = Query(0, ge=0, description="偏移量"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.PARENT)),
 ):
     """
     请假列表查询，支持角色自动范围限定:
@@ -490,6 +503,7 @@ async def batch_approve_leaves(
     body: LeaveBatchApproveRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
     批量审批/拒绝请假申请（年级组长专用）。
@@ -539,6 +553,7 @@ async def get_class_attendance_history(
     end_date: date = Query(..., description="结束日期 YYYY-MM-DD"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     班级考勤历史聚合 — 按天多态状态矩阵

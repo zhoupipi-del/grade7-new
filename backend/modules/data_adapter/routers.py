@@ -57,6 +57,7 @@ async def health():
 @router.get("/templates", response_model=TemplateListResponse)
 async def list_templates(
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """获取所有可用的清洗模板"""
     templates = get_all_templates()
@@ -293,6 +294,7 @@ async def list_tasks(
     page_size: int = Query(20, ge=1, le=100),
     sync_status: str | None = Query(None, description="按数据来源筛选: native/legacy/imported"),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -410,6 +412,7 @@ async def preview_cleaning(
 async def get_exam_zscore_heatmap_matrix(
     exam_id: int,
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -511,6 +514,7 @@ async def trigger_rdi_analysis(
 async def get_exam_alerts(
     exam_id: int,
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -568,6 +572,7 @@ async def list_prescriptions(
     risk_level: str | None = Query(None, description="red/yellow/green (按 Z-Score 阈值映射)"),
     student_name: str | None = Query(None, description="学生姓名模糊匹配"),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -669,6 +674,7 @@ async def list_prescriptions(
 async def get_alert_prescriptions(
     alert_id: int,
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """

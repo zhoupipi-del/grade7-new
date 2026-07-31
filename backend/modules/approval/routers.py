@@ -25,7 +25,7 @@ import logging
 from datetime import timedelta
 
 from core.models import School, Student, User, UserRole
-from core.routers import get_current_user, get_db
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 # ApprovalRequest 定义在 evaluation/models.py 中
@@ -180,6 +180,7 @@ async def list_chains(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """列出当前学校的审批链"""
@@ -217,6 +218,7 @@ async def create_chain(
 async def get_chain(
     chain_id: int,
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """获取审批链详情"""
@@ -278,6 +280,7 @@ async def deactivate_chain(
 @router.get("/pending-count", response_model=PendingCountResponse)
 async def get_pending_count(
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """获取当前学校的待审批工单数量"""
@@ -300,6 +303,7 @@ async def get_pending_count(
 async def get_tickets(
     type: str = Query(default="todo", description="todo=待审批, done=已完成"),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -416,6 +420,7 @@ async def list_requests(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """分页查询审批请求列表"""
@@ -469,6 +474,7 @@ async def list_requests(
 async def get_request(
     req_id: int,
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """获取单个审批请求详情"""

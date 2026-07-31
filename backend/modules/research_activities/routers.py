@@ -24,8 +24,8 @@ research_activities/routers.py — 教研活动管理 API 网关
   DELETE /{act_id}/agendas/{aid}        删除议题
 """
 
-from core.models import User
-from core.routers import get_current_user, get_db
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,10 +36,14 @@ from .models import (
     ACT_IN_PROGRESS,
 )
 
-router = APIRouter(tags=["教研活动管理"])
+router = APIRouter(
+    tags=["教研活动管理"],
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.TEACHER))],
+)
 
 ROLE_MS_ADMIN = "MS_ADMIN"
 ROLE_GRADE_LEADER = "GRADE_LEADER"
+ROLE_TEACHER = "TEACHER"
 ROLE_CLASS_TEACHER = "CLASS_TEACHER"
 
 
@@ -65,7 +69,7 @@ async def api_create_activity(
     current_user: User = Depends(get_current_user),
 ):
     """创建教研活动"""
-    if current_user.role not in (ROLE_MS_ADMIN, ROLE_GRADE_LEADER, ROLE_CLASS_TEACHER):
+    if current_user.role not in (ROLE_MS_ADMIN, ROLE_GRADE_LEADER, ROLE_TEACHER, ROLE_CLASS_TEACHER):
         raise HTTPException(403, "无权创建教研活动")
 
     activity = await services.create_activity(
@@ -164,6 +168,7 @@ async def api_delete_activity(
     act_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """删除活动 (仅planned/cancelled可删)"""
     activity = await services.get_activity(db, current_user.school_id, act_id)
@@ -360,6 +365,7 @@ async def api_remove_participant(
     pid: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """移除参与人"""
     activity = await services.get_activity(db, current_user.school_id, act_id)
@@ -481,6 +487,7 @@ async def api_delete_agenda(
     aid: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """删除议题"""
     activity = await services.get_activity(db, current_user.school_id, act_id)

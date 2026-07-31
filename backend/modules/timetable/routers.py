@@ -53,6 +53,7 @@ async def list_classrooms(
     room_type: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     return await TimetableService.list_classrooms(
         db=db,
@@ -66,6 +67,7 @@ async def create_classroom(
     body: ClassroomCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     return await TimetableService.create_classroom(
         db=db,
@@ -82,6 +84,7 @@ async def list_courses(
     subject_category: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     return await TimetableService.list_courses(
         db=db,
@@ -95,6 +98,7 @@ async def create_course(
     body: CourseCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     return await TimetableService.create_course(
         db=db,
@@ -113,6 +117,7 @@ async def list_slots(
     semester: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     return await TimetableService.list_slots(
         db=db,
@@ -129,6 +134,7 @@ async def create_slot(
     auto_resolve: bool = Query(False, description="冲突时是否强制创建"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     return await TimetableService.create_slot(
         db=db,
@@ -143,6 +149,7 @@ async def delete_slot(
     slot_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     ok = await TimetableService.delete_slot(db, slot_id)
     if not ok:
@@ -155,6 +162,7 @@ async def check_conflict(
     body: CourseSlotCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     return await TimetableService._check_conflicts(
         db,
@@ -172,6 +180,7 @@ async def get_weekly_schedule(
     semester: str = Query(..., description="学期: 2025-2026-1"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     result = await TimetableService.get_weekly_schedule(
         db=db,
@@ -190,6 +199,7 @@ async def get_teacher_weekly_schedule(
     semester: str = Query(..., description="学期: 2025-2026-1"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     result = await TimetableService.get_teacher_weekly_schedule(
         db=db,
@@ -212,6 +222,7 @@ async def list_conflicts(
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     return await TimetableService.list_conflicts(
         db=db,
@@ -228,6 +239,7 @@ async def resolve_conflict(
     resolution: str = Query(..., description="resolved_by_move/resolved_by_cancel/ignored"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN)),
 ):
     result = await TimetableService.resolve_conflict(
         db=db,
@@ -250,6 +262,7 @@ async def list_schedule_instances(
     end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """查询班级在指定日期范围内的日历级课表实例"""
     try:

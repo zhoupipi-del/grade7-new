@@ -25,8 +25,8 @@
   GET    /tags/suggestions               — 标签建议(高频标签)
 """
 
-from core.models import Class, Grade, Student, User, get_local_now
-from core.routers import get_current_user, get_db
+from core.models import Class, Grade, Student, User, UserRole, get_local_now
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from modules.psych_profiles import services as svc
 from modules.psych_profiles.models import PsyProfile
@@ -128,7 +128,8 @@ async def api_list_profiles(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """心理档案列表 — 支持风险等级/标签筛选"""
     profiles, total = await svc.list_profiles(
@@ -161,7 +162,8 @@ async def api_list_profiles(
 async def api_get_profile(
     student_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """心理档案详情 — 含学生基本信息 + 最近筛查/咨询记录"""
     profile = await svc.get_profile(db, current_user.school_id, student_id)
@@ -252,7 +254,8 @@ async def api_create_profile(
     student_id: int,
     payload: PsyProfileCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """初始化学生心理档案"""
     existing = await svc.get_profile(db, current_user.school_id, student_id)
@@ -285,7 +288,8 @@ async def api_update_profile(
     student_id: int,
     payload: PsyProfileUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """更新心理档案"""
     update_data = payload.model_dump(exclude_none=True)
@@ -305,7 +309,8 @@ async def api_update_tags(
     student_id: int,
     payload: TagsUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """更新标签云 (完整替换)"""
     profile = await svc.update_tags(db, current_user.school_id, student_id, payload.tags)
@@ -320,7 +325,8 @@ async def api_update_tags(
 async def api_delete_profile(
     student_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """删除心理档案"""
     ok = await svc.delete_profile(db, current_user.school_id, student_id)
@@ -335,7 +341,8 @@ async def api_delete_profile(
 async def api_recompute_profile(
     student_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """重新聚合统计 — 从子表重新计算咨询/筛查/干预次数和最近活动时间"""
     profile = await svc.recompute_profile_stats(db, current_user.school_id, student_id)
@@ -353,7 +360,8 @@ async def api_recompute_profile(
 async def api_create_screening(
     payload: PsyScreeningCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """录入筛查快照 — 自动更新心理档案风险等级"""
     record = await svc.create_screening(
@@ -380,7 +388,8 @@ async def api_list_screenings(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """筛查快照列表"""
     records, total = await svc.list_screenings(
@@ -415,7 +424,8 @@ async def api_student_screenings(
     student_id: int,
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """学生筛查历史"""
     records = await svc.get_student_screenings(db, current_user.school_id, student_id, limit)
@@ -451,7 +461,8 @@ async def api_comprehensive_risks(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """
     学业x心理双轨预警合成视图
@@ -477,7 +488,8 @@ async def api_comprehensive_risks(
 async def api_student_nexus(
     student_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """单个学生双轨详细画像 — 学业预警历史 + 筛查历史 + RDI四维 + 咨询摘要"""
     detail = await svc.get_student_nexus_detail(db, current_user.school_id, student_id)
@@ -492,7 +504,8 @@ async def api_student_nexus(
 @router.get("/dashboard")
 async def api_dashboard(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """心理档案仪表盘聚合统计"""
     data = await svc.get_dashboard_stats(db, current_user.school_id)
@@ -503,7 +516,8 @@ async def api_dashboard(
 async def api_tag_suggestions(
     limit: int = Query(30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """标签建议 — 从现有档案中提取高频标签"""
     tags = await svc.get_tag_suggestions(db, current_user.school_id, limit)

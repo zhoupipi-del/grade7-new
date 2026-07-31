@@ -12,8 +12,8 @@ Habit Cards 路由层
   POST /parent/blindbox/share   — 裂变分享标记 (Task #1400)
 """
 
-from core.models import Student, User
-from core.routers import get_current_user, get_db
+from core.models import Student, User, UserRole
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, status
 from modules.habit_cards.models import (
     CardTransaction,
@@ -57,6 +57,7 @@ async def list_card_templates(
     school_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """拉取当前学校所有启用的卡牌模板"""
     # 多租户安全: 只能查自己学校的模板
@@ -91,6 +92,7 @@ async def batch_issue_cards(
     payload: IssueCardsRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.TEACHER)),
 ):
     """教师端点：批量向选定学生派发萌卡"""
     # RBAC: 只有教师和管理员可以发卡
@@ -126,6 +128,7 @@ async def get_student_wallet(
     student_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """调阅学生卡牌钱包及 AI 即时表彰信"""
     school_id = current_user.school_id
@@ -184,6 +187,7 @@ async def open_blindbox(
     payload: BlindBoxOpenRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.PARENT)),
 ):
     """家长端点：盲盒翻牌查看孩子最新卡牌资产"""
     # 多租户安全
@@ -214,6 +218,7 @@ async def get_card_transactions(
     student_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """查看学生的发卡流水记录"""
     school_id = current_user.school_id
@@ -301,6 +306,7 @@ async def require_parent_binding(
 async def parent_auto_blindbox(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.PARENT)),
 ):
     """家长 H5 落地页自动盲盒翻牌 — 无需传参, 自动识别绑定学生"""
     # 绑定校验
@@ -351,6 +357,7 @@ async def parent_auto_blindbox(
 async def parent_blindbox_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.PARENT)),
 ):
     """家长查看盲盒开启历史记录 (最近 20 条)"""
     parent_user, student = await require_parent_binding(
@@ -382,6 +389,7 @@ async def parent_mark_share(
     payload: ShareBlindboxRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.PARENT)),
 ):
     """家长分享盲盒表彰信后标记裂变渠道"""
     parent_user, student = await require_parent_binding(

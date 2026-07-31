@@ -8,7 +8,7 @@ modules/dashboard/routers.py — 大数据看板 API 端点
 """
 
 from core.models import User, UserRole
-from core.routers import get_current_user, get_db
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +18,9 @@ from .services import (
     get_trends,
 )
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER))],
+)
 
 
 # ═══════════════════════════════════════════════════════════════

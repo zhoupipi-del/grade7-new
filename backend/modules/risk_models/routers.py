@@ -15,7 +15,7 @@ modules/risk_models/routers.py — 风险预警雷达 API 路由
 import logging
 
 from core.models import Class, Student, User, UserRole, get_local_now
-from core.routers import get_current_user, get_db
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +49,7 @@ async def calculate_rdi(
     request: RDICalculateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     计算学生 RDI 风险偏离指数
@@ -82,6 +83,7 @@ async def get_risk_dashboard(
     grade_id: int | None = Query(None, description="年级ID (级组长自动限制本年级)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     获取风险看板数据 (v3.2 — 真实多租户聚合)
@@ -355,6 +357,7 @@ async def get_dashboard_metrics(
     limit_events: int = Query(20, description="事件流返回条数"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     获取四维风险看板聚合数据 (dashboard-metrics)
@@ -393,6 +396,7 @@ async def get_monitor_panel(
     grade_id: int | None = Query(None, description="年级ID (级组长看全年级)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     获取风险监控面板 — 仅展示黄/红预警学生 (RDI > 1.0)
@@ -436,6 +440,7 @@ async def list_warnings(
     days: int = Query(7, description="最近N天的预警"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     查询风险预警列表
@@ -461,6 +466,7 @@ async def handle_warning(
     note: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     处置风险预警
@@ -498,6 +504,7 @@ async def get_baselines(
     baseline_type: str = Query(..., description="behavior/attendance/score"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     查询学生行为基线 (调试用)
@@ -515,6 +522,7 @@ async def warmup_baselines(
     window_days: int = Query(30, description="滑动窗口天数 (默认30天)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN)),
 ):
     """
     冷启动批量预热 — 为全校学生计算并存储风险基线
@@ -556,6 +564,7 @@ async def explain_penalty(
     request: PenaltyExplanationRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
     生成判罚透明化解释 — 三段式表达 (Fact → Rule → Growth)
@@ -629,6 +638,7 @@ async def calculate_rdi_async(
     request: AsyncCalculateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     异步计算学生 RDI 并生成预警 (fire-and-forget)
@@ -697,6 +707,7 @@ async def trigger_class_scan(
     class_id: int,
     request: AsyncScanClassRequest = AsyncScanClassRequest(),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
     触发班级级 RDI 风险扫描 (异步 — maintenance 队列)
@@ -735,6 +746,7 @@ async def trigger_class_scan(
 async def trigger_school_scan(
     request: AsyncScanSchoolRequest = AsyncScanSchoolRequest(),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN)),
 ):
     """
     触发全校 RDI 风险扫描 (异步 — maintenance 队列)

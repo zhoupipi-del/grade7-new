@@ -40,6 +40,7 @@ async def add_routine(
     body: RoutineScoreCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """录入一条常规评分（班主任/年级组/德育处均可按角色录入）"""
     result = await FlagService.add_routine(
@@ -62,6 +63,7 @@ async def add_routine_batch(
     body: RoutineScoreBatch,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """批量录入常规评分"""
     scores = [
@@ -92,6 +94,7 @@ async def list_routines(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """查询常规评分列表（支持多条件筛选 + 分页）"""
     result = await FlagService.list_routines(
@@ -117,6 +120,7 @@ async def delete_routine(
     routine_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """删除一条常规评分"""
     ok = await FlagService.delete_routine(db, routine_id, user.school_id)
@@ -134,10 +138,10 @@ async def delete_routine(
 async def generate_evaluations(
     body: FlagGenerateRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.MS_ADMIN)),
+    user: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
-    生成流动红旗评价草稿（仅德育处管理员）。
+    生成流动红旗评价草稿（德育处/年级组）。
 
     自动跨模块聚合:
       - RoutineScore 三维度均分 → 权重重分配 → 加权底分
@@ -165,6 +169,7 @@ async def view_drafts(
     period_type: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     查看待发布草稿。
@@ -190,10 +195,10 @@ async def publish_evaluations(
     period_type: str = Query(..., min_length=1),
     period_label: str = Query(..., min_length=1),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.MS_ADMIN)),
+    user: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
-    发布草稿 → 按 final_score 降序排列 → 分配 rank → 状态=published（仅德育处）
+    发布草稿 → 按 final_score 降序排列 → 分配 rank → 状态=published（德育处/年级组）
     """
     result = await FlagService.publish_evaluations(
         db=db,
@@ -219,6 +224,7 @@ async def get_leaderboard(
     period_label: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """查看已发布的流动红旗排行榜（所有角色可查看）"""
     items = await FlagService.get_leaderboard(
@@ -242,10 +248,10 @@ async def archive_evaluations(
     period_type: str = Query(..., min_length=1),
     period_label: str = Query(..., min_length=1),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(UserRole.MS_ADMIN)),
+    user: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """
-    归档已发布评价 → FlagArchiveReport 物理快照（仅德育处）
+    归档已发布评价 → FlagArchiveReport 物理快照（德育处/年级组）
 
     幂等防护：同周期重复归档返回 409 Conflict
     物理快照：存储完整三维明细+扣分详情，杜绝历史回溯篡改
@@ -275,6 +281,7 @@ async def get_archive_history(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """查询归档历史"""
     result = await FlagService.get_archive_history(
@@ -302,6 +309,7 @@ async def get_class_trends(
     class_id: int,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     获取班级历史趋势（归档数据）。

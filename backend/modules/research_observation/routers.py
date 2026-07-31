@@ -21,17 +21,21 @@ research_observation/routers.py — 听课评课量化追踪 API 网关
   GET    /{obs_id}/compare-plan      对比备课教案(预留)
 """
 
-from core.models import User
-from core.routers import get_current_user, get_db
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import schemas, services
 
-router = APIRouter(tags=["听课评课量化追踪"])
+router = APIRouter(
+    tags=["听课评课量化追踪"],
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.TEACHER))],
+)
 
 ROLE_MS_ADMIN = "MS_ADMIN"
 ROLE_GRADE_LEADER = "GRADE_LEADER"
+ROLE_TEACHER = "TEACHER"
 ROLE_CLASS_TEACHER = "CLASS_TEACHER"
 
 
@@ -43,7 +47,7 @@ ROLE_CLASS_TEACHER = "CLASS_TEACHER"
 def _can_observe(user: User) -> bool:
     """谁能听课 (听课人)"""
     role = user.role.upper() if isinstance(user.role, str) else str(user.role).upper()
-    return role in (ROLE_MS_ADMIN, ROLE_GRADE_LEADER, ROLE_CLASS_TEACHER)
+    return role in (ROLE_MS_ADMIN, ROLE_GRADE_LEADER, ROLE_TEACHER, ROLE_CLASS_TEACHER)
 
 
 def _can_manage_observation(user: User, observer_id: int) -> bool:
@@ -288,6 +292,7 @@ async def api_submit_rubric(
     payload: schemas.RubricSubmit,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """提交多维评分"""
     obs = await services.get_observation(db, current_user.school_id, obs_id)
@@ -406,6 +411,7 @@ async def api_resolve_appeal(
     payload: schemas.AppealResolve,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     """处理申诉 (APPEALED → RESOLVED)"""
     if not _can_resolve(current_user):

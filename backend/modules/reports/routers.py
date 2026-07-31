@@ -18,7 +18,7 @@ from pathlib import Path
 
 from celery.result import AsyncResult
 from core.models import User, UserRole
-from core.routers import get_current_user, get_db
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from modules.reports.schemas import (
@@ -57,6 +57,7 @@ HTML_FILE_PATH = BACKEND_ROOT / "static" / "ms" / "batch_export.html"
 async def export_moral_report(
     body: ExportMoralReportRequest,
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     【端点 1】触发异步导出
@@ -82,6 +83,7 @@ async def export_moral_report(
 async def get_task_status(
     task_id: str,
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     【端点 2】状态雷达
@@ -137,6 +139,7 @@ async def get_task_status(
 async def download_task_report(
     task_id: str,
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     【端点 2b】带鉴权的报告下载
@@ -191,6 +194,7 @@ def _default_semester() -> str:
 async def export_grade_moral_report(
     body: ExportGradeReportRequest,
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """
     【端点 3】触发全年级异步批量导出
@@ -283,7 +287,10 @@ async def export_grade_moral_report(
 
 
 @router.get("/batch-export", response_class=HTMLResponse)
-async def get_batch_export_page(current_user: User = Depends(get_current_user)):
+async def get_batch_export_page(
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
+):
     """
     期末德育大账本批量导出前端工作台
     路径将被挂载在: /api/v1/reports/batch-export
@@ -312,6 +319,7 @@ async def get_batch_export_page(current_user: User = Depends(get_current_user)):
 async def get_rdi_summary(
     grade_id: int | None = Query(None, description="年级ID过滤（为空则全校）"),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -348,6 +356,7 @@ async def export_high_risk(
     risk_levels: list[str] | None = Query(None, description="风险等级过滤，默认 intervention"),
     export_format: str = Query("json", description="导出格式: json / excel / pdf"),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -382,6 +391,7 @@ async def export_high_risk(
 async def get_class_report(
     class_id: int,
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
     db: AsyncSession = Depends(get_db),
 ):
     """

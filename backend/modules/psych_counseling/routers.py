@@ -25,8 +25,8 @@
   GET    /stats                    — 心理老师工作台统计概览
 """
 
-from core.models import Student, User
-from core.routers import get_current_user, get_db
+from core.models import Student, User, UserRole
+from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from modules.psych_counseling.models import (
     PsyAppointment,
@@ -169,7 +169,8 @@ async def require_counselor(
 async def api_create_slot(
     payload: SlotCreateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_counselor),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """心理老师开放可预约时段"""
     try:
@@ -206,8 +207,9 @@ async def api_list_slots(
     teacher_id: int = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
-    """查询可用时段 — 全角色可读"""
+    """查询可用时段"""
     slots = await list_slots(
         db=db,
         school_id=current_user.school_id,
@@ -243,7 +245,8 @@ async def api_update_slot_status(
     slot_id: int,
     status_val: str = Query(..., description="open/locked"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_counselor),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """锁定/解锁时段"""
     try:
@@ -265,7 +268,8 @@ async def api_update_slot_status(
 async def api_delete_slot(
     slot_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_counselor),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """删除空闲时段"""
     try:
@@ -289,8 +293,9 @@ async def api_create_appointment(
     payload: AppointmentCreateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
-    """发起预约 — 学生/班主任/家长均可"""
+    """发起预约"""
     allowed_roles = {"ms_admin", "grade_leader", "class_teacher", "parent", "student"}
     role = (current_user.role or "").lower()
     if role not in allowed_roles:
@@ -339,8 +344,9 @@ async def api_list_appointments(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
-    """查询预约列表 — 心理老师/管理员看全部, 其他看自己的"""
+    """查询预约列表"""
     # P0-1: 学生/家长强制只看绑定学生本人，防止越权读取他人预约 (IDOR 防御)
     role = (current_user.role or "").lower()
     if role in {"student", "parent"}:
@@ -398,8 +404,9 @@ async def api_my_appointments(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
-    """我的预约 — 学生或班主任视角"""
+    """我的预约"""
     role = (current_user.role or "").lower()
     student_id = None
 
@@ -469,6 +476,7 @@ async def api_get_appointment(
     appointment_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
     """预约详情"""
     stmt = select(PsyAppointment).where(
@@ -516,7 +524,8 @@ async def api_update_appointment(
     appointment_id: int,
     payload: AppointmentUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_counselor),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """心理老师审核/更新预约"""
     try:
@@ -559,7 +568,8 @@ async def api_update_appointment(
 async def api_create_consult_record(
     payload: ConsultRecordCreateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_counselor),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """心理老师加密写实 — 提交咨询记录"""
     try:
@@ -600,8 +610,9 @@ async def api_list_consult_records(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
-    """咨询记录列表 — 元数据可见, 正文需单个查询解密"""
+    """咨询记录列表"""
     # P0-1: 学生/家长强制只看绑定学生本人，防止越权读取他人咨询记录 (IDOR 防御)
     role = (current_user.role or "").lower()
     if role in {"student", "parent"}:
@@ -655,8 +666,9 @@ async def api_get_consult_record(
     record_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
-    """获取单条咨询记录 — 按角色自动解密/脱敏"""
+    """获取单条咨询记录"""
     role = (current_user.role or "").lower()
     # P0-1: 学生/家长仅可查看绑定学生本人的咨询记录，防止同校 IDOR 越权
     requester_student_id = current_user.bound_student_id if role in {"student", "parent"} else None
@@ -705,8 +717,9 @@ async def api_student_consult_history(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR, UserRole.GRADE_LEADER)),
 ):
-    """某学生的全部咨询历史 — 班主任/心理老师/管理员可查"""
+    """某学生的全部咨询历史"""
     role = (current_user.role or "").lower()
     if role not in {"ms_admin", "counselor", "grade_leader", "class_teacher"}:
         raise HTTPException(
@@ -755,7 +768,8 @@ async def api_student_consult_history(
 async def api_counselor_stats(
     counselor_id: int = Query(None, description="为空则查当前用户"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_counselor),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.COUNSELOR)),
 ):
     """心理老师工作台统计概览"""
     target_id = counselor_id or current_user.id
