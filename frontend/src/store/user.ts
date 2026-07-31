@@ -1,49 +1,52 @@
 import { defineStore } from 'pinia'
 import type { UserInfo, UserRole } from '@/types'
+import { parseUserRole, ROLE_LABELS } from '@/types'
 
 /**
- * User Store — JWT Token + RBAC Role Management
+ * User Store — JWT Token + RBAC Role Management (W3-FE-RBAC-A)
  *
  * Token is stored in LocalStorage via pinia-plugin-persistedstate.
  * school_id is NEVER manually passed in request params — it is encoded in the JWT.
+ *
+ * Role parsing: raw role from backend is validated via parseUserRole().
+ * Unknown roles → isRoleValid=false, role=null — fail closed, no auto-downgrade.
  */
 
 interface UserState {
   token: string
   userInfo: UserInfo | null
+  /** Raw role string from backend (before parsing), for audit logging */
+  rawRole: string
+  /** Whether the current role passed validation — false = fail-closed */
+  isRoleValid: boolean
 }
 
 export const useUserStore = defineStore('user', {
   state: (): UserState => ({
     token: '',
     userInfo: null,
+    rawRole: '',
+    isRoleValid: false,
   }),
 
   getters: {
     isLoggedIn: (state): boolean => !!state.token,
     currentRole(): UserRole | null {
-      // setUserInfo() 已归一化为大写 UserRole，直接取值即可
+      if (!this.isRoleValid) return null
       return this.userInfo?.role ?? null
     },
     currentRoleLabel(): string {
-      const roleMap: Record<UserRole, string> = {
-        MS_ADMIN: '德育处管理员',
-        GRADE_LEADER: '年级组长',
-        CLASS_TEACHER: '班主任',
-        PARENT: '家长',
-        STUDENT: '学生',
-      }
-      // 🔪 Fix: 用 currentRole (已大写) 替代 userInfo.role (可能小写)
-      return this.currentRole ? roleMap[this.currentRole] : '未登录'
+      if (!this.isRoleValid || !this.userInfo?.role) return '角色未配置'
+      return ROLE_LABELS[this.userInfo.role] ?? '未知角色'
     },
     schoolId(): number | null {
       return this.userInfo?.school_id ?? null
     },
-    /** 🎯 千人千面: 当前学段 */
+    /** 千人千面: 当前学段 */
     currentPhase(): string {
       return this.userInfo?.school_phase ?? 'junior'
     },
-    /** 🎯 千人千面: 插件配置 */
+    /** 千人千面: 插件配置 */
     pluginConfig(): Record<string, any> | null {
       return this.userInfo?.plugin_config ?? null
     },
@@ -62,19 +65,30 @@ export const useUserStore = defineStore('user', {
      *   role: "ms_admin" (前端用 "MS_ADMIN" 大写 UserRole)
      *   class_name/grade_name 可能缺失
      *
-     * 此方法在边界层做翻译，下游代码始终拿到规范化的 UserInfo。
+     * W3-FE-RBAC-A: 角色解析使用 parseUserRole()，未知角色安全拒绝。
+     * 不使用 `as UserRole` 断言，不自动降级。
      */
     setUserInfo(raw: Record<string, any>) {
+      const rawRoleStr = raw.role ?? ''
+      this.rawRole = rawRoleStr
+
+      const roleResult = parseUserRole(rawRoleStr)
+      this.isRoleValid = roleResult.ok
+
+      if (!roleResult.ok) {
+        // Unknown role — fail closed, log security warning
+        console.warn(
+          `[UserStore] Unknown role "${rawRoleStr}" rejected — session invalid, fail-closed.`
+        )
+      }
+
       this.userInfo = {
         id: raw.id ?? 0,
         username: raw.username ?? '',
-        // 🔪 Fix: 后端 display_name → 前端 real_name
         real_name: raw.real_name || raw.display_name || '',
-        // 🔪 Fix: 后端 "ms_admin" → 前端 "MS_ADMIN"
-        role: (typeof raw.role === 'string' ? raw.role.toUpperCase() : raw.role) as UserRole,
+        role: roleResult.ok ? roleResult.role : null,
         school_id: raw.school_id ?? 0,
         school_name: raw.school_name || '',
-        // 🎯 千人千面: 学段 + 插件配置
         school_phase: raw.school_phase || 'junior',
         plugin_config: raw.plugin_config ?? null,
         class_id: raw.class_id ?? null,
@@ -88,12 +102,14 @@ export const useUserStore = defineStore('user', {
     clearAuth() {
       this.token = ''
       this.userInfo = null
+      this.rawRole = ''
+      this.isRoleValid = false
     },
   },
 
   persist: {
     key: 'wings3_user',
     storage: localStorage,
-    paths: ['token', 'userInfo'],
+    paths: ['token', 'userInfo', 'rawRole', 'isRoleValid'],
   },
 })

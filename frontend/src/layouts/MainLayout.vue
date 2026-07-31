@@ -1,5 +1,5 @@
 <template>
-  <!-- 🔪 Fix #3: 启动会话验证 — 防止过期token闪烁旧侧边栏 -->
+  <!-- 启动会话验证 — 防止过期token闪烁旧侧边栏 -->
   <div v-if="isSessionLoading" class="session-loading">
     <el-skeleton :rows="8" animated />
   </div>
@@ -37,14 +37,14 @@
 
           <el-menu-item
             v-for="item in group.items"
-            :key="item.index"
-            :index="item.index"
+            :key="item.menuCode"
+            :index="routePathMap[item.routeName] ?? '/' + item.menuCode"
           >
             <el-icon><component :is="item.icon" /></el-icon>
             <template #title>
               <span class="menu-title-text">{{ item.title }}</span>
               <el-badge
-                v-if="item.index === '/approval-center' && pendingCount > 0"
+                v-if="item.routeName === 'ApprovalCenter' && pendingCount > 0"
                 :value="pendingCount"
                 :max="99"
                 class="approval-badge"
@@ -54,14 +54,14 @@
         </el-sub-menu>
       </el-menu>
 
-      <!-- Empty state for PARENT (no accessible menu items) -->
+      <!-- Empty state for roles with no menu items -->
       <div v-else class="empty-menu">
         <el-icon class="empty-icon"><WarningFilled /></el-icon>
         <p v-if="!isCollapsed" class="empty-text">
           当前角色（{{ userStore.currentRoleLabel }}）暂无可访问的功能模块
         </p>
-        <p v-if="!isCollapsed" class="empty-hint">
-          家长请使用微信小程序或<a href="/" class="empty-link">家长门户</a>
+        <p v-if="!isCollapsed && userStore.currentRole === 'PARENT'" class="empty-hint">
+          家长请使用微信小程序或<a href="/parent" class="empty-link">家长门户</a>
         </p>
       </div>
     </el-aside>
@@ -98,6 +98,7 @@
               <el-avatar :size="32" class="user-avatar">
                 {{ userStore.userInfo?.real_name?.charAt(0) || 'U' }}
               </el-avatar>
+
               <div class="user-detail">
                 <span class="user-name">{{ userStore.userInfo?.real_name || '未登录' }}</span>
                 <el-tag size="small" :type="roleTagType" class="role-tag">
@@ -138,7 +139,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { useUserStore } from '@/store/user'
@@ -146,7 +147,7 @@ import { useTenantStore } from '@/store/tenant'
 import { getPendingCount } from '@/api/approval'
 import { getCurrentUser } from '@/api/auth'
 import NotificationBell from '@/views/notifications/NotificationBell.vue'
-import type { UserRole } from '@/types'
+import { getMenuItemsForRole, MENU_GROUPS } from '@/rbac/access-policy'
 
 const route = useRoute()
 const router = useRouter()
@@ -156,42 +157,26 @@ const tenantStore = useTenantStore()
 const isCollapsed = ref(false)
 const pendingCount = ref(0)
 
-// 🔪 Fix #3: 启动会话验证状态 — 防止过期token闪烁旧侧边栏
+// 🔪 Fix #3: 启动会话验证状态
 const isSessionLoading = ref(true)
 
 const activeMenu = computed(() => route.path)
 
+// ── 9角色标签颜色 ──
 const roleTagType = computed(() => {
   switch (userStore.currentRole) {
-    case 'MS_ADMIN':
-      return 'danger'
-    case 'GRADE_LEADER':
-      return 'warning'
-    case 'CLASS_TEACHER':
-      return 'success'
-    case 'PARENT':
-      return 'info'
-    default:
-      return 'info'
+    case 'MS_ADMIN':       return 'danger'
+    case 'GROUP_ADMIN':    return 'primary'
+    case 'BRANCH_ADMIN':   return 'primary'
+    case 'GRADE_LEADER':   return 'warning'
+    case 'CLASS_TEACHER':  return 'success'
+    case 'TEACHER':        return 'success'
+    case 'COUNSELOR':      return 'warning'
+    case 'PARENT':         return 'info'
+    case 'STUDENT':        return 'info'
+    default:               return 'info'
   }
 })
-
-interface MenuItem {
-  index: string
-  title: string
-  icon: string
-  roles: UserRole[]
-  /** 🎯 千人千面: 该菜单项对哪些学段可见，缺省=全学段 */
-  phases?: string[]
-  /** 🎯 千人千面: 依赖的插件开关名，对应 plugin_config 的 key */
-  plugin?: string
-}
-
-interface MenuGroup {
-  title: string
-  icon: string
-  items: MenuItem[]
-}
 
 // ── 学段标签映射 ──
 const phaseLabels: Record<string, string> = {
@@ -201,7 +186,6 @@ const phaseLabels: Record<string, string> = {
   integrated: '完中',
 }
 
-// ── 学段标签颜色 ──
 const phaseTagTypes: Record<string, string> = {
   primary: 'success',
   junior: 'warning',
@@ -210,387 +194,31 @@ const phaseTagTypes: Record<string, string> = {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 菜单分组定义 — 五域分类（Phase A 重组）
-// 与 router/index.ts 的 meta.roles 保持 1:1 对齐
-// 分组策略：公共底座 → 德育管理 → 教导管理 → 教研工具 → 心理关怀 → 家长门户
-// 教师角色看到前5组，家长只看到"家长门户"
+// 菜单生成 — RBAC-B: 从 access-policy.ts 统一生成
+// 不再使用内联 allMenuGroups，角色+学段+插件三重过滤
 // ─────────────────────────────────────────────────────────────
-const allMenuGroups: MenuGroup[] = [
-  // ── 1. 公共底座：跨业务域的基础设施 ──
-  {
-    title: '公共底座',
-    icon: 'Platform',
-    items: [
-      {
-        index: '/dashboard',
-        title: '指挥舱看板',
-        icon: 'DataLine',
-        roles: ['MS_ADMIN', 'GRADE_LEADER'],
-      },
-      {
-        index: '/notifications',
-        title: '通知中心',
-        icon: 'Bell',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/growth',
-        title: '成长档案',
-        icon: 'TrendCharts',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/grades/profile',
-        title: '全息档案',
-        icon: 'UserFilled',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      // 数据铁三角: 学籍 + 班级管理
-      {
-        index: '/student-registry',
-        title: '学籍管理',
-        icon: 'User',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/class-mgmt',
-        title: '班级管理',
-        icon: 'Grid',
-        roles: ['MS_ADMIN', 'GRADE_LEADER'],
-      },
-      {
-        index: '/teacher-mgmt',
-        title: '教师管理',
-        icon: 'Avatar',
-        roles: ['MS_ADMIN', 'GRADE_LEADER'],
-      },
-    ],
-  },
-  // ── 2. 德育管理中心：违纪→处分→评价→风险→处方闭环 ──
-  {
-    title: '德育管理中心',
-    icon: 'Shield',
-    items: [
-      {
-        index: '/rdi-radar',
-        title: 'RDI 风险雷达',
-        icon: 'Monitor',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-        phases: ['junior', 'senior', 'integrated'],
-        plugin: 'enable_rdi',
-      },
-      {
-        index: '/rdi-dashboard',
-        title: 'RDI 风险看板',
-        icon: 'Odometer',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-        phases: ['junior', 'senior', 'integrated'],
-        plugin: 'enable_rdi',
-      },
-      {
-        index: '/approval-center',
-        title: '审批工作台',
-        icon: 'Checked',
-        roles: ['MS_ADMIN', 'GRADE_LEADER'],
-      },
-      {
-        index: '/behavior',
-        title: '德育与处分中心',
-        icon: 'Warning',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/discipline',
-        title: '惩戒流转中心',
-        icon: 'Stamp',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/ai-prescription',
-        title: 'AI 德育处方',
-        icon: 'MagicStick',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-        phases: ['junior', 'senior', 'integrated'],
-      },
-      {
-        index: '/evaluation',
-        title: '素质评价',
-        icon: 'TrendCharts',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/evaluation/positive-entry',
-        title: '正向加分',
-        icon: 'Plus',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/evaluation/positive-ranking',
-        title: '正能量排行榜',
-        icon: 'Histogram',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/reports',
-        title: '报告工作台',
-        icon: 'Document',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/attendance',
-        title: '考勤管理',
-        icon: 'Calendar',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/attendance/class-history',
-        title: '考勤历史大盘',
-        icon: 'TrendCharts',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/red-flag',
-        title: '流动红旗',
-        icon: 'Flag',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      // 🎯 千人千面: 小学萌卡系统入口
-      {
-        index: '/card-system',
-        title: '萌卡系统',
-        icon: 'Box',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-        phases: ['primary'],
-        plugin: 'enable_card',
-      },
-    ],
-  },
-  // ── 3. 教导管理中心：成绩→分析→报告闭环 ──
-  {
-    title: '教导管理中心',
-    icon: 'School',
-    items: [
-      {
-        index: '/grades/dashboard',
-        title: '成绩看板',
-        icon: 'DataLine',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-        phases: ['junior', 'senior', 'integrated'],
-      },
-      {
-        index: '/grades/radar',
-        title: '成绩雷达',
-        icon: 'Aim',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-        phases: ['junior', 'senior', 'integrated'],
-      },
-      {
-        index: '/grades/prescriptions',
-        title: 'AI 处方中心',
-        icon: 'MagicStick',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-        phases: ['junior', 'senior', 'integrated'],
-      },
-      // 🎯 千人千面: 高中高考学情大盘入口
-      {
-        index: '/gaokao-dashboard',
-        title: '高考学情大盘',
-        icon: 'TrophyBase',
-        roles: ['MS_ADMIN', 'GRADE_LEADER'],
-        phases: ['senior', 'integrated'],
-      },
-      {
-        index: '/data-adapter',
-        title: '数据并网',
-        icon: 'Connection',
-        roles: ['MS_ADMIN', 'GRADE_LEADER'],
-        phases: ['junior', 'senior', 'integrated'],
-      },
-      {
-        index: '/timetable',
-        title: '课程表管理',
-        icon: 'Calendar',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/habit-cards',
-        title: '萌卡荣誉生态',
-        icon: 'Medal',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-        phases: ['primary', 'integrated'],
-      },
-      {
-        index: '/homework',
-        title: '作业管理',
-        icon: 'EditPen',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-        phases: ['junior', 'senior', 'integrated'],
-      },
-      {
-        index: '/error-funnel',
-        title: '错题断层',
-        icon: 'Filter',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-        phases: ['junior', 'senior', 'integrated'],
-      },
-    ],
-  },
-  // ── 4. 教研工具：学科教学辅助 ──
-  {
-    title: '教研工具',
-    icon: 'Tools',
-    items: [
-      {
-        index: '/research',
-        title: '教研协同',
-        icon: 'Coordinate',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/teach-math/coach',
-        title: '审题助手',
-        icon: 'Reading',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/teach-math/report',
-        title: '审题诊断',
-        icon: 'DataAnalysis',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-    ],
-  },
-  // ── 5. 心理关怀：筛查→干预→画像→危机闭环 ──
-  {
-    title: '心理关怀',
-    icon: 'Sunrise',
-    items: [
-      {
-        index: '/psych-screening',
-        title: '心理筛查',
-        icon: 'Sunny',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/psych-screening/intervention',
-        title: '干预管理',
-        icon: 'FirstAidKit',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/psych-screening/portrait',
-        title: '画像与交叉分析',
-        icon: 'PieChart',
-        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
-      },
-      {
-        index: '/counselor-console',
-        title: '心理咨询工作台',
-        icon: 'ChatDotRound',
-        roles: ['MS_ADMIN', 'GRADE_LEADER'],
-      },
-      {
-        index: '/nexus-board',
-        title: '双轨预警决策看板',
-        icon: 'DataLine',
-        roles: ['MS_ADMIN', 'GRADE_LEADER'],
-      },
-    ],
-  },
-  // ── 6. 家长门户：家长专属只读视图 ──
-  {
-    title: '家长门户',
-    icon: 'HomeFilled',
-    items: [
-      {
-        index: '/parent',
-        title: '家长首页',
-        icon: 'HomeFilled',
-        roles: ['PARENT'],
-      },
-      {
-        index: '/parent/feedback',
-        title: '家校反馈',
-        icon: 'ChatLineSquare',
-        roles: ['PARENT'],
-      },
-      {
-        index: '/parent/appeal',
-        title: '在线申诉',
-        icon: 'WarningFilled',
-        roles: ['PARENT'],
-      },
-      {
-        index: '/notifications',
-        title: '通知中心',
-        icon: 'Bell',
-        roles: ['PARENT'],
-      },
-      {
-        index: '/growth',
-        title: '成长时间轴',
-        icon: 'TrendCharts',
-        roles: ['PARENT'],
-      },
-      {
-        index: '/evaluation/positive-view',
-        title: '我的正能量',
-        icon: 'Trophy',
-        roles: ['PARENT'],
-      },
-      {
-        index: '/evaluation/positive-ranking',
-        title: '正能量排行榜',
-        icon: 'Histogram',
-        roles: ['PARENT'],
-      },
-      {
-        index: '/parent/appointment',
-        title: '心理咨询预约',
-        icon: 'Clock',
-        roles: ['PARENT'],
-      },
-    ],
-  },
-]
-
-// ─────────────────────────────────────────────────────────────
-// 🎯 千人千面: 按角色 + 学段 + 插件配置 三重过滤菜单
-//
-// 1. 角色过滤: MS_ADMIN/GRADE_LEADER/CLASS_TEACHER/PARENT
-// 2. 学段过滤: primary/junior/senior/integrated
-//    - MS_ADMIN 超管跳过学段过滤（可看到所有学段的入口）
-// 3. 插件过滤: plugin_config 中对应 key 必须为 true
-// ─────────────────────────────────────────────────────────────
-const visibleGroups = computed<MenuGroup[]>(() => {
+const visibleGroups = computed(() => {
   const role = userStore.currentRole
   if (!role) return []
-  const currentPhase = userStore.currentPhase
-  const pluginConfig = userStore.pluginConfig
-  const isSuperAdmin = role === 'MS_ADMIN'
+  return getMenuItemsForRole(
+    role,
+    userStore.currentPhase,
+    userStore.pluginConfig,
+    role === 'MS_ADMIN',
+  )
+})
 
-  return allMenuGroups
-    .map((g) => ({
-      ...g,
-      items: g.items.filter((item) => {
-        // 1. 角色过滤
-        if (!item.roles.includes(role)) return false
-
-        // 2. 学段过滤（超管跳过）
-        if (!isSuperAdmin && item.phases && !item.phases.includes(currentPhase)) {
-          return false
-        }
-
-        // 3. 插件开关过滤
-        if (item.plugin) {
-          const enabled = pluginConfig?.[item.plugin] === true
-          if (!enabled) return false
-        }
-
-        return true
-      }),
-    }))
-    .filter((g) => g.items.length > 0)
+// ── routeName → path 映射（用于 el-menu-item 的 index）──
+// 从路由配置自动生成，避免硬编码
+const routePathMap = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {}
+  const routes = router.getRoutes()
+  for (const r of routes) {
+    if (r.name && typeof r.name === 'string') {
+      map[r.name] = r.path
+    }
+  }
+  return map
 })
 
 function toggleSidebar() {
@@ -633,22 +261,16 @@ function handleCommand(command: string) {
 
 /**
  * 🔪 Fix #3: 启动会话验证 — 刷新页面时调用 /auth/me 刷新 userInfo
- *
- * 解决 localStorage 有过期token → 侧边栏短暂闪烁旧数据 → 401踢出 的UX问题
- * 流程: 骨架屏 → /auth/me → 成功(刷新userInfo+渲染) / 失败(401拦截器自动跳login)
  */
 async function validateSession() {
   if (!userStore.isLoggedIn) {
-    // 无token → 路由守卫已拦截到/login，不会渲染MainLayout
     isSessionLoading.value = false
     return
   }
 
   try {
     const freshUserInfo = await getCurrentUser()
-    // setUserInfo 归一化: display_name→real_name, role→大写UserRole, school_phase→plugin_config
     userStore.setUserInfo(freshUserInfo)
-    // 同步租户信息（含学段）
     if (freshUserInfo.school_id && freshUserInfo.school_name) {
       tenantStore.setSchool(
         freshUserInfo.school_id,
@@ -657,7 +279,7 @@ async function validateSession() {
       )
     }
   } catch {
-    // 401拦截器已自动 clearAuth + 硬跳转login；此处不重复处理
+    // 401拦截器已自动 clearAuth + 硬跳转login
   } finally {
     isSessionLoading.value = false
   }
@@ -665,7 +287,6 @@ async function validateSession() {
 
 onMounted(() => {
   validateSession()
-  // Poll pending approval count every 60s
   fetchPendingCount()
   setInterval(fetchPendingCount, 60000)
 })
@@ -732,14 +353,14 @@ onMounted(() => {
   font-weight: 600;
 }
 
-/* hover：浅白底 + 白字 */
+/* hover */
 .sidebar-menu :deep(.el-menu-item:hover),
 .sidebar-menu :deep(.el-sub-menu__title:hover) {
   background: rgba(255, 255, 255, 0.1) !important;
   color: #fff !important;
 }
 
-/* 激活态：主色填充 + 白字 + 左侧白条 */
+/* 激活态 */
 .sidebar-menu :deep(.el-menu-item) {
   position: relative;
 }
@@ -769,7 +390,7 @@ onMounted(() => {
   margin-left: 8px;
 }
 
-/* 空状态 — PARENT 角色无可用菜单 */
+/* 空状态 */
 .empty-menu {
   padding: 40px 16px;
   text-align: center;
@@ -907,7 +528,7 @@ onMounted(() => {
   height: calc(100vh - 60px);
 }
 
-/* 🔪 Fix #3: 启动会话验证骨架屏 — 防止旧数据闪烁 */
+/* 启动会话验证骨架屏 */
 .session-loading {
   height: 100vh;
   display: flex;
