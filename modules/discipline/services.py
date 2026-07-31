@@ -11,20 +11,23 @@ modules/discipline/services.py — 处分业务逻辑层
 """
 
 import logging
-from datetime import datetime, date, timedelta, timezone
-from typing import Optional, List, Tuple
-
-from sqlalchemy import select, func, and_, or_
-from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import date, timedelta
 
 from core.event_bus import EventBus
+from core.models import Class, Student, UserRole, get_local_now
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from .models import (
-    DisciplineSanction, DisciplineLevel, DisciplineStatus,
-    LEVEL_LABELS, LEVEL_PENALTY_MAP, VETO_LEVELS, AUTO_ESCALATION_MAP,
+    AUTO_ESCALATION_MAP,
+    LEVEL_LABELS,
+    LEVEL_PENALTY_MAP,
+    VETO_LEVELS,
+    DisciplineLevel,
+    DisciplineSanction,
+    DisciplineStatus,
 )
-from core.models import User, UserRole, Student, Class, Grade, get_local_now
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +43,7 @@ STATUS_LABELS = {
 }
 
 
-def _dt_str(val) -> Optional[str]:
+def _dt_str(val) -> str | None:
     """时间 → ISO 字符串"""
     if val is None:
         return None
@@ -77,7 +80,7 @@ class DisciplineService:
         try:
             level_enum = DisciplineLevel(level)
         except ValueError:
-            valid = [l.value for l in DisciplineLevel]
+            valid = [lv.value for lv in DisciplineLevel]
             raise ValueError(f"无效的处分等级: {level}，有效值: {valid}")
 
         sanction = DisciplineSanction(
@@ -115,15 +118,18 @@ class DisciplineService:
             "EXPULSION": "serious",
         }
         bus = EventBus()
-        bus.publish("behavior.disciplined", {
-            "school_id": school_id,
-            "student_id": student.id,
-            "class_id": student.class_id,
-            "category": level_enum.value,
-            "level": _LEVEL_TO_BEHAVIOR.get(level_enum.value, "minor"),
-            "deduction": data.get("deduction", 0),
-            "title": f"处分[{LEVEL_LABELS.get(level_enum, level_enum.value)}]: {data['reason'][:60]}",
-        })
+        bus.publish(
+            "behavior.disciplined",
+            {
+                "school_id": school_id,
+                "student_id": student.id,
+                "class_id": student.class_id,
+                "category": level_enum.value,
+                "level": _LEVEL_TO_BEHAVIOR.get(level_enum.value, "minor"),
+                "deduction": data.get("deduction", 0),
+                "title": f"处分[{LEVEL_LABELS.get(level_enum, level_enum.value)}]: {data['reason'][:60]}",
+            },
+        )
         logger.info(
             f"[discipline] CEP published: student={student.id} "
             f"level={level_enum.value} sanction={sanction.id}"
@@ -134,23 +140,23 @@ class DisciplineService:
         return sanction
 
     @staticmethod
-    async def get_sanction(db: AsyncSession, sanction_id: int) -> Optional[DisciplineSanction]:
+    async def get_sanction(db: AsyncSession, sanction_id: int) -> DisciplineSanction | None:
         return await _query_by_id(db, sanction_id)
 
     @staticmethod
     async def list_sanctions(
         db: AsyncSession,
         school_id: int,
-        class_id: Optional[int] = None,
-        grade_id: Optional[int] = None,
-        student_id: Optional[int] = None,
-        level: Optional[str] = None,
-        status: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        class_id: int | None = None,
+        grade_id: int | None = None,
+        student_id: int | None = None,
+        level: str | None = None,
+        status: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> Tuple[List[DisciplineSanction], int]:
+    ) -> tuple[list[DisciplineSanction], int]:
         """分页查询处分列表"""
         conditions = [DisciplineSanction.school_id == school_id]
         if class_id:
@@ -199,7 +205,7 @@ class DisciplineService:
     @staticmethod
     async def update_sanction(
         db: AsyncSession, sanction_id: int, data: dict
-    ) -> Optional[DisciplineSanction]:
+    ) -> DisciplineSanction | None:
         """编辑处分 — PENDING 或 DRAFT_PENDING 状态可编辑"""
         sanction = await _query_by_id(db, sanction_id)
         if not sanction:
@@ -244,7 +250,7 @@ class DisciplineService:
         comment: str,
         reviewer_id: int,
         reviewer_role: str,
-    ) -> Optional[DisciplineSanction]:
+    ) -> DisciplineSanction | None:
         """
         行政审批 — 角色感知二级审批流
 
@@ -319,7 +325,7 @@ class DisciplineService:
         comment: str,
         reviewer_id: int,
         reviewer_role: str,
-    ) -> Optional[DisciplineSanction]:
+    ) -> DisciplineSanction | None:
         """
         行政审批驳回 — 任意阶段均可驳回
 
@@ -390,8 +396,8 @@ class DisciplineService:
         db: AsyncSession,
         sanction_id: int,
         revoke_reason: str,
-        revoke_date: Optional[date] = None,
-    ) -> Optional[DisciplineSanction]:
+        revoke_date: date | None = None,
+    ) -> DisciplineSanction | None:
         """
         撤销处分 — ACTIVE → REVOKED
 
@@ -433,9 +439,7 @@ class DisciplineService:
     # ═══════════════════════════════════════════════════════════
 
     @staticmethod
-    async def check_escalation(
-        db: AsyncSession, student_id: int
-    ) -> dict:
+    async def check_escalation(db: AsyncSession, student_id: int) -> dict:
         """
         评估学生是否需要从违纪升级为处分
 
@@ -461,20 +465,22 @@ class DisciplineService:
         behavior_count = int(row.behavior_count or 0)
 
         # 查询学生信息
-        student = await db.scalar(
-            select(Student).where(Student.id == student_id)
-        )
+        student = await db.scalar(select(Student).where(Student.id == student_id))
         student_name = student.name if student else None
 
         # 已有处分数
         existing_count = await db.scalar(
-            select(func.count()).select_from(DisciplineSanction).where(
+            select(func.count())
+            .select_from(DisciplineSanction)
+            .where(
                 DisciplineSanction.student_id == student_id,
-                DisciplineSanction.status.in_([
-                    DisciplineStatus.PENDING,
-                    DisciplineStatus.GRADE_LEADER_APPROVED,
-                    DisciplineStatus.ACTIVE,
-                ])
+                DisciplineSanction.status.in_(
+                    [
+                        DisciplineStatus.PENDING,
+                        DisciplineStatus.GRADE_LEADER_APPROVED,
+                        DisciplineStatus.ACTIVE,
+                    ]
+                ),
             )
         )
         existing_count = int(existing_count or 0)
@@ -517,7 +523,7 @@ class DisciplineService:
         db: AsyncSession,
         student_id: int,
         created_by: int,
-    ) -> Optional[DisciplineSanction]:
+    ) -> DisciplineSanction | None:
         """
         一键升级：违纪 → 处分草案
 
@@ -532,19 +538,21 @@ class DisciplineService:
                 f"existing_sanctions={assessment['existing_sanctions']}"
             )
 
-        student = await db.scalar(
-            select(Student).where(Student.id == student_id)
-        )
+        student = await db.scalar(select(Student).where(Student.id == student_id))
         if not student:
             raise ValueError(f"学生不存在: id={student_id}")
 
         # 找到扣分最多的那条违纪记录作为溯源
         from modules.behavior.models import DisciplineRecord as BehaviorRecord
+
         top_behavior = await db.scalar(
-            select(BehaviorRecord).where(
+            select(BehaviorRecord)
+            .where(
                 BehaviorRecord.student_id == student_id,
                 BehaviorRecord.status == "active",
-            ).order_by(BehaviorRecord.points.desc()).limit(1)
+            )
+            .order_by(BehaviorRecord.points.desc())
+            .limit(1)
         )
 
         sanction = DisciplineSanction(
@@ -579,23 +587,28 @@ class DisciplineService:
     # ═══════════════════════════════════════════════════════════
 
     # 滑窗参数
-    ESCALATION_WINDOW_DAYS = 30       # 滑窗: 过去30天
+    ESCALATION_WINDOW_DAYS = 30  # 滑窗: 过去30天
     ESCALATION_SERIOUS_THRESHOLD = 3  # 阈值: ≥3次严重违纪
 
     @staticmethod
     async def detect_escalation_trigger(
         db: AsyncSession,
         student_id: int,
+        school_id: int,
     ) -> dict:
         """
         30天滑窗规则判定器
 
         SQL 直查 behavior_records 表中:
-          type == "serious" AND incident_date >= 30天前 AND status == "active"
+          school_id == school_id AND type == "serious"
+          AND incident_date >= 30天前 AND status == "active"
+
+        W3-BE-RBAC-002 修复 R2-b: school_id 为必填参数，服务层强制租户过滤，
+        杜绝跨租户 student_id 直读外校违纪明细。
 
         若 ≥3 次严重违纪，返回触发信号 + 铁证快照。
         幂等守卫: 检查是否已存在相同原因 DRAFT_PENDING/PENDING/ACTIVE 处分。
-        
+
         Returns:
           {
             "triggered": bool,
@@ -620,13 +633,16 @@ class DisciplineService:
                 BehaviorRecord.description,
                 BehaviorRecord.points,
                 BehaviorRecord.category,
-            ).where(
+            )
+            .where(
+                BehaviorRecord.school_id == school_id,
                 BehaviorRecord.student_id == student_id,
                 BehaviorRecord.type == "serious",
                 BehaviorRecord.status == "active",
                 BehaviorRecord.incident_date >= window_start,
                 BehaviorRecord.incident_date <= window_end,
-            ).order_by(BehaviorRecord.incident_date.desc())
+            )
+            .order_by(BehaviorRecord.incident_date.desc())
         )
         evidence_rows = serious_records.all()
         serious_count = len(evidence_rows)
@@ -634,13 +650,15 @@ class DisciplineService:
         # 构建铁证快照（取最近 3 次）
         evidence = []
         for row in evidence_rows[:3]:
-            evidence.append({
-                "behavior_id": int(row[0]),
-                "incident_date": row[1].isoformat() if row[1] else None,
-                "description": row[2],
-                "points": int(row[3] or 0),
-                "category": row[4],
-            })
+            evidence.append(
+                {
+                    "behavior_id": int(row[0]),
+                    "incident_date": row[1].isoformat() if row[1] else None,
+                    "description": row[2],
+                    "points": int(row[3] or 0),
+                    "category": row[4],
+                }
+            )
 
         triggered = serious_count >= DisciplineService.ESCALATION_SERIOUS_THRESHOLD
         blocked_reason = None
@@ -648,14 +666,19 @@ class DisciplineService:
         if triggered:
             # 幂等守卫: 检查是否已存在 DRAFT_PENDING/PENDING/ACTIVE 的"系统自动"处分
             existing = await db.scalar(
-                select(func.count()).select_from(DisciplineSanction).where(
+                select(func.count())
+                .select_from(DisciplineSanction)
+                .where(
+                    DisciplineSanction.school_id == school_id,
                     DisciplineSanction.student_id == student_id,
-                    DisciplineSanction.status.in_([
-                        DisciplineStatus.DRAFT_PENDING,
-                        DisciplineStatus.PENDING,
-                        DisciplineStatus.GRADE_LEADER_APPROVED,
-                        DisciplineStatus.ACTIVE,
-                    ]),
+                    DisciplineSanction.status.in_(
+                        [
+                            DisciplineStatus.DRAFT_PENDING,
+                            DisciplineStatus.PENDING,
+                            DisciplineStatus.GRADE_LEADER_APPROVED,
+                            DisciplineStatus.ACTIVE,
+                        ]
+                    ),
                     DisciplineSanction.auto_generated == True,  # noqa: E712
                 )
             )
@@ -693,7 +716,7 @@ class DisciplineService:
         student_id: int,
         evidence: list,
         db_session_for_commit: bool = True,
-    ) -> Optional[DisciplineSanction]:
+    ) -> DisciplineSanction | None:
         """
         生成处分草稿 → DRAFT_PENDING 状态
 
@@ -705,34 +728,34 @@ class DisciplineService:
             student_id: 学生 ID
             evidence: detect_escalation_trigger() 返回的 evidence 列表
             db_session_for_commit: 是否由本方法 commit（Hook 注入场景中为 False）
-        
+
         Returns:
             生成的草稿记录，或 None（幂等拦截）
         """
         # 查询学生信息
-        student = await db.scalar(
-            select(Student).where(Student.id == student_id)
-        )
+        student = await db.scalar(select(Student).where(Student.id == student_id))
         if not student:
             raise ValueError(f"学生不存在: id={student_id}")
 
         # 二次幂等检查
         existing = await db.scalar(
-            select(func.count()).select_from(DisciplineSanction).where(
+            select(func.count())
+            .select_from(DisciplineSanction)
+            .where(
                 DisciplineSanction.student_id == student_id,
                 DisciplineSanction.auto_generated == True,  # noqa: E712
-                DisciplineSanction.status.in_([
-                    DisciplineStatus.DRAFT_PENDING,
-                    DisciplineStatus.PENDING,
-                    DisciplineStatus.GRADE_LEADER_APPROVED,
-                    DisciplineStatus.ACTIVE,
-                ]),
+                DisciplineSanction.status.in_(
+                    [
+                        DisciplineStatus.DRAFT_PENDING,
+                        DisciplineStatus.PENDING,
+                        DisciplineStatus.GRADE_LEADER_APPROVED,
+                        DisciplineStatus.ACTIVE,
+                    ]
+                ),
             )
         )
         if existing and existing > 0:
-            logger.info(
-                f"⏭️ 草稿已存在(幂等跳过): student_id={student_id}"
-            )
+            logger.info(f"⏭️ 草稿已存在(幂等跳过): student_id={student_id}")
             return None
 
         # 处分等级: 3次严重违纪 → 警告
@@ -781,12 +804,12 @@ class DisciplineService:
     async def list_drafts(
         db: AsyncSession,
         school_id: int,
-        class_id: Optional[int] = None,
-        grade_id: Optional[int] = None,
-        student_id: Optional[int] = None,
+        class_id: int | None = None,
+        grade_id: int | None = None,
+        student_id: int | None = None,
         limit: int = 20,
         offset: int = 0,
-    ) -> Tuple[List[DisciplineSanction], int]:
+    ) -> tuple[list[DisciplineSanction], int]:
         """
         查询处分草稿列表 — DRAFT_PENDING 状态
 
@@ -830,9 +853,9 @@ class DisciplineService:
     async def submit_draft(
         db: AsyncSession,
         draft_id: int,
-        confirm_reason: Optional[str] = None,
-        submitter_id: Optional[int] = None,
-    ) -> Optional[DisciplineSanction]:
+        confirm_reason: str | None = None,
+        submitter_id: int | None = None,
+    ) -> DisciplineSanction | None:
         """
         班主任一键提交草稿: DRAFT_PENDING → PENDING
 
@@ -894,44 +917,53 @@ class DisciplineService:
     async def get_stats(
         db: AsyncSession,
         school_id: int,
-        grade_id: Optional[int] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        grade_id: int | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        class_id: int | None = None,
     ) -> dict:
-        """处分统计概览"""
+        """
+        处分统计概览
+
+        W3-BE-RBAC-002 补充修复: 新增可选 class_id 维度，供 CLASS_TEACHER
+        强制绑定本班范围使用，避免班主任读取全校聚合计数。
+        """
         conditions = [DisciplineSanction.school_id == school_id]
         if grade_id:
             conditions.append(DisciplineSanction.grade_id == grade_id)
+        if class_id:
+            conditions.append(DisciplineSanction.class_id == class_id)
         if start_date:
             conditions.append(DisciplineSanction.punish_date >= start_date)
         if end_date:
             conditions.append(DisciplineSanction.punish_date <= end_date)
 
-        total = int(await db.scalar(
-            select(func.count()).select_from(DisciplineSanction).where(*conditions)
-        ) or 0)
+        total = int(
+            await db.scalar(select(func.count()).select_from(DisciplineSanction).where(*conditions))
+            or 0
+        )
 
         # 按等级分组
         level_rows = await db.execute(
             select(
                 DisciplineSanction.level,
                 func.count(DisciplineSanction.id),
-            ).where(*conditions).group_by(DisciplineSanction.level)
+            )
+            .where(*conditions)
+            .group_by(DisciplineSanction.level)
         )
-        by_level = {
-            row[0].value: row[1] for row in level_rows.all()
-        }
+        by_level = {row[0].value: row[1] for row in level_rows.all()}
 
         # 按状态分组
         status_rows = await db.execute(
             select(
                 DisciplineSanction.status,
                 func.count(DisciplineSanction.id),
-            ).where(*conditions).group_by(DisciplineSanction.status)
+            )
+            .where(*conditions)
+            .group_by(DisciplineSanction.status)
         )
-        by_status = {
-            row[0].value: row[1] for row in status_rows.all()
-        }
+        by_status = {row[0].value: row[1] for row in status_rows.all()}
 
         # 按班级分组
         class_rows = await db.execute(
@@ -939,7 +971,8 @@ class DisciplineService:
                 DisciplineSanction.class_id,
                 Class.name,
                 func.count(DisciplineSanction.id),
-            ).join(Class, DisciplineSanction.class_id == Class.id)
+            )
+            .join(Class, DisciplineSanction.class_id == Class.id)
             .where(*conditions)
             .group_by(DisciplineSanction.class_id, Class.name)
         )
@@ -949,19 +982,26 @@ class DisciplineService:
         active_conds = list(conditions) + [
             DisciplineSanction.status == DisciplineStatus.ACTIVE,
         ]
-        active_count = int(await db.scalar(
-            select(func.count()).select_from(DisciplineSanction).where(*active_conds)
-        ) or 0)
+        active_count = int(
+            await db.scalar(
+                select(func.count()).select_from(DisciplineSanction).where(*active_conds)
+            )
+            or 0
+        )
 
         # 一票否决学生数 (PROBATION 且 ACTIVE)
         veto_conds = list(conditions) + [
             DisciplineSanction.status == DisciplineStatus.ACTIVE,
             DisciplineSanction.level.in_(list(VETO_LEVELS)),
         ]
-        veto_count = int(await db.scalar(
-            select(func.count(func.distinct(DisciplineSanction.student_id)))
-            .select_from(DisciplineSanction).where(*veto_conds)
-        ) or 0)
+        veto_count = int(
+            await db.scalar(
+                select(func.count(func.distinct(DisciplineSanction.student_id)))
+                .select_from(DisciplineSanction)
+                .where(*veto_conds)
+            )
+            or 0
+        )
 
         return {
             "total": total,
@@ -994,7 +1034,7 @@ class DisciplineService:
           {"appeal": SanctionAppeal, "created": bool}
           created=False 表示幂等返回已存在记录
         """
-        from .models import SanctionAppeal, AppealStatus, APPEAL_STATUS_LABELS
+        from .models import AppealStatus, SanctionAppeal
 
         idem_key = data["idempotency_key"]
         sanction_id = data["sanction_id"]
@@ -1014,9 +1054,7 @@ class DisciplineService:
         if not sanction:
             raise ValueError(f"处分记录不存在: id={sanction_id}")
         if sanction.status != DisciplineStatus.ACTIVE:
-            raise ValueError(
-                f"仅生效中的处分可申诉，当前状态: {sanction.status.value}"
-            )
+            raise ValueError(f"仅生效中的处分可申诉，当前状态: {sanction.status.value}")
 
         # ── 唯一性守卫: 同一处分不可有多个 PENDING 申诉 ──
         pending_appeal = await db.scalar(
@@ -1044,9 +1082,7 @@ class DisciplineService:
         await db.flush()
 
         # 🔔 通知德育处管理员
-        await DisciplineService._notify_on_appeal_event(
-            db, appeal, sanction, "created"
-        )
+        await DisciplineService._notify_on_appeal_event(db, appeal, sanction, "created")
         await db.commit()
         await db.refresh(appeal)
 
@@ -1062,7 +1098,7 @@ class DisciplineService:
         appeal_id: int,
         action: str,
         reviewer_id: int,
-        comment: Optional[str] = None,
+        comment: str | None = None,
     ) -> dict:
         """
         德育处复核申诉 → 原子状态机
@@ -1081,20 +1117,16 @@ class DisciplineService:
         Returns:
           {"appeal": SanctionAppeal, "sanction": DisciplineSanction|None}
         """
-        from .models import SanctionAppeal, AppealStatus, APPEAL_STATUS_LABELS
+        from .models import AppealStatus, SanctionAppeal
 
         if action not in ("ACCEPTED", "REJECTED"):
             raise ValueError(f"无效复核动作: {action}，有效值: ACCEPTED / REJECTED")
 
-        appeal = await db.scalar(
-            select(SanctionAppeal).where(SanctionAppeal.id == appeal_id)
-        )
+        appeal = await db.scalar(select(SanctionAppeal).where(SanctionAppeal.id == appeal_id))
         if not appeal:
             raise ValueError(f"申诉记录不存在: id={appeal_id}")
         if appeal.status != AppealStatus.PENDING:
-            raise ValueError(
-                f"仅「待复核」的申诉可操作，当前状态: {appeal.status.value}"
-            )
+            raise ValueError(f"仅「待复核」的申诉可操作，当前状态: {appeal.status.value}")
 
         now = get_local_now()
 
@@ -1113,8 +1145,7 @@ class DisciplineService:
             sanction = await _query_by_id(db, appeal.sanction_id)
             if sanction and sanction.status == DisciplineStatus.ACTIVE:
                 revoke_reason = (
-                    f"家长申诉通过 — {appeal.reason[:80]}"
-                    f"{'...' if len(appeal.reason) > 80 else ''}"
+                    f"家长申诉通过 — {appeal.reason[:80]}{'...' if len(appeal.reason) > 80 else ''}"
                 )
                 sanction.status = DisciplineStatus.REVOKED
                 sanction.revoke_reason = revoke_reason
@@ -1136,9 +1167,7 @@ class DisciplineService:
             # ── 申诉驳回 ──
             event_type = "rejected"
             sanction = await _query_by_id(db, appeal.sanction_id)  # 加载处分记录用于通知
-            logger.info(
-                f"❌ 申诉驳回: appeal_id={appeal.id} sanction_id={appeal.sanction_id}"
-            )
+            logger.info(f"❌ 申诉驳回: appeal_id={appeal.id} sanction_id={appeal.sanction_id}")
 
         # 🔔 通知
         if sanction:
@@ -1155,13 +1184,13 @@ class DisciplineService:
     async def list_appeals(
         db: AsyncSession,
         school_id: int,
-        sanction_id: Optional[int] = None,
-        status: Optional[str] = None,
+        sanction_id: int | None = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> Tuple[list, int]:
+    ) -> tuple[list, int]:
         """分页查询申诉列表"""
-        from .models import SanctionAppeal, AppealStatus
+        from .models import AppealStatus, SanctionAppeal
 
         conditions = [SanctionAppeal.school_id == school_id]
         if sanction_id:
@@ -1172,9 +1201,7 @@ class DisciplineService:
             except ValueError:
                 pass
 
-        cnt = await db.scalar(
-            select(func.count()).select_from(SanctionAppeal).where(*conditions)
-        )
+        cnt = await db.scalar(select(func.count()).select_from(SanctionAppeal).where(*conditions))
         total = int(cnt or 0)
 
         stmt = (
@@ -1213,10 +1240,10 @@ class DisciplineService:
     @staticmethod
     async def _notify_on_appeal_event(
         db: AsyncSession,
-        appeal,         # SanctionAppeal
-        sanction,       # DisciplineSanction
+        appeal,  # SanctionAppeal
+        sanction,  # DisciplineSanction
         event: str,
-        reviewer_id: Optional[int] = None,
+        reviewer_id: int | None = None,
     ):
         """
         申诉事件通知 Hook
@@ -1229,9 +1256,7 @@ class DisciplineService:
         from modules.notifications.services import NotificationService
 
         # 获取学生姓名
-        student_result = await db.execute(
-            select(Student).where(Student.id == sanction.student_id)
-        )
+        student_result = await db.execute(select(Student).where(Student.id == sanction.student_id))
         student = student_result.scalar_one_or_none()
         student_name = student.name if student else f"学生#{sanction.student_id}"
 
@@ -1280,17 +1305,26 @@ class DisciplineService:
         try:
             if event == "created":
                 await NotificationService.notify_by_role(
-                    db, school_id, notify_role,
-                    type=notify_type, title=title, body=body,
+                    db,
+                    school_id,
+                    notify_role,
+                    type=notify_type,
+                    title=title,
+                    body=body,
                     sender_id=reviewer_id,
-                    entity_type="sanction_appeal", entity_id=entity_id,
+                    entity_type="sanction_appeal",
+                    entity_id=entity_id,
                 )
             if event in ("accepted", "rejected") and notify_users:
                 await NotificationService.notify_users(
-                    db, notify_users,
-                    type=notify_type, title=title, body=body,
+                    db,
+                    notify_users,
+                    type=notify_type,
+                    title=title,
+                    body=body,
                     sender_id=reviewer_id,
-                    entity_type="sanction_appeal", entity_id=entity_id,
+                    entity_type="sanction_appeal",
+                    entity_id=entity_id,
                     school_id=school_id,
                 )
         except Exception as e:
@@ -1334,13 +1368,17 @@ class DisciplineService:
         """
         # 统计学生单学期现有处分数（PENDING + GL_APPROVED + ACTIVE）
         existing_count = await db.scalar(
-            select(func.count()).select_from(DisciplineSanction).where(
+            select(func.count())
+            .select_from(DisciplineSanction)
+            .where(
                 DisciplineSanction.student_id == student.id,
-                DisciplineSanction.status.in_([
-                    DisciplineStatus.PENDING,
-                    DisciplineStatus.GRADE_LEADER_APPROVED,
-                    DisciplineStatus.ACTIVE,
-                ]),
+                DisciplineSanction.status.in_(
+                    [
+                        DisciplineStatus.PENDING,
+                        DisciplineStatus.GRADE_LEADER_APPROVED,
+                        DisciplineStatus.ACTIVE,
+                    ]
+                ),
             )
         )
         existing_count = int(existing_count or 0)
@@ -1349,14 +1387,18 @@ class DisciplineService:
             if existing_count >= threshold:
                 # 幂等检查
                 has_upgrade = await db.scalar(
-                    select(func.count()).select_from(DisciplineSanction).where(
+                    select(func.count())
+                    .select_from(DisciplineSanction)
+                    .where(
                         DisciplineSanction.student_id == student.id,
                         DisciplineSanction.level == upgrade_level,
-                        DisciplineSanction.status.in_([
-                            DisciplineStatus.PENDING,
-                            DisciplineStatus.GRADE_LEADER_APPROVED,
-                            DisciplineStatus.ACTIVE,
-                        ]),
+                        DisciplineSanction.status.in_(
+                            [
+                                DisciplineStatus.PENDING,
+                                DisciplineStatus.GRADE_LEADER_APPROVED,
+                                DisciplineStatus.ACTIVE,
+                            ]
+                        ),
                     )
                 )
                 if has_upgrade and has_upgrade > 0:
@@ -1389,8 +1431,8 @@ class DisciplineService:
         db: AsyncSession,
         sanction: DisciplineSanction,
         event: str,
-        sender_id: Optional[int] = None,
-        extra: Optional[str] = None,
+        sender_id: int | None = None,
+        extra: str | None = None,
     ):
         """
         通知引擎 Hook — 处分状态变更时向相关用户推送通知
@@ -1406,9 +1448,7 @@ class DisciplineService:
         from modules.notifications.services import NotificationService
 
         # 获取学生姓名
-        student_result = await db.execute(
-            select(Student).where(Student.id == sanction.student_id)
-        )
+        student_result = await db.execute(select(Student).where(Student.id == sanction.student_id))
         student = student_result.scalar_one_or_none()
         student_name = student.name if student else f"学生#{sanction.student_id}"
 
@@ -1489,17 +1529,26 @@ class DisciplineService:
         try:
             if notify_role:
                 await NotificationService.notify_by_role(
-                    db, school_id, notify_role,
-                    type=notify_type, title=title, body=body,
+                    db,
+                    school_id,
+                    notify_role,
+                    type=notify_type,
+                    title=title,
+                    body=body,
                     sender_id=sender,
-                    entity_type="discipline_sanction", entity_id=entity_id,
+                    entity_type="discipline_sanction",
+                    entity_id=entity_id,
                 )
             if notify_users:
                 await NotificationService.notify_users(
-                    db, notify_users,
-                    type=notify_type, title=title, body=body,
+                    db,
+                    notify_users,
+                    type=notify_type,
+                    title=title,
+                    body=body,
                     sender_id=sender,
-                    entity_type="discipline_sanction", entity_id=entity_id,
+                    entity_type="discipline_sanction",
+                    entity_id=entity_id,
                     school_id=school_id,
                 )
         except Exception as e:
@@ -1537,9 +1586,10 @@ class DisciplineService:
 
         # ═══ PolicyEngine Hook-3: 处分生效→回血追踪初始化 ═══
         try:
-            from modules.policy_engine import get_engine
-            from modules.evaluation.models import RecoveryState
             from datetime import timedelta
+
+            from modules.evaluation.models import RecoveryState
+            from modules.policy_engine import get_engine
 
             # 处分等级 → PolicyEngine severity 名称（与 policy.yaml per_severity 对齐）
             _LEVEL_SEVERITY_MAP = {
@@ -1555,8 +1605,8 @@ class DisciplineService:
                 "warning": 7,
                 "serious_warning": 14,
                 "demerit": 30,
-                "probation": 0,     # 不可回血，无观察期
-                "expulsion": 0,     # 不可回血，无观察期
+                "probation": 0,  # 不可回血，无观察期
+                "expulsion": 0,  # 不可回血，无观察期
             }
 
             # 处分等级 → policy_tag（与 policy.yaml tag_on_apply 对齐）
@@ -1649,9 +1699,7 @@ class DisciplineService:
             if recovery:
                 recovery.recovered_amount = recovery.original_penalty
                 recovery.remaining_penalty = 0.0
-                recovery.recovery_ratio = (
-                    1.0 if recovery.original_penalty > 0 else 0.0
-                )
+                recovery.recovery_ratio = 1.0 if recovery.original_penalty > 0 else 0.0
                 recovery.policy_tag = "recovered"
                 recovery.is_active = False
                 recovery.last_computed_at = get_local_now()
@@ -1708,7 +1756,9 @@ class DisciplineService:
             return
 
         others = await db.scalar(
-            select(func.count()).select_from(DisciplineSanction).where(
+            select(func.count())
+            .select_from(DisciplineSanction)
+            .where(
                 DisciplineSanction.student_id == sanction.student_id,
                 DisciplineSanction.id != sanction.id,
                 DisciplineSanction.status == DisciplineStatus.ACTIVE,
@@ -1726,7 +1776,8 @@ class DisciplineService:
 # 模块内辅助
 # ═══════════════════════════════════════════════════════════════
 
-async def _query_by_id(db: AsyncSession, sanction_id: int) -> Optional[DisciplineSanction]:
+
+async def _query_by_id(db: AsyncSession, sanction_id: int) -> DisciplineSanction | None:
     result = await db.execute(
         select(DisciplineSanction)
         .options(
