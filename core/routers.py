@@ -20,6 +20,9 @@ from .schemas import (
 )
 from .models import User, UserRole
 from .tenant_context import TenantContext, build_tenant_context
+from .redis_client import get_redis
+from datetime import datetime, timezone
+from sqlalchemy import text
 
 router = APIRouter(prefix="/api/v1", tags=["core"])
 security = HTTPBearer(auto_error=False)  # 非强制 → 允许 Cookie 降级
@@ -263,9 +266,59 @@ async def get_tenant_context(
 # 健康检查
 # ═══════════════════════════════════════════════════════════════
 
-@router.get("/health", response_model=MessageResponse)
-async def health_check():
-    return MessageResponse(message="ok", detail="Wings 3.0 Core Online")
+@router.get("/health")
+async def health_check(db: AsyncSession = Depends(get_db)):
+    """
+    健康检查 — 分别暴露 数据库 / Redis / Celery 组件状态。
+
+    始终返回 200（便于存活探针与部署冒烟），组件异常体现在 components 明细中：
+      - components.database.ok
+      - components.redis.ok
+      - components.celery.{ok, worker_count, broker}
+    """
+    components: dict[str, Any] = {}
+
+    # 1) 数据库（SELECT 1 探活）
+    try:
+        await db.execute(text("SELECT 1"))
+        components["database"] = {"ok": True, "detail": "reachable"}
+    except Exception as e:
+        components["database"] = {"ok": False, "detail": f"unreachable: {e}"}
+
+    # 2) Redis（事件总线）
+    try:
+        redis = get_redis()
+        if redis is None:
+            components["redis"] = {"ok": False, "detail": "client not initialized (degraded)"}
+        else:
+            await redis.ping()
+            components["redis"] = {"ok": True, "detail": "reachable"}
+    except Exception as e:
+        components["redis"] = {"ok": False, "detail": f"unreachable: {e}"}
+
+    # 3) Celery（broker + 在线 worker）
+    celery_info: dict[str, Any] = {"ok": False, "worker_count": 0, "broker": "unknown"}
+    try:
+        from modules.reports.celery_app import celery_engine
+
+        try:
+            insp = celery_engine.control.inspect(timeout=0.8)
+            ping = insp.ping() or {}
+            celery_info["worker_count"] = len(ping)
+            celery_info["broker"] = "reachable"
+            celery_info["ok"] = True
+        except Exception as e:
+            celery_info["broker"] = f"unreachable: {e}"
+    except Exception as e:
+        celery_info["detail"] = f"celery app unavailable: {e}"
+    components["celery"] = celery_info
+
+    overall_ok = components["database"].get("ok") and components["redis"].get("ok")
+    return {
+        "status": "ok" if overall_ok else "degraded",
+        "components": components,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
