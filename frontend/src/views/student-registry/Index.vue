@@ -77,7 +77,7 @@
         :data="students"
         border stripe
         v-loading="loading"
-        @row-click="goDetail"
+        @row-click="(row: any) => goDetail(row)"
         style="cursor: pointer"
       >
         <el-table-column type="index" width="50" label="#" />
@@ -94,14 +94,14 @@
               :type="statusTagType(row.registry_status)"
               size="small"
             >
-              {{ REGISTRY_STATUS_LABELS[row.registry_status] || row.registry_status || '在读' }}
+              {{ REGISTRY_STATUS_LABELS[row.registry_status as keyof typeof REGISTRY_STATUS_LABELS] || row.registry_status || '在读' }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="数据来源" width="90">
           <template #default="{ row }">
             <el-tag :type="syncTagType(row.sync_status)" size="small" effect="plain">
-              {{ SYNC_STATUS_LABELS[row.sync_status] || '原生' }}
+              {{ SYNC_STATUS_LABELS[row.sync_status as keyof typeof SYNC_STATUS_LABELS] || '原生' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -240,13 +240,13 @@ const createClassOptions = computed(() => {
 })
 
 // ── 标签 ──
-function statusTagType(status?: string) {
-  const m: Record<string, string> = { active: 'success', suspended: 'warning', transferred: 'info', graduated: '', inactive: 'danger' }
+function statusTagType(status?: string): 'success' | 'warning' | 'info' | 'danger' | undefined {
+  const m: Record<string, 'success' | 'warning' | 'info' | 'danger' | undefined> = { active: 'success', suspended: 'warning', transferred: 'info', graduated: undefined, inactive: 'danger' }
   return m[status || 'active'] || 'info'
 }
-function syncTagType(status?: string) {
-  const m: Record<string, string> = { native: 'success', legacy: 'warning', imported: 'info' }
-  return m[status || 'native'] || ''
+function syncTagType(status?: string): 'success' | 'warning' | 'info' | undefined {
+  const m: Record<string, 'success' | 'warning' | 'info' | undefined> = { native: 'success', legacy: 'warning', imported: 'info' }
+  return m[status || 'native'] || undefined
 }
 
 // ── 搜索 ──
@@ -291,7 +291,7 @@ async function loadList() {
 }
 
 // ── 导航 ──
-function goDetail(row: StudentDetail) {
+function goDetail(row: any) {
   router.push({ path: '/student-registry/detail', query: { id: String(row.id) } })
 }
 
@@ -321,7 +321,7 @@ async function doCreate() {
 }
 
 // ── 快速休学 ──
-async function quickSuspend(row: StudentDetail) {
+async function quickSuspend(row: any) {
   try {
     const { value: reason } = await ElMessageBox.prompt('休学原因', '确认休学', { inputType: 'textarea' })
     await suspendStudent(row.id, { change_type: 'suspend', reason: reason || '' })

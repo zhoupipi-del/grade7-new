@@ -354,7 +354,7 @@ async function fetchInstances() {
     const startDate = weekDays.value[0].dateStr
     const endDate = weekDays.value[6].dateStr
     const res = await getTimetableInstances(selectedClassId.value, startDate, endDate)
-    let data = res.data.instances || []
+    let data = res.instances || []
     if (showAdjustedOnly.value) {
       data = data.filter((i) => i.is_adjusted)
     }
@@ -373,8 +373,8 @@ async function fetchLookupData() {
       listCourses(),
       listTeachers({ page_size: 300 }),
     ])
-    courseList.value = cRes.data
-    teacherList.value = tRes.data.teachers
+    courseList.value = cRes
+    teacherList.value = tRes.teachers
   } catch (err) {
     // 降级: 无lookup数据也能显示ID
   }
@@ -437,9 +437,9 @@ async function doAdjust() {
   adjusting.value = true
   try {
     const res = await adjustTimetableInstance(target.id, adjustForm.value)
-    if (res.data.status === 'success') {
+    if (res.status === 'success') {
       // 变轨成功 — 拉响通知
-      const d = res.data.data
+      const d = res.data
       const oldSubj = getSubjectName(d.old_subject_id)
       const newSubj = getSubjectName(d.new_subject_id)
       const oldTeach = getTeacherName(d.old_teacher_id)
@@ -465,7 +465,7 @@ async function doAdjust() {
 
       adjustDialogVisible.value = false
     } else {
-      ElMessage.error(`变轨失败: ${res.data.msg || '未知错误'}`)
+      ElMessage.error(`变轨失败: ${res.msg || '未知错误'}`)
     }
   } catch (err: any) {
     const detail = err?.response?.data?.detail || err?.message || '未知错误'

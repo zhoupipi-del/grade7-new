@@ -130,7 +130,7 @@
                 v-model="detailClass.is_active"
                 active-text="在读"
                 inactive-text="停用"
-                @change="toggleActive"
+                @change="(val: string | number | boolean) => toggleActive(!!val)"
               />
             </el-descriptions-item>
             <el-descriptions-item label="班级口号" :span="2">{{ detailClass.class_slogan || '-' }}</el-descriptions-item>
@@ -150,13 +150,13 @@
             <el-table-column label="状态" width="80">
               <template #default="{ row }">
                 <el-tag :type="row.registry_status === 'active' ? 'success' : 'warning'" size="small">
-                  {{ REGISTRY_STATUS_LABELS[row.registry_status] || row.registry_status }}
+                  {{ REGISTRY_STATUS_LABELS[row.registry_status as keyof typeof REGISTRY_STATUS_LABELS] || row.registry_status }}
                 </el-tag>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="90" fixed="right">
               <template #default="{ row }">
-                <el-button type="danger" link size="small" @click="removeStudent(row)">移出</el-button>
+                <el-button type="danger" link size="small" @click="removeStudent(row as any)">移出</el-button>
               </template>
             </el-table-column>
           </el-table>

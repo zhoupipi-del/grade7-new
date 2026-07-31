@@ -138,11 +138,11 @@
                 <span class="date-text">{{ date }}</span>
               </div>
               <div v-for="evt in group" :key="evt.event_id" class="timeline-event" :class="'severity-' + evt.severity">
-                <div class="event-node" :style="{ background: eventTypeColor(evt.event_type) }"></div>
+                <div class="event-node" :style="{ background: eventTypeColor(evt.event_type as GrowthEventType) }"></div>
                 <div class="event-card">
                   <div class="event-header">
-                    <span class="event-type-tag" :style="{ background: eventTypeColor(evt.event_type), color: '#fff' }">
-                      {{ eventTypeLabel(evt.event_type) }}
+                    <span class="event-type-tag" :style="{ background: eventTypeColor(evt.event_type as GrowthEventType), color: '#fff' }">
+                      {{ eventTypeLabel(evt.event_type as GrowthEventType) }}
                     </span>
                     <span class="event-time">{{ formatTime(evt.occurred_at) }}</span>
                   </div>

@@ -40,7 +40,7 @@
                 <el-descriptions-item label="年级">{{ student.grade_name || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="状态">
                   <el-tag :type="statusTagType(student.registry_status)" size="small">
-                    {{ REGISTRY_STATUS_LABELS[student.registry_status] || student.registry_status || '在读' }}
+                    {{ REGISTRY_STATUS_LABELS[student.registry_status as keyof typeof REGISTRY_STATUS_LABELS] || student.registry_status || '在读' }}
                   </el-tag>
                 </el-descriptions-item>
                 <el-descriptions-item label="出生日期">{{ student.birth_date || '-' }}</el-descriptions-item>
@@ -125,7 +125,7 @@
             <!-- 当前状态 -->
             <div class="current-status" v-if="student.registry_status !== 'active'">
               <el-alert
-                :title="`当前状态: ${REGISTRY_STATUS_LABELS[student.registry_status] || student.registry_status}`"
+                :title="`当前状态: ${REGISTRY_STATUS_LABELS[student.registry_status as keyof typeof REGISTRY_STATUS_LABELS] || student.registry_status}`"
                 :type="student.registry_status === 'suspended' ? 'warning' : 'info'"
                 show-icon
                 :closable="false"
@@ -265,22 +265,22 @@ const statusFormPlaceholder = computed(() => {
   const m: Record<string, string> = { suspend: '请输入休学原因...', resume: '请输入复学原因...', transfer: '请输入转学原因...', graduate: '请输入毕业备注...' }
   return m[statusType.value] || ''
 })
-const statusConfirmBtnType = computed(() => {
-  const m: Record<string, string> = { suspend: 'warning', resume: 'success', transfer: 'primary', graduate: 'info' }
+const statusConfirmBtnType = computed<'' | 'default' | 'primary' | 'success' | 'warning' | 'info' | 'danger' | 'text' | undefined>(() => {
+  const m: Record<string, '' | 'default' | 'primary' | 'success' | 'warning' | 'info' | 'danger' | 'text' | undefined> = { suspend: 'warning', resume: 'success', transfer: 'primary', graduate: 'info' }
   return m[statusType.value] || 'primary'
 })
 
 // ── 标签 ──
-function statusTagType(status?: string) {
-  const m: Record<string, string> = { active: 'success', suspended: 'warning', transferred: 'info', graduated: '', inactive: 'danger' }
+function statusTagType(status?: string): 'success' | 'warning' | 'info' | 'danger' | undefined {
+  const m: Record<string, 'success' | 'warning' | 'info' | 'danger' | undefined> = { active: 'success', suspended: 'warning', transferred: 'info', graduated: undefined, inactive: 'danger' }
   return m[status || 'active'] || 'info'
 }
-function historyColor(type: string) {
+function historyColor(type: string): string {
   const m: Record<string, string> = { transfer: '#409eff', suspend: '#e6a23c', resume: '#67c23a', graduate: '#909399', inactive: '#f56c6c' }
   return m[type] || '#909399'
 }
-function historyTagType(type: string) {
-  const m: Record<string, string> = { transfer: '', suspend: 'warning', resume: 'success', graduate: 'info', inactive: 'danger' }
+function historyTagType(type: string): 'success' | 'warning' | 'info' | 'danger' | undefined {
+  const m: Record<string, 'success' | 'warning' | 'info' | 'danger' | undefined> = { transfer: undefined, suspend: 'warning', resume: 'success', graduate: 'info', inactive: 'danger' }
   return m[type] || 'info'
 }
 function changeTypeLabel(type: string) {

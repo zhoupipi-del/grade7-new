@@ -62,7 +62,7 @@ onMounted(async () => {
   loading.value = true
   try {
     const res = await getClassWeeklySchedule(classId, semester)
-    schedule.value = res.data
+    schedule.value = res
   } finally { loading.value = false }
 })
 </script>
