@@ -50,7 +50,7 @@
             <el-table-column prop="classroom_name" label="教室" width="120" />
             <el-table-column label="周模式" width="80">
               <template #default="{ row }">
-                <el-tag :type="row.week_pattern === 'every' ? '' : 'warning'" size="small">
+                <el-tag :type="row.week_pattern === 'every' ? undefined : 'warning'" size="small">
                   {{ weekPatternLabel(row.week_pattern) }}
                 </el-tag>
               </template>
@@ -192,7 +192,7 @@ async function fetchSlots() {
       teacher_user_id: filterTeacherId.value || undefined,
       semester: filterSemester.value || undefined,
     })
-    slots.value = res.data
+    slots.value = res
   } finally { loading.value = false }
 }
 
@@ -200,7 +200,7 @@ async function previewConflict() {
   checking.value = true
   try {
     const res = await checkConflict({ ...slotForm.value as any, class_id: slotForm.value.class_id!, course_id: slotForm.value.course_id!, teacher_user_id: slotForm.value.teacher_user_id! })
-    conflicts.value = res.data.conflicts
+    conflicts.value = res.conflicts
   } finally { checking.value = false }
 }
 
@@ -208,8 +208,8 @@ async function doCreateSlot(autoResolve: boolean) {
   creating.value = true
   try {
     const res = await createSlot(slotForm.value as any, autoResolve)
-    if (res.data.created === false) {
-      conflicts.value = res.data.conflicts?.conflicts || []
+    if (res.created === false) {
+      conflicts.value = res.conflicts?.conflicts || []
       return
     }
     showSlotDialog.value = false
@@ -238,14 +238,14 @@ onMounted(async () => {
   const [cRes, coRes, tRes] = await Promise.all([
     listClassrooms(), listCourses(), listTeachers({ page_size: 200 })
   ])
-  classrooms.value = cRes.data
-  courses.value = coRes.data
-  teachers.value = tRes.data.teachers
+  classrooms.value = cRes
+  courses.value = coRes
+  teachers.value = tRes.teachers
   // 获取班级列表 - 使用已有 API
   try {
     const { listClasses } = await import('@/api/classMgmt')
     const clsRes = await listClasses()
-    classes.value = clsRes.data.classes || clsRes.data || []
+    classes.value = clsRes.classes || clsRes || []
   } catch { /* fallback */ }
   fetchSlots()
 })

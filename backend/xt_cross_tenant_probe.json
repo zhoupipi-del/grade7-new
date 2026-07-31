@@ -1,0 +1,82 @@
+[
+  {
+    "role_account": "student",
+    "path": "/discipline/escalation-trigger/4",
+    "target_student_school_id": 2,
+    "caller_school_id": 1,
+    "status": 200,
+    "triggered": true,
+    "serious_count": 3,
+    "evidence_count": 3,
+    "evidence_desc_sample": [
+      "AUDIT_TEST_XT_外校敏感违纪明细_1",
+      "AUDIT_TEST_XT_外校敏感违纪明细_2",
+      "AUDIT_TEST_XT_外校敏感违纪明细_3"
+    ],
+    "verdict": "CROSS_TENANT_LEAK"
+  },
+  {
+    "role_account": "parent",
+    "path": "/discipline/escalation-trigger/4",
+    "target_student_school_id": 2,
+    "caller_school_id": 1,
+    "status": 200,
+    "triggered": true,
+    "serious_count": 3,
+    "evidence_count": 3,
+    "evidence_desc_sample": [
+      "AUDIT_TEST_XT_外校敏感违纪明细_1",
+      "AUDIT_TEST_XT_外校敏感违纪明细_2",
+      "AUDIT_TEST_XT_外校敏感违纪明细_3"
+    ],
+    "verdict": "CROSS_TENANT_LEAK"
+  },
+  {
+    "role_account": "teacher",
+    "path": "/discipline/escalation-trigger/4",
+    "target_student_school_id": 2,
+    "caller_school_id": 1,
+    "status": 200,
+    "triggered": true,
+    "serious_count": 3,
+    "evidence_count": 3,
+    "evidence_desc_sample": [
+      "AUDIT_TEST_XT_外校敏感违纪明细_1",
+      "AUDIT_TEST_XT_外校敏感违纪明细_2",
+      "AUDIT_TEST_XT_外校敏感违纪明细_3"
+    ],
+    "verdict": "CROSS_TENANT_LEAK"
+  },
+  {
+    "role_account": "class_teacher",
+    "path": "/discipline/escalation-trigger/4",
+    "target_student_school_id": 2,
+    "caller_school_id": 1,
+    "status": 200,
+    "triggered": true,
+    "serious_count": 3,
+    "evidence_count": 3,
+    "evidence_desc_sample": [
+      "AUDIT_TEST_XT_外校敏感违纪明细_1",
+      "AUDIT_TEST_XT_外校敏感违纪明细_2",
+      "AUDIT_TEST_XT_外校敏感违纪明细_3"
+    ],
+    "verdict": "CROSS_TENANT_LEAK"
+  },
+  {
+    "role_account": "grade_leader",
+    "path": "/discipline/escalation-trigger/4",
+    "target_student_school_id": 2,
+    "caller_school_id": 1,
+    "status": 200,
+    "triggered": true,
+    "serious_count": 3,
+    "evidence_count": 3,
+    "evidence_desc_sample": [
+      "AUDIT_TEST_XT_外校敏感违纪明细_1",
+      "AUDIT_TEST_XT_外校敏感违纪明细_2",
+      "AUDIT_TEST_XT_外校敏感违纪明细_3"
+    ],
+    "verdict": "CROSS_TENANT_LEAK"
+  }
+]

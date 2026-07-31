@@ -1,0 +1,7 @@
+{
+  "create_status": 201,
+  "drafts_total_before": 1,
+  "drafts_total_after": 2,
+  "hook_effect": "DRAFT_INCUBATED",
+  "verdict": "OK"
+}

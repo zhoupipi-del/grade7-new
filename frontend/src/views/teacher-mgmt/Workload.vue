@@ -103,7 +103,7 @@ async function fetchStats() {
   loading.value = true
   try {
     const res = await getWorkloadStats(userId)
-    stats.value = res.data
+    stats.value = res
   } finally {
     loading.value = false
   }

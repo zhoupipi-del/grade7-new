@@ -349,12 +349,12 @@
                     class="indicator-group"
                   >
                     <div class="group-header" :style="{ borderLeftColor: dimensionColor(group.dimension) }">
-                      <span>{{ group.dimension_label }}</span>
+                      <span>{{ group.dimension_name }}</span>
                       <el-tag size="small" effect="plain">
-                        {{ group.items.length }} 项
+                        {{ group.indicators.length }} 项
                       </el-tag>
                     </div>
-                    <div v-for="item in group.items" :key="item.id" class="indicator-item">
+                    <div v-for="item in group.indicators" :key="item.id" class="indicator-item">
                       <div class="item-info">
                         <span class="item-name" :class="{ disabled: !item.enabled }">
                           {{ item.name }}
@@ -995,7 +995,7 @@ const scoreSaving = ref(false)
 // 级联选择器选项
 const indicatorCascaderOptions = computed(() => {
   return indicatorGroups.value.map((g) => ({
-    name: g.dimension_label,
+    name: g.dimension_name,
     id: `dim_${g.dimension}`,
     children: g.items.flatMap((item) => [
       { name: item.name, id: item.id },

@@ -58,7 +58,7 @@
       <template v-if="detail.subjects_taught?.length">
         <el-tag
           v-for="s in detail.subjects_taught" :key="s.subject_code"
-          :type="s.is_primary ? '' : 'info'" size="small" style="margin-right:6px;margin-bottom:6px"
+          :type="s.is_primary ? undefined : 'info'" size="small" style="margin-right:6px;margin-bottom:6px"
         >
           {{ s.subject_name }}{{ s.grade_level ? ` (${s.grade_level})` : '' }}
         </el-tag>
@@ -161,7 +161,7 @@ async function fetchDetail() {
   loading.value = true
   try {
     const res = await getTeacherDetail(userId)
-    detail.value = res.data
+    detail.value = res
   } finally {
     loading.value = false
   }

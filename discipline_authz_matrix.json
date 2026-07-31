@@ -1,0 +1,245 @@
+{
+  "rows": [
+    {
+      "method": "POST",
+      "path": "/discipline/sanctions",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/discipline/sanctions",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/discipline/sanctions/999999",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/discipline/sanctions/999999",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/discipline/sanctions/999999",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/discipline/sanctions/999999/approve",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/discipline/sanctions/999999/reject",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/discipline/sanctions/999999/revoke",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/discipline/escalation/999999",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/discipline/escalation/999999",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/discipline/stats",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/discipline/drafts",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/discipline/drafts/999999",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/discipline/drafts/999999/submit",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/discipline/drafts/999999",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/discipline/escalation-trigger/999999",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/discipline/appeals",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/discipline/appeals/999999",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/discipline/appeals/999999/review",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/discipline/parent-portal/children/999999/discipline-records",
+      "lowpriv_results": {
+        "teacher": "403",
+        "counselor": "403",
+        "parent": "403",
+        "student": "403",
+        "group_admin": "403",
+        "branch_admin": "403"
+      }
+    }
+  ],
+  "penetrations": []
+}

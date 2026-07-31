@@ -103,8 +103,8 @@ async function fetchList() {
       is_active: filterActive.value ?? undefined,
       keyword: keyword.value || undefined,
     })
-    teachers.value = res.data.teachers
-    total.value = res.data.total
+    teachers.value = res.teachers
+    total.value = res.total
   } finally {
     loading.value = false
   }
