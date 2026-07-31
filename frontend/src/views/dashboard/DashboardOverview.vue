@@ -8,11 +8,34 @@
       </div>
       <div class="page-header-meta">
         <el-tag type="primary" effect="plain" round>数据周期：近 6 观测窗</el-tag>
+        <!-- W3-FE-MOCK-001: 数据来源标签 -->
+        <el-tag v-if="dataSource === 'realtime'" type="success" effect="plain" size="small">实时数据</el-tag>
+        <template v-else-if="dataSource === 'partial'">
+          <el-tag :type="sectionStatus.overview === 'success' ? 'success' : 'danger'" effect="plain" size="small">核心指标：{{ sectionStatus.overview === 'success' ? '实时' : '失败' }}</el-tag>
+          <el-tag :type="sectionStatus.alerts === 'success' ? 'success' : sectionStatus.alerts === 'failed' ? 'danger' : 'info'" effect="plain" size="small">风险流水：{{ sectionStatus.alerts === 'success' ? '实时' : sectionStatus.alerts === 'failed' ? '失败' : '暂无数据' }}</el-tag>
+          <el-tag type="info" effect="plain" size="small">雷达：暂不可用</el-tag>
+          <el-tag type="info" effect="plain" size="small">趋势：暂不可用</el-tag>
+        </template>
+        <el-tag v-else-if="dataSource === 'cache'" type="warning" effect="plain" size="small">⚠️ 缓存数据（后端不可达）</el-tag>
+        <el-tag v-else-if="dataSource === 'demo'" type="info" effect="plain" size="small">🎭 演示数据</el-tag>
+        <el-tag v-else-if="dataSource === 'failed'" type="danger" effect="dark" size="small">数据加载失败 · 请重试</el-tag>
       </div>
     </div>
 
     <!-- ═══ 顶层：四象 KPI 指挥指标卡 ═══ -->
-    <el-row :gutter="20" class="kpi-row">
+    <!-- W3-FE-MOCK-001: failed → 明确失败面板，绝不渲染KPI=0冒充空数据 -->
+    <el-row v-if="!hasUsableData" :gutter="20" class="kpi-row">
+      <el-col :span="24">
+        <el-card shadow="never" class="failed-state-card">
+          <el-result icon="warning" title="数据加载失败" sub-title="后端服务不可达且无可用缓存，请检查网络或稍后重试">
+            <template #extra>
+              <el-button type="primary" @click="refreshDashboardData">重新加载</el-button>
+            </template>
+          </el-result>
+        </el-card>
+      </el-col>
+    </el-row>
+    <el-row v-else :gutter="20" class="kpi-row">
       <el-col :span="6" v-for="metric in kpiMetrics" :key="metric.key">
         <el-card shadow="hover" class="kpi-card" :class="`kpi-${metric.tone}`">
           <div class="kpi-body">
@@ -53,6 +76,8 @@
             </div>
           </template>
           <div class="alert-stream">
+            <el-empty v-if="sectionStatus.alerts === 'failed'" description="风险流水加载失败 · 请稍后重试" :image-size="60" />
+            <template v-else>
             <div
               v-for="alert in alertStream"
               :key="alert.id"
@@ -76,6 +101,7 @@
                 </div>
               </div>
             </div>
+            </template>
           </div>
         </el-card>
       </el-col>
@@ -100,7 +126,10 @@
           </template>
           <div class="chart-relative-container">
             <div ref="radarChartRef" class="echart-dom radar-chart" :class="{ 'chart-dimmed': isOffline }"></div>
-            <div v-if="isOffline && !hasCache" class="chart-offline-overlay">
+            <div v-if="sectionStatus.radar === 'unavailable'" class="chart-offline-overlay">
+              <el-empty description="雷达对比暂不可用 · 后端端点待实现" :image-size="80" />
+            </div>
+            <div v-else-if="isOffline && !hasCache" class="chart-offline-overlay">
               <el-empty description="数据流链路断开，正在尝试重连..." :image-size="80" />
             </div>
           </div>
@@ -129,7 +158,10 @@
           </template>
           <div class="chart-relative-container">
             <div ref="trendChartRef" class="echart-dom trend-chart" :class="{ 'chart-dimmed': isOffline }"></div>
-            <div v-if="isOffline && !hasCache" class="chart-offline-overlay">
+            <div v-if="sectionStatus.trend === 'unavailable'" class="chart-offline-overlay">
+              <el-empty description="趋势图暂不可用 · 后端端点待实现" :image-size="80" />
+            </div>
+            <div v-else-if="isOffline && !hasCache" class="chart-offline-overlay">
               <el-empty description="数据流链路断开，正在尝试重连..." :image-size="80" />
             </div>
           </div>
@@ -170,10 +202,15 @@ import {
   fetchDashboardOverview,
   refreshAlertStream,
   campusColor,
+  clearDashboardCache,
   type KpiMetric,
   type AlertItem,
   type CampusRadarSeries,
   type CampusTrendSeries,
+  type DashboardResult,
+  type DashboardDataSource,
+  type SectionStatus,
+  DashboardError,
 } from '@/api/dashboard'
 import CorrelationScatter from './CorrelationScatter.vue'
 import RedFlagLeaderboard from './RedFlagLeaderboard.vue'
@@ -202,6 +239,20 @@ const kpiMetrics = ref<KpiMetric[]>([])
 const alertStream = ref<AlertItem[]>([])
 const radarSeries = ref<CampusRadarSeries[]>([])
 const trendSeries = ref<CampusTrendSeries[]>([])
+
+// ─── W3-FE-MOCK-001: 数据来源与新鲜度 ────────────────────────
+const dataSource = ref<DashboardDataSource>('realtime')
+const dataIsStale = ref(false)
+const dataLastSuccessAt = ref<string | null>(null)
+const dataErrorCode = ref<string | null>(null)
+const dataFetchFailed = ref(false)
+const hasUsableData = ref(true)
+const sectionStatus = ref<SectionStatus>({
+  overview: 'success',
+  alerts: 'success',
+  radar: 'unavailable',
+  trend: 'unavailable',
+})
 
 // ─── ECharts 实例与 DOM 引用 ────────────────────────────────────
 const radarChartRef = ref<HTMLDivElement | null>(null)
@@ -282,21 +333,35 @@ const handleNetworkChange = () => {
 // ─── 全量数据刷新 (首次加载 + 网络恢复时调用) ───────────────────
 const refreshDashboardData = async () => {
   try {
-    const data = await fetchDashboardOverview()
-    kpiMetrics.value = data.kpiMetrics
-    alertStream.value = data.alertStream
-    radarSeries.value = data.radarSeries
-    trendSeries.value = data.trendSeries
+    const result = await fetchDashboardOverview()
+    kpiMetrics.value = result.data.kpiMetrics
+    alertStream.value = result.data.alertStream
+    radarSeries.value = result.data.radarSeries
+    trendSeries.value = result.data.trendSeries
+
+    // W3-FE-MOCK-001: 记录数据来源与新鲜度
+    dataSource.value = result.source
+    dataIsStale.value = result.isStale
+    dataLastSuccessAt.value = result.lastSuccessAt
+    dataErrorCode.value = result.errorCode
+    dataFetchFailed.value = result.source === 'failed'
+    hasUsableData.value = result.hasUsableData
+    sectionStatus.value = result.sectionStatus
 
     // 成功获取后, 顺手做一层离线快照写入
-    saveChartCache()
-    isOffline.value = false
+    if (result.source === 'realtime' || result.source === 'partial') {
+      saveChartCache()
+      isOffline.value = false
+    }
 
     await nextTick()
     initRadarChart()
     initTrendChart()
   } catch (err) {
-    // 后端断开或超时, 启动前端降级兜底
+    // Unexpected error (network, parse, etc.)
+    dataFetchFailed.value = true
+    dataSource.value = 'failed'
+    hasUsableData.value = false
     console.error('[DashboardOverview] refreshDashboardData error:', err)
     isOffline.value = true
     tryLoadChartCache()
@@ -785,5 +850,14 @@ onBeforeUnmount(() => {
 
 .alert-stream::-webkit-scrollbar-thumb:hover {
   background: #c0c4cc;
+}
+
+/* ═══ 数据加载失败面板 ═══ */
+.failed-state-card {
+  border-radius: 8px;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>

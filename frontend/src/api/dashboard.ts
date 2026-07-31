@@ -11,9 +11,10 @@ import type { TagType } from './behavior'
  *   2. /api/v1/risk_models/*    — monitor panel (high-risk students), dashboard overview
  *   3. /api/v1/discipline/*     — sanction stats (closure rate, appeal counts)
  *
- * Strategy: Real-backend-first with demo-data fallback (same pattern as behavior.ts).
- *           If any single source fails, the adapter gracefully degrades to demo data
- *           so the dashboard never goes blank during backend outages.
+ * Strategy (W3-FE-MOCK-001): Explicit data-source tracking with no silent demo fallback.
+ *   Production: realtime | cache (is_stale=true) | throw (no demo ever).
+ *   Dev only: demo allowed when VITE_ALLOW_DEMO_FALLBACK=true.
+ *   Every result carries source/staleness metadata via DashboardResult<T>.
  */
 
 // ═════════════════════════════════════════════════════════════════
@@ -63,6 +64,59 @@ export interface DashboardOverviewData {
   alertStream: AlertItem[]
   radarSeries: CampusRadarSeries[]
   trendSeries: CampusTrendSeries[]
+}
+
+// ═════════════════════════════════════════════════════════════════
+// Data Source Tracking (W3-FE-MOCK-001)
+// ═════════════════════════════════════════════════════════════════
+
+/** Where the dashboard data actually came from */
+export type DashboardDataSource = 'realtime' | 'partial' | 'cache' | 'demo' | 'failed'
+
+/** Per-section health — lets the view layer mark individual widgets */
+export interface SectionStatus {
+  overview: 'success' | 'empty' | 'failed'
+  alerts: 'success' | 'empty' | 'failed'
+  radar: 'success' | 'unavailable'
+  trend: 'success' | 'unavailable'
+}
+
+/**
+ * Unified result wrapper — every dashboard API returns this shape
+ * so the view layer can render source-aware UI (stale badges, demo
+ * watermarks, error states) without guessing.
+ */
+export interface DashboardResult<T> {
+  data: T
+  source: DashboardDataSource
+  /** ISO timestamp of last successful backend fetch (null for demo/failed) */
+  lastSuccessAt: string | null
+  /** True when data is from a past-successful cache but backend is now unreachable */
+  isStale: boolean
+  /** Machine-readable error code when source is cache/failed */
+  errorCode: string | null
+  /** Per-section health for granular UI feedback */
+  sectionStatus: SectionStatus
+  /**
+   * Whether the data payload can be meaningfully rendered.
+   * realtime/partial/cache/demo → true  |  failed → false
+   * When false, view layer must NOT render KPI=0 or "暂无数据" — show failure panel instead.
+   */
+  hasUsableData: boolean
+}
+
+/**
+ * Standardised dashboard fetch error.
+ * Thrown when production has no backend data AND no cache to fall back to.
+ * View layer catches this to render the explicit failure state.
+ */
+export class DashboardError extends Error {
+  errorCode: string
+  constructor(errorCode: string, message?: string) {
+    super(message || `Dashboard fetch failed: ${errorCode}`)
+    this.name = 'DashboardError'
+    this.errorCode = errorCode
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -313,15 +367,155 @@ export async function refreshAlertStream(): Promise<AlertItem[] | null> {
 /**
  * Fetch the complete dashboard overview data.
  *
- * Aggregation strategy (parallel with graceful degradation):
+ * W3-FE-MOCK-001 — Explicit data-source tracking, no silent demo fallback.
+ *
+ * Aggregation strategy (parallel, source-aware):
  *   1. /risk_models/monitor-panel  → alertStream + KPI high_risk_count
  *   2. /risk_models/dashboard      → KPI avg_rdi + class ranking
  *   3. /discipline/stats           → KPI closure_rate + appeal counts
  *
- * If ALL three fail → fall back to demo data (dashboard never goes blank).
- * If SOME fail → merge whatever real data is available with demo gaps.
+ * Behaviour matrix:
+ *   Production + any source OK      → source='realtime', cache updated
+ *   Production + all fail + cache   → source='cache', isStale=true
+ *   Production + all fail + no cache→ throws DashboardError (never demo)
+ *   Dev + fallback on + all fail    → source='demo' (requires both
+ *                                     DEV=true AND VITE_ALLOW_DEMO_FALLBACK=true)
+ *   Dev + fallback off + all fail   → same as production
+ *
+ * Radar/Trend: real campus-aggregate endpoints do not exist yet.
+ * They are included as placeholder data; the source flag is determined
+ * solely by the three primary API sources above.
  */
-export async function fetchDashboardOverview(): Promise<DashboardOverviewData> {
+
+// ── Cache helpers (scope-aware, TTL, session-validated) ─────────
+const CACHE_VERSION = 'v1'
+const CACHE_TTL_MS = 30 * 60 * 1000  // 30 minutes
+
+/** Authorization scope type — determines cache isolation boundary */
+type ScopeType = 'school' | 'group' | 'branch'
+
+interface RoleScope {
+  scopeType: ScopeType
+  scopeId: number | string
+}
+
+/** Derive authorization scope from role + schoolId — cache key isolation boundary */
+function deriveScope(role: string | null, schoolId: number | null, userId: number | null): RoleScope {
+  if (role === 'GROUP_ADMIN') {
+    // TODO: Replace with group_id when backend provides it
+    return { scopeType: 'group', scopeId: schoolId ?? userId ?? 'na' }
+  }
+  if (role === 'BRANCH_ADMIN') {
+    // TODO: Replace with branch_id when backend provides it
+    return { scopeType: 'branch', scopeId: schoolId ?? userId ?? 'na' }
+  }
+  return { scopeType: 'school', scopeId: schoolId ?? userId ?? 'na' }
+}
+
+interface CachedDashboard {
+  data: DashboardOverviewData
+  timestamp: string
+  userId: number
+  role: string
+  /** Authorization scope type (school / group / branch) */
+  scopeType: ScopeType
+  /** Authorization scope ID — school_id, group_id, or branch_id */
+  scopeId: number | string
+  version: string
+}
+
+/** Build scope-scoped cache key — prevents cross-scope leaks */
+function buildCacheKey(userId: number | null, role: string | null, scope: RoleScope): string {
+  return `wings3_dashboard:${CACHE_VERSION}:${userId ?? 'anon'}:${role ?? 'none'}:${scope.scopeType}:${scope.scopeId}`
+}
+
+function getCachedDashboard(): CachedDashboard | null {
+  try {
+    // Lazy import to avoid circular dep at module init
+    const { useUserStore } = require('@/store/user') as typeof import('@/store/user')
+    const store = useUserStore()
+    const userId = store.userInfo?.id ?? null
+    const schoolId = store.schoolId ?? null
+    const role = store.currentRole ?? null
+
+    // Identity or scope not yet loaded → do NOT read fixed cache
+    if (userId === null) return null
+
+    const scope = deriveScope(role, schoolId, userId)
+    const key = buildCacheKey(userId, role, scope)
+    const raw = localStorage.getItem(key)
+    if (!raw) return null
+    const cached: CachedDashboard = JSON.parse(raw)
+
+    // Session consistency — reject if identity or scope changed
+    if (cached.userId !== userId || cached.role !== role) {
+      localStorage.removeItem(key)
+      return null
+    }
+    // Scope consistency — reject if scope type or ID doesn't match current session
+    if (cached.scopeType !== scope.scopeType || String(cached.scopeId) !== String(scope.scopeId)) {
+      localStorage.removeItem(key)
+      return null
+    }
+    // Version check
+    if (cached.version !== CACHE_VERSION) {
+      localStorage.removeItem(key)
+      return null
+    }
+    // TTL check
+    const age = Date.now() - new Date(cached.timestamp).getTime()
+    if (age > CACHE_TTL_MS) {
+      localStorage.removeItem(key)
+      return null
+    }
+    return cached
+  } catch { /* corrupted cache or store unavailable — treat as miss */ }
+  return null
+}
+
+function setCachedDashboard(data: DashboardOverviewData): void {
+  try {
+    const { useUserStore } = require('@/store/user') as typeof import('@/store/user')
+    const store = useUserStore()
+    const userId = store.userInfo?.id ?? null
+    const schoolId = store.schoolId ?? null
+    const role = store.currentRole ?? null
+
+    if (userId === null) return  // Don't cache without identity
+
+    const scope = deriveScope(role, schoolId, userId)
+    const key = buildCacheKey(userId, role, scope)
+    const cached: CachedDashboard = {
+      data,
+      timestamp: new Date().toISOString(),
+      userId,
+      role: role ?? 'none',
+      scopeType: scope.scopeType,
+      scopeId: scope.scopeId,
+      version: CACHE_VERSION,
+    }
+    localStorage.setItem(key, JSON.stringify(cached))
+  } catch { /* quota exceeded or store unavailable — non-critical */ }
+}
+
+/** Clear all dashboard caches (call on logout / school switch / role switch) */
+export function clearDashboardCache(): void {
+  try {
+    const keysToRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k?.startsWith('wings3_dashboard:')) keysToRemove.push(k)
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k))
+  } catch { /* ignore */ }
+}
+
+/** Dev-only demo gate: both DEV mode AND explicit opt-in required */
+function isDemoAllowed(): boolean {
+  return import.meta.env.DEV && import.meta.env.VITE_ALLOW_DEMO_FALLBACK === 'true'
+}
+
+export async function fetchDashboardOverview(): Promise<DashboardResult<DashboardOverviewData>> {
   const [monitorResult, dashboardResult, disciplineResult] = await Promise.allSettled([
     getMonitorPanel(),
     getRiskDashboard(),
@@ -333,26 +527,102 @@ export async function fetchDashboardOverview(): Promise<DashboardOverviewData> {
   const dashboardData = dashboardResult.status === 'fulfilled' ? dashboardResult.value : null
   const disciplineData = disciplineResult.status === 'fulfilled' ? disciplineResult.value : null
 
-  // If all three failed, use full demo data
-  if (!monitorData && !dashboardData && !disciplineData) {
-    return getDemoDashboardData()
+  const sourceOk = [monitorData, dashboardData, disciplineData]
+  const successCount = sourceOk.filter(Boolean).length
+
+  // ── Build per-section status ───────────────────────────────────
+  const sectionStatus: SectionStatus = {
+    overview: dashboardData ? 'success' : 'failed',
+    alerts: monitorData
+      ? (monitorData.students?.length ? 'success' : 'empty')
+      : 'failed',
+    // Real campus-aggregate endpoints do not exist yet — mark unavailable
+    radar: 'unavailable',
+    trend: 'unavailable',
   }
 
-  // Build KPI metrics from real data (with demo fallback for missing pieces)
-  const kpiMetrics = buildKpiMetrics(dashboardData, monitorData, disciplineData)
+  // ── At least one source succeeded → realtime or partial ────────
+  if (successCount > 0) {
+    const kpiMetrics = buildKpiMetrics(dashboardData, monitorData, disciplineData)
+    const alertStream = monitorData?.students?.length
+      ? buildAlertStream(monitorData)
+      : []   // API OK but no students → empty, NOT demo
+    // W3-FE-MOCK-001 fix: no demo data in production path
+    // Real radar/trend endpoints not implemented → empty arrays
+    const radarSeries: CampusRadarSeries[] = []
+    const trendSeries: CampusTrendSeries[] = []
+    const data: DashboardOverviewData = { kpiMetrics, alertStream, radarSeries, trendSeries }
+    setCachedDashboard(data)
 
-  // Build alert stream from monitor panel (with demo fallback)
-  const alertStream = monitorData?.students?.length
-    ? buildAlertStream(monitorData)
-    : getDemoAlertStream()
+    const source: DashboardDataSource = successCount === 3 ? 'realtime' : 'partial'
+    return {
+      data,
+      source,
+      lastSuccessAt: new Date().toISOString(),
+      isStale: false,
+      errorCode: successCount < 3 ? 'PARTIAL_SOURCES_FAILED' : null,
+      sectionStatus,
+      hasUsableData: true,
+    }
+  }
 
-  // Radar + Trend: backend doesn't yet provide campus-aggregate RDI radar or
-  // EWMA trend by campus. Use demo data for now; real endpoints can be
-  // wired in when backend adds /dashboard/campus-radar and /dashboard/ewma-trend.
-  const radarSeries = getDemoRadarSeries()
-  const trendSeries = getDemoTrendSeries()
+  // ── All three failed — try cache ──────────────────────────────
+  const cached = getCachedDashboard()
+  if (cached) {
+    return {
+      data: cached.data,
+      source: 'cache',
+      lastSuccessAt: cached.timestamp,
+      isStale: true,
+      errorCode: 'ALL_SOURCES_FAILED',
+      sectionStatus: {
+        overview: 'failed',
+        alerts: 'failed',
+        radar: 'unavailable',
+        trend: 'unavailable',
+      },
+      hasUsableData: true,
+    }
+  }
 
-  return { kpiMetrics, alertStream, radarSeries, trendSeries }
+  // ── No cache — dev demo gate ──────────────────────────────────
+  if (isDemoAllowed()) {
+    return {
+      data: getDemoDashboardData(),
+      source: 'demo',
+      lastSuccessAt: null,
+      isStale: false,
+      errorCode: null,
+      sectionStatus: {
+        overview: 'success',
+        alerts: 'success',
+        radar: 'success',
+        trend: 'success',
+      },
+      hasUsableData: true,
+    }
+  }
+
+  // ── Production / no fallback: explicit failure (NOT cache) ────
+  return {
+    data: {
+      kpiMetrics: [],
+      alertStream: [],
+      radarSeries: [],
+      trendSeries: [],
+    },
+    source: 'failed',
+    lastSuccessAt: null,
+    isStale: false,
+    errorCode: 'ALL_SOURCES_FAILED',
+    sectionStatus: {
+      overview: 'failed',
+      alerts: 'failed',
+      radar: 'unavailable',
+      trend: 'unavailable',
+    },
+    hasUsableData: false,
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -365,23 +635,24 @@ function buildKpiMetrics(
   discipline: DisciplineStatsResponse | null,
 ): KpiMetric[] {
   // KPI 1: 极端高危覆盖数 — from monitor panel intervention_count or dashboard high_risk_count
+  // W3-FE-MOCK-001: no hardcoded demo defaults; missing source → 0
   const highRiskCount = monitor?.intervention_count
     ?? dashboard?.high_risk_count
-    ?? 14
+    ?? 0
 
   // KPI 2: RDI 均值水位 — from dashboard avg_rdi
-  const avgRdi = dashboard?.avg_rdi ?? 1.82
+  const avgRdi = dashboard?.avg_rdi ?? 0
 
   // KPI 3: 处分流转结案率 — derived from discipline stats
   // closure_rate = (total - active_count) / total * 100
-  let closureRate = 92.4
+  let closureRate = 0
   if (discipline && discipline.total > 0) {
     const closed = discipline.total - discipline.active_count
     closureRate = Number(((closed / discipline.total) * 100).toFixed(1))
   }
 
   // KPI 4: 申诉观察解除数 — from discipline by_status REVOKED count
-  const appealRelease = discipline?.by_status?.REVOKED ?? 6
+  const appealRelease = discipline?.by_status?.REVOKED ?? 0
 
   return [
     {
