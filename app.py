@@ -719,10 +719,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS 中间件
+# CORS 中间件 — 允许来源通过环境变量 CORS_ALLOW_ORIGINS 配置（逗号分隔），
+# 默认仅生产域名；避免硬编码，便于多环境部署。
+_cors_raw = os.getenv("CORS_ALLOW_ORIGINS", "https://lijiangschool.online")
+_allow_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://lijiangschool.online"],
+    allow_origins=_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
