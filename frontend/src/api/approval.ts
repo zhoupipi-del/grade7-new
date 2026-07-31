@@ -106,15 +106,17 @@ export function getApprovalChains() {
 export async function fetchTicketsWithFallback(type: 'todo' | 'done'): Promise<ApprovalTicket[]> {
   try {
     const tickets = await getApprovalTickets(type)
-    if (tickets && tickets.length > 0) {
-      return tickets
+    return tickets
+  } catch (error) {
+    if (
+      import.meta.env.DEV &&
+      import.meta.env.VITE_ALLOW_DEMO_FALLBACK === 'true'
+    ) {
+      await sleep(300)
+      return getDemoTickets(type)
     }
-  } catch {
-    // Backend unavailable — fall through to demo
+    throw error
   }
-
-  await sleep(300)
-  return getDemoTickets(type)
 }
 
 // ═════════════════════════════════════════════════════════════════

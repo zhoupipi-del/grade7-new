@@ -372,19 +372,21 @@ export async function fetchBehaviorWithFallback(params?: {
   status?: BehaviorStatus
 }): Promise<{ items: BehaviorRecord[]; total: number }> {
   try {
-    const res = await getBehaviorRecords({ page: 1, page_size: 50, ...params })
-    if (res?.items && res.items.length > 0) {
-      return { items: res.items, total: res.total }
+    const result = await getBehaviorRecords({ page: 1, page_size: 50, ...params })
+    return result
+  } catch (error) {
+    if (
+      import.meta.env.DEV &&
+      import.meta.env.VITE_ALLOW_DEMO_FALLBACK === 'true'
+    ) {
+      await sleep(300)
+      let items = getDemoBehaviorRecords()
+      if (params?.type) items = items.filter(r => r.type === params.type)
+      if (params?.status) items = items.filter(r => r.status === params.status)
+      return { items, total: items.length }
     }
-  } catch {
-    // Backend unavailable — fall through to demo
+    throw error
   }
-
-  await sleep(300)
-  let items = getDemoBehaviorRecords()
-  if (params?.type) items = items.filter(r => r.type === params.type)
-  if (params?.status) items = items.filter(r => r.status === params.status)
-  return { items, total: items.length }
 }
 
 /**
@@ -395,19 +397,21 @@ export async function fetchSanctionsWithFallback(params?: {
   status?: DisciplineStatus
 }): Promise<{ items: Sanction[]; total: number }> {
   try {
-    const res = await getSanctions({ page: 1, page_size: 50, ...params })
-    if (res?.items && res.items.length > 0) {
-      return { items: res.items, total: res.total }
+    const result = await getSanctions({ page: 1, page_size: 50, ...params })
+    return result
+  } catch (error) {
+    if (
+      import.meta.env.DEV &&
+      import.meta.env.VITE_ALLOW_DEMO_FALLBACK === 'true'
+    ) {
+      await sleep(300)
+      let items = getDemoSanctions()
+      if (params?.level) items = items.filter(s => s.level === params.level)
+      if (params?.status) items = items.filter(s => s.status === params.status)
+      return { items, total: items.length }
     }
-  } catch {
-    // Backend unavailable — fall through to demo
+    throw error
   }
-
-  await sleep(300)
-  let items = getDemoSanctions()
-  if (params?.level) items = items.filter(s => s.level === params.level)
-  if (params?.status) items = items.filter(s => s.status === params.status)
-  return { items, total: items.length }
 }
 
 /**
@@ -415,17 +419,19 @@ export async function fetchSanctionsWithFallback(params?: {
  */
 export async function fetchDraftsWithFallback(): Promise<{ items: SanctionDraft[]; total: number }> {
   try {
-    const res = await getSanctionDrafts({ page: 1, page_size: 50 })
-    if (res?.items && res.items.length > 0) {
-      return { items: res.items, total: res.total }
+    const result = await getSanctionDrafts({ page: 1, page_size: 50 })
+    return result
+  } catch (error) {
+    if (
+      import.meta.env.DEV &&
+      import.meta.env.VITE_ALLOW_DEMO_FALLBACK === 'true'
+    ) {
+      await sleep(300)
+      const items = getDemoDrafts()
+      return { items, total: items.length }
     }
-  } catch {
-    // Backend unavailable
+    throw error
   }
-
-  await sleep(300)
-  const items = getDemoDrafts()
-  return { items, total: items.length }
 }
 
 /**
@@ -435,30 +441,28 @@ export async function fetchAppealsWithFallback(): Promise<{
   behavior: BehaviorAppeal[]
   discipline: DisciplineAppeal[]
 }> {
-  let behavior: BehaviorAppeal[] = []
-  let discipline: DisciplineAppeal[] = []
-
   try {
-    const res = await getDisciplineAppeals({ page: 1, page_size: 50 })
-    if (res?.items && res.items.length > 0) discipline = res.items
-  } catch {
-    // fall through
+    const [dRes, bRes] = await Promise.all([
+      getDisciplineAppeals({ page: 1, page_size: 50 }),
+      getBehaviorAppeals({ page: 1, page_size: 50 }),
+    ])
+    return {
+      discipline: dRes?.items ?? [],
+      behavior: bRes?.items ?? [],
+    }
+  } catch (error) {
+    if (
+      import.meta.env.DEV &&
+      import.meta.env.VITE_ALLOW_DEMO_FALLBACK === 'true'
+    ) {
+      await sleep(300)
+      return {
+        behavior: getDemoBehaviorAppeals(),
+        discipline: getDemoDisciplineAppeals(),
+      }
+    }
+    throw error
   }
-
-  try {
-    const res = await getBehaviorAppeals({ page: 1, page_size: 50 })
-    if (res?.items && res.items.length > 0) behavior = res.items
-  } catch {
-    // fall through
-  }
-
-  if (behavior.length === 0 && discipline.length === 0) {
-    await sleep(300)
-    behavior = getDemoBehaviorAppeals()
-    discipline = getDemoDisciplineAppeals()
-  }
-
-  return { behavior, discipline }
 }
 
 // ═════════════════════════════════════════════════════════════════

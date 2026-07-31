@@ -83,20 +83,22 @@ export async function fetchDisciplineWithFallback(
   params?: { status?: string }
 ): Promise<DisciplineRecord[]> {
   try {
-    const res = await getDisciplineRecords(params)
-    if (res && Array.isArray(res) && res.length > 0) {
-      return res
+    const result = await getDisciplineRecords(params)
+    return result
+  } catch (error) {
+    if (
+      import.meta.env.DEV &&
+      import.meta.env.VITE_ALLOW_DEMO_FALLBACK === 'true'
+    ) {
+      await sleep(400)
+      let items = getDemoDisciplineRecords()
+      if (params?.status) {
+        items = items.filter(r => r.probation_status === params.status)
+      }
+      return items
     }
-  } catch {
-    // Backend unavailable — fall through to demo
+    throw error
   }
-
-  await sleep(400)
-  let items = getDemoDisciplineRecords()
-  if (params?.status) {
-    items = items.filter(r => r.probation_status === params.status)
-  }
-  return items
 }
 
 /**
@@ -106,14 +108,19 @@ export async function fetchDisciplineWithFallback(
 export async function submitAppealWithFallback(
   punishmentId: string,
   appealReason: string
-): Promise<{ success: boolean; message: string }> {
+): Promise<{ success: boolean; message: string; demo?: boolean }> {
   try {
     await submitAppeal(punishmentId, appealReason)
     return { success: true, message: '申诉已提交，等待德育处审核' }
-  } catch {
-    // Demo mode — simulate success
-    await sleep(500)
-    return { success: true, message: '（演示模式）申诉已提交，等待德育处审核' }
+  } catch (error) {
+    if (
+      import.meta.env.DEV &&
+      import.meta.env.VITE_ALLOW_DEMO_FALLBACK === 'true'
+    ) {
+      await sleep(500)
+      return { success: true, message: '演示模式：未提交到真实后端', demo: true }
+    }
+    throw error
   }
 }
 
