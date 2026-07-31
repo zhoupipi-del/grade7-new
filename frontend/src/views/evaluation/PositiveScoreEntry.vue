@@ -268,7 +268,7 @@ async function loadPositiveIndicators() {
     // 筛选出正向加分指标（保留 dimension 信息）
     const positiveList: Array<{ dimension: EvalDimension; item: IndicatorItem }> = []
     for (const group of data) {
-      for (const ind of group.items) {
+      for (const ind of group.indicators) {
         if (
           ind.name.includes('之星') ||
           ind.name.includes('助人') ||

@@ -63,8 +63,8 @@ export interface IndicatorItem {
 
 export interface IndicatorGroupedOut {
   dimension: EvalDimension
-  dimension_label: string
-  items: IndicatorItem[]
+  dimension_name: string
+  indicators: IndicatorItem[]
 }
 
 export interface IndicatorCreate {
@@ -447,8 +447,8 @@ export function getDemoIndicators(): IndicatorGroupedOut[] {
   const dimensions: EvalDimension[] = ['moral', 'academic', 'health', 'art', 'social']
   return dimensions.map((dim, di) => ({
     dimension: dim,
-    dimension_label: DIMENSION_LABELS[dim],
-    items: [
+    dimension_name: DIMENSION_LABELS[dim],
+    indicators: [
       {
         id: di * 10 + 1,
         parent_id: null,
