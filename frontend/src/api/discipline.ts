@@ -118,7 +118,8 @@ export async function submitAppealWithFallback(
       import.meta.env.VITE_ALLOW_DEMO_FALLBACK === 'true'
     ) {
       await sleep(500)
-      return { success: true, message: '演示模式：未提交到真实后端', demo: true }
+      // 开发演示模式：明确返回 success:false，绝不伪装成真实写入成功（调用方按 success 判断时不会误显示"申诉已受理"）
+      return { success: false, message: '演示模式：未提交到真实后端', demo: true }
     }
     throw error
   }

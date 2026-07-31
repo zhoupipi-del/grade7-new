@@ -11,17 +11,17 @@
  * 通过 mock `./request`（axios 实例）统一控制真实 API 行为。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import request from './request'
-import { fetchDisciplineWithFallback, submitAppealWithFallback } from './discipline'
+import request from '@/api/request'
+import { fetchDisciplineWithFallback, submitAppealWithFallback } from '@/api/discipline'
 import {
   fetchBehaviorWithFallback,
   fetchSanctionsWithFallback,
   fetchDraftsWithFallback,
   fetchAppealsWithFallback,
-} from './behavior'
-import { fetchTicketsWithFallback } from './approval'
+} from '@/api/behavior'
+import { fetchTicketsWithFallback } from '@/api/approval'
 
-vi.mock('./request', () => ({
+vi.mock('@/api/request', () => ({
   default: {
     get: vi.fn(),
     post: vi.fn(),
@@ -169,11 +169,11 @@ describe('submitAppealWithFallback（写操作）', () => {
     await expect(submitAppealWithFallback('p1', '理由')).rejects.toThrow()
   })
 
-  it('DEV+开关下失败 → 返回 demo:true 明确标记，不误导为真实写入', async () => {
+  it('DEV+开关下失败 → 返回 demo:true 且 success:false，绝不伪装为真实写入', async () => {
     vi.stubEnv('VITE_ALLOW_DEMO_FALLBACK', DEMO_ON)
     mockRequest.post.mockRejectedValue(new Error('500'))
     const res = await submitAppealWithFallback('p1', '理由')
-    expect(res.success).toBe(true)
+    expect(res.success).toBe(false)
     expect(res.demo).toBe(true)
   })
 })
