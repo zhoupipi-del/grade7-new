@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>期末德育大账本批量导出 - 梨江中学德育管理平台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .card { border-radius: 12px; border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; }
+        .progress { height: 20px; }
+        .task-card { transition: all 0.3s; }
+        .task-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-primary mb-4">
+        <div class="container-fluid">
+            <span class="navbar-brand"><i class="bi bi-file-earmark-arrow-down"></i> 期末德育大账本批量导出</span>
+            <a href="/api/v1/reports/batch-export" class="btn btn-outline-light btn-sm"><i class="bi bi-arrow-left"></i> 返回工作台</a>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4">
+        <!-- 控制面板 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card p-4">
+                    <h5 class="mb-3"><i class="bi bi-gear"></i> 导出配置</h5>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">选择年级</label>
+                            <select class="form-select" id="gradeSelect">
+                                <option value="">请选择年级...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">学期</label>
+                            <input type="text" class="form-control" id="semesterInput" placeholder="如: 2025-2026-2">
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <button class="btn btn-primary w-100" id="exportBtn">
+                                <i class="bi bi-cloud-download"></i> 一键批量导出
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 进度看板 -->
+        <div class="row mb-4" id="progressSection" style="display: none;">
+            <div class="col-12">
+                <div class="card p-4">
+                    <h5 class="mb-3"><i class="bi bi-activity"></i> 导出进度</h5>
+                    <div class="mb-3">
+                        <span class="badge bg-primary" id="totalClasses">0</span> 个班级，
+                        已完成 <span class="badge bg-success" id="completedCount">0</span> 个，
+                        进行中 <span class="badge bg-warning" id="runningCount">0</span> 个，
+                        失败 <span class="badge bg-danger" id="failedCount">0</span> 个
+                    </div>
+                    <div id="taskList"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 下载链接列表 -->
+        <div class="row" id="downloadSection" style="display: none;">
+            <div class="col-12">
+                <div class="card p-4">
+                    <h5 class="mb-3"><i class="bi bi-download"></i> 下载报告</h5>
+                    <div id="downloadList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let taskIds = [];
+        let pollInterval = null;
+
+        // 页面加载时获取年级列表
+        document.addEventListener('DOMContentLoaded', function() {
+            loadGrades();
+            setDefaultSemester();
+        });
+
+        // 加载年级列表
+        async function loadGrades() {
+            try {
+                const response = await fetch('/api/v1/grades');
+                if (response.ok) {
+                    const grades = await response.json();
+                    const select = document.getElementById('gradeSelect');
+                    grades.forEach(g => {
+                        const option = document.createElement('option');
+                        option.value = g.id;
+                        option.textContent = g.name;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('加载年级失败:', error);
+            }
+        }
+
+        // 设置默认学期
+        function setDefaultSemester() {
+            const now = new Date();
+            let semester = '';
+            if (now.getMonth() >= 1 && now.getMonth() <= 6) {
+                semester = `${now.getFullYear() - 1}-${now.getFullYear()}-2`;
+            } else {
+                semester = `${now.getFullYear()}-${now.getFullYear() + 1}-1`;
+            }
+            document.getElementById('semesterInput').value = semester;
+        }
+
+        // 一键批量导出
+        document.getElementById('exportBtn').addEventListener('click', async function() {
+            const gradeId = document.getElementById('gradeSelect').value;
+            const semester = document.getElementById('semesterInput').value;
+
+            if (!gradeId) {
+                alert('请选择年级');
+                return;
+            }
+
+            this.disabled = true;
+            this.innerHTML = '<i class="bi bi-hourglass-split"></i> 提交中...';
+
+            try {
+                const response = await fetch('/api/v1/reports/export/grade-report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        grade_id: parseInt(gradeId),
+                        semester: semester
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    taskIds = data.task_ids;
+                    showProgress(data.total_classes);
+                    startPolling();
+                } else {
+                    const error = await response.json();
+                    alert('导出失败: ' + (error.detail || '未知错误'));
+                }
+            } catch (error) {
+                alert('导出失败: ' + error.message);
+            } finally {
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-cloud-download"></i> 一键批量导出';
+            }
+        });
+
+        // 显示进度看板
+        function showProgress(total) {
+            document.getElementById('progressSection').style.display = 'block';
+            document.getElementById('totalClasses').textContent = total;
+            document.getElementById('completedCount').textContent = '0';
+            document.getElementById('runningCount').textContent = total;
+            document.getElementById('failedCount').textContent = '0';
+
+            const taskList = document.getElementById('taskList');
+            taskList.innerHTML = '';
+
+            taskIds.forEach((taskId, index) => {
+                const taskCard = document.createElement('div');
+                taskCard.className = 'card mb-2 task-card';
+                taskCard.id = `task-${taskId}`;
+                taskCard.innerHTML = `
+                    <div class="card-body py-2 px-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span>班级 ${index + 1}</span>
+                            <span class="badge bg-warning">排队中</span>
+                        </div>
+                        <div class="progress mt-2" style="height: 6px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 role="progressbar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                `;
+                taskList.appendChild(taskCard);
+            });
+        }
+
+        // 开始轮询任务状态
+        function startPolling() {
+            if (pollInterval) clearInterval(pollInterval);
+            pollInterval = setInterval(pollTaskStatus, 2000);
+        }
+
+        // 轮询任务状态
+        async function pollTaskStatus() {
+            let completed = 0;
+            let failed = 0;
+
+            for (const taskId of taskIds) {
+                try {
+                    const response = await fetch(`/api/v1/reports/tasks/${taskId}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        updateTaskCard(taskId, data);
+
+                        if (data.state === 'SUCCESS') completed++;
+                        if (data.state === 'FAILURE') failed++;
+                    }
+                } catch (error) {
+                    console.error(`轮询任务 ${taskId} 失败:`, error);
+                }
+            }
+
+            const running = taskIds.length - completed - failed;
+            document.getElementById('completedCount').textContent = completed;
+            document.getElementById('runningCount').textContent = running;
+            document.getElementById('failedCount').textContent = failed;
+
+            // 所有任务完成，停止轮询
+            if (completed + failed === taskIds.length) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+                showDownloadLinks();
+            }
+        }
+
+        // 更新任务卡片
+        function updateTaskCard(taskId, data) {
+            const card = document.getElementById(`task-${taskId}`);
+            if (!card) return;
+
+            const badge = card.querySelector('.badge');
+            const progressBar = card.querySelector('.progress-bar');
+
+            switch (data.state) {
+                case 'PENDING':
+                    badge.className = 'badge bg-warning';
+                    badge.textContent = '排队中';
+                    progressBar.style.width = '0%';
+                    break;
+                case 'PROGRESS':
+                    badge.className = 'badge bg-primary';
+                    badge.textContent = data.status_text || '生成中...';
+                    progressBar.style.width = `${data.progress || 0}%`;
+                    break;
+                case 'SUCCESS':
+                    badge.className = 'badge bg-success';
+                    badge.textContent = '完成';
+                    progressBar.style.width = '100%';
+                    progressBar.className = 'progress-bar bg-success';
+                    break;
+                case 'FAILURE':
+                    badge.className = 'badge bg-danger';
+                    badge.textContent = '失败';
+                    progressBar.style.width = '100%';
+                    progressBar.className = 'progress-bar bg-danger';
+                    break;
+            }
+        }
+
+        // 显示下载链接
+        function showDownloadLinks() {
+            document.getElementById('downloadSection').style.display = 'block';
+            const downloadList = document.getElementById('downloadList');
+            downloadList.innerHTML = '<div class="list-group">';
+
+            taskIds.forEach(taskId => {
+                const card = document.getElementById(`task-${taskId}`);
+                const badge = card.querySelector('.badge');
+
+                if (badge.textContent === '完成') {
+                    // 获取任务结果
+                    fetch(`/api/v1/reports/tasks/${taskId}`)
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.result && data.result.download_url) {
+                                downloadList.innerHTML += `
+                                    <a href="${data.result.download_url}" 
+                                       class="list-group-item list-group-item-action">
+                                        <i class="bi bi-file-pdf text-danger"></i>
+                                        ${data.result.filename}
+                                        <span class="badge bg-primary float-end">${data.result.file_size_kb} KB</span>
+                                    </a>
+                                `;
+                            }
+                        });
+                }
+            });
+
+            downloadList.innerHTML += '</div>';
+        }
+    </script>
+</body>
+</html>
