@@ -5,6 +5,8 @@ core/routers.py — Wings 3.0 核心路由
 """
 
 from typing import Any
+from pathlib import Path
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -527,3 +529,27 @@ async def test_senior_only():
         "status": "success",
         "msg": "成功进入高中硬核高考学情大盘",
     }
+
+@router.get("/version")
+async def version(current_user=Depends(get_current_user)):
+    """部署版本信息（仅管理员可见）。返回当前生产对应的 Git commit / 前后端版本。"""
+    ADMIN_ROLES = {"ms_admin", "school_admin", "group_admin", "branch_admin"}
+    role = getattr(current_user, "role", None)
+    if role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="仅管理员可查看版本信息")
+    info = {
+        "service": "wings3",
+        "backend_sha": None,
+        "frontend_sha": None,
+        "release_tag": None,
+        "alembic": None,
+        "released_at": None,
+    }
+    try:
+        release_json = Path(__file__).resolve().parent.parent.parent / "release.json"
+        if release_json.exists():
+            info.update(json.loads(release_json.read_text(encoding="utf-8")))
+    except Exception:
+        pass
+    return info
+
