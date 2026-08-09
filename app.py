@@ -11,11 +11,12 @@ FastAPI 异步主入口，负责:
 
 import logging
 import os
+import json
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -757,7 +758,7 @@ app.dependency_overrides[_core_get_db] = get_db_override
 # 核心路由注册
 # ═══════════════════════════════════════════════════════════════
 
-from core.routers import router as core_router
+from core.routers import get_current_user, router as core_router
 
 app.include_router(core_router)
 
@@ -831,6 +832,30 @@ async def ping():
 # ═══════════════════════════════════════════════════════════════
 # 启动入口
 # ═══════════════════════════════════════════════════════════════
+
+@app.get("/version")
+async def version(current_user=Depends(get_current_user)):
+    """部署版本信息（仅管理员可见）。返回当前生产对应的 Git commit / 前后端版本。"""
+    ADMIN_ROLES = {"ms_admin", "school_admin", "group_admin", "branch_admin"}
+    role = getattr(current_user, "role", None)
+    if role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="仅管理员可查看版本信息")
+    info = {
+        "service": "wings3",
+        "backend_sha": None,
+        "frontend_sha": None,
+        "release_tag": None,
+        "alembic": None,
+        "released_at": None,
+    }
+    try:
+        release_json = BACKEND_DIR.parent / "release.json"
+        if release_json.exists():
+            info.update(json.loads(release_json.read_text(encoding="utf-8")))
+    except Exception:
+        pass
+    return info
+
 
 if __name__ == "__main__":
     import uvicorn
