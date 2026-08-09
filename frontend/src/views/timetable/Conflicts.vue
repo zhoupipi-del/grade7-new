@@ -75,7 +75,8 @@ async function fetchConflicts() {
   loading.value = true
   try {
     const res = await listConflicts({ resolution: filterResolution.value || undefined })
-    conflicts.value = res.data.items || res.data
+    // 后端返回结构为 { items, page, page_size, total }，列表键为 items（非 data.items）
+    conflicts.value = res.items || []
   } finally { loading.value = false }
 }
 

@@ -331,7 +331,7 @@
               <el-timeline-item
                 v-if="selectedAppt.status === 'cancelled'"
                 type="info"
-                :timestamp="formatDateTime(selectedAppt.updated_at || selectedAppt.created_at)"
+                :timestamp="formatDateTime(selectedAppt.created_at)"
                 placement="top"
               >
                 预约已取消
@@ -339,7 +339,7 @@
               <el-timeline-item
                 v-if="selectedAppt.status === 'no_show'"
                 type="danger"
-                :timestamp="formatDateTime(selectedAppt.updated_at || selectedAppt.created_at)"
+                :timestamp="formatDateTime(selectedAppt.created_at)"
                 placement="top"
               >
                 未到诊（缺席）
@@ -347,7 +347,7 @@
               <el-timeline-item
                 v-if="selectedAppt.completed_at || selectedAppt.status === 'completed'"
                 type="success"
-                :timestamp="formatDateTime(selectedAppt.completed_at || selectedAppt.updated_at)"
+                :timestamp="formatDateTime(selectedAppt.completed_at || selectedAppt.created_at)"
                 placement="top"
               >
                 咨询已完成

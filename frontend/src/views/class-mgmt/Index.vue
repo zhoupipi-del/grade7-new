@@ -378,7 +378,8 @@ async function showClassDetail(cls: ClassDetail) {
   detailVisible.value = true
   try {
     const res = await getClassStudents(cls.id)
-    classStudents.value = (res as any)?.items || res || []
+    // 后端返回结构为 { class_id, total, students: [...] }，解包键为 students（非 items）
+    classStudents.value = (res as any)?.students || (Array.isArray(res) ? res : [])
   } catch {}
 }
 

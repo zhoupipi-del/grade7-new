@@ -913,7 +913,7 @@ const activeTab = ref('portrait')
 const indicatorCount = computed(() => {
   let total = 0
   for (const g of indicatorGroups.value) {
-    for (const item of g.items) {
+    for (const item of g.indicators) {
       total += 1 + (item.children?.length || 0)
     }
   }
@@ -997,7 +997,7 @@ const indicatorCascaderOptions = computed(() => {
   return indicatorGroups.value.map((g) => ({
     name: g.dimension_name,
     id: `dim_${g.dimension}`,
-    children: g.items.flatMap((item) => [
+    children: g.indicators.flatMap((item) => [
       { name: item.name, id: item.id },
       ...(item.children || []).map((child) => ({
         name: `  ${child.name}`,
@@ -1011,7 +1011,7 @@ const selectedIndicatorMax = computed(() => {
   const id = scoreForm.value.indicator_path
   if (!id) return '—'
   for (const g of indicatorGroups.value) {
-    for (const item of g.items) {
+    for (const item of g.indicators) {
       if (item.id === id) return item.max_score
       if (item.children) {
         const child = item.children.find((c) => c.id === id)
