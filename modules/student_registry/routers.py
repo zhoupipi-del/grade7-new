@@ -65,7 +65,7 @@ async def create_student(
 @router.get("/students", response_model=PaginatedStudents)
 async def list_students(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     class_id: int | None = None,
     grade_id: int | None = None,
     status: str | None = None,

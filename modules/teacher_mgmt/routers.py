@@ -50,7 +50,7 @@ router = APIRouter()
 @router.get("/teachers", response_model=TeacherListResponse)
 async def list_teachers(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=500),
     role: Optional[str] = Query(None, description="class_teacher / teacher"),
     is_active: Optional[bool] = Query(None),
     keyword: Optional[str] = Query(None, description="搜索姓名"),
