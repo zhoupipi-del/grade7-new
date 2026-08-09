@@ -107,7 +107,7 @@ async def get_student(
     if not result:
         raise HTTPException(status_code=404, detail="学生不存在")
     # 纵深防御：保留学校级校验（归属校验已含此层，双重保险）
-    verify_school_access(result["school_id"], current_user)
+    verify_school_access(result["school_id"], current_user, db)
     return result
 
 
@@ -123,7 +123,7 @@ async def update_student(
         student = await StudentRegistryService.update_student(db, student_id, body)
         result = await StudentRegistryService.get_student(db, student.id)
         if result:
-            verify_school_access(result["school_id"], current_user)
+            verify_school_access(result["school_id"], current_user, db)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

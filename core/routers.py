@@ -4,21 +4,25 @@ core/routers.py — Wings 3.0 核心路由
 提供认证、租户管理、组织架构查询等系统级 API。
 """
 
-from typing import Optional, List, Any
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .services import AuthService, OrgService
-from .schemas import (
-    LoginRequest, LoginResponse, UserOut,
-    SchoolOut, SchoolCreate,
-    StudentOut, StudentBrief,
-    ClassOut, GradeOut,
-    PaginatedResponse, MessageResponse,
-    ChangePasswordRequest,
-)
 from .models import User, UserRole
+from .schemas import (
+    ChangePasswordRequest,
+    GradeOut,
+    LoginRequest,
+    LoginResponse,
+    MessageResponse,
+    PaginatedResponse,
+    SchoolCreate,
+    SchoolOut,
+    UserOut,
+)
+from .services import AuthService, OrgService
 from .tenant_context import TenantContext, build_tenant_context
 
 router = APIRouter(prefix="/api/v1", tags=["core"])
@@ -29,6 +33,7 @@ security = HTTPBearer(auto_error=False)  # 非强制 → 允许 Cookie 降级
 # 依赖注入
 # ═══════════════════════════════════════════════════════════════
 
+
 async def get_db() -> AsyncSession:
     """获取数据库会话 — 由 app.py 的依赖覆盖实现"""
     raise NotImplementedError("DB session must be injected by app.py")
@@ -36,11 +41,11 @@ async def get_db() -> AsyncSession:
 
 async def get_current_user(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """双模雷达：Authorization Header → Cookie access_token 降级"""
-    token: Optional[str] = None
+    token: str | None = None
 
     # 模式 A: Authorization: Bearer <token>（原生调用 / Swagger）
     if credentials and credentials.credentials:
@@ -64,10 +69,11 @@ async def get_current_user(
 
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
+
     result = await db.execute(
-        select(User).options(selectinload(User.school)).where(
-            User.id == int(raw_id), User.is_active == True
-        )
+        select(User)
+        .options(selectinload(User.school))
+        .where(User.id == int(raw_id), User.is_active == True)
     )
     user = result.scalar_one_or_none()
     if not user:
@@ -149,25 +155,33 @@ def require_school_phase(allowed_phases: list[str]):
 # 多租户访问守卫 — P0 安全修复 (2026-06-30)
 # ═══════════════════════════════════════════════════════════════
 
-def verify_school_access(requested_school_id: int, current_user: User) -> int:
-    """
-    校验当前用户是否有权访问 requested_school_id 的数据（同步函数，端点内调用）。
 
-    - MS_ADMIN / GROUP_ADMIN / BRANCH_ADMIN: 放行（超管/集团管理员/片区管理员）
-    - 其他角色: requested_school_id 必须等于 current_user.school_id
+async def verify_school_access(
+    requested_school_id: int,
+    current_user: User,
+    db: AsyncSession,
+) -> int:
+    """
+    校验当前用户是否有权访问 requested_school_id 的数据（异步函数，端点内调用）。
+
+    P0 修复 (2026-07-31): 所有角色均基于 access_scope 判定，消除超管全局旁路。
+    - MS_ADMIN: 仅可访问自己所属的单校（与 tenant_context.py / models.py 一致）
+    - GROUP_ADMIN: 可访问其集团下所有学校
+    - BRANCH_ADMIN: 可访问其片区下所有学校
+    - 其他角色: 严格 school_id 硬匹配
 
     用法:
-        verify_school_access(school_id, current_user)  # 抛 403 或直接返回 school_id
+        await verify_school_access(school_id, current_user, db)  # 抛 403 或返回 school_id
     """
     user_role = current_user.role
     if isinstance(user_role, str):
         user_role = UserRole(user_role)
 
-    bypass_roles = {UserRole.MS_ADMIN, UserRole.GROUP_ADMIN, UserRole.BRANCH_ADMIN}
-    if user_role in bypass_roles:
-        return requested_school_id  # 超管/集团/片区放行
+    from .tenant_context import get_accessible_school_ids
 
-    if current_user.school_id != requested_school_id:
+    accessible_ids = await get_accessible_school_ids(current_user, db)
+
+    if requested_school_id not in accessible_ids:
         raise HTTPException(
             status_code=403,
             detail="无权访问其他学校的数据",
@@ -187,13 +201,13 @@ async def verify_entity_ownership(
 
     三层防护:
     1. 实体不存在 → 404（而非 403，避免信息泄露）
-    2. 实体 school_id 不在用户权限范围 + 非超管 → 403
+    2. 实体 school_id 不在用户 access_scope 内 → 403
     3. 实体无 school_id 列（如系统级表）→ 放行
 
-    角色放行规则（不可妥协原则 — 18/18 PASS 基线不变）:
-    - MS_ADMIN: 全局放行（所有学校，等同现有逻辑）
-    - GROUP_ADMIN: 放行（其 org 下所有学校，scope 由 access_scope 控制）
-    - BRANCH_ADMIN: 放行（其 branch 下所有学校，scope 由 access_scope 控制）
+    P0 修复 (2026-07-31): 消除超管全局旁路，所有角色统一走 access_scope 校验。
+    - MS_ADMIN: 收敛为单校（access_scope = [user.school_id]）
+    - GROUP_ADMIN: 在其 org 范围内放行
+    - BRANCH_ADMIN: 在其 branch 范围内放行
     - 其他角色: 严格 school_id 硬匹配（逻辑不变）
 
     用法:
@@ -213,15 +227,16 @@ async def verify_entity_ownership(
     if isinstance(user_role, str):
         user_role = UserRole(user_role)
 
-    # 超管角色放行 — MS_ADMIN(全局) / GROUP_ADMIN(集团范围) / BRANCH_ADMIN(片区范围)
-    # scope 过滤由 access_scope + build_scope_filter 在查询层实现，此函数只做实体级校验
-    bypass_roles = {UserRole.MS_ADMIN, UserRole.GROUP_ADMIN, UserRole.BRANCH_ADMIN}
-    if user_role in bypass_roles:
-        return entity
+    # ── 基于访问域(scope)的权限校验（P0 修复: 消除超管全局旁路）──
+    # 所有角色均通过 access_scope 判定是否可访问该实体所属学校。
+    # MS_ADMIN 收敛为单校（与 tenant_context.py / models.py 定义一致）。
+    # GROUP_ADMIN / BRANCH_ADMIN 在其组织/片区范围内放行。
+    from .tenant_context import get_accessible_school_ids
 
-    # 只对有 school_id 列的实体做隔离校验（单校角色严格硬匹配）
+    accessible_ids = await get_accessible_school_ids(current_user, db)
+
     if hasattr(entity, "school_id"):
-        if entity.school_id != current_user.school_id:
+        if entity.school_id not in accessible_ids:
             raise HTTPException(status_code=403, detail="无权访问其他学校的数据")
 
     return entity
@@ -230,6 +245,7 @@ async def verify_entity_ownership(
 # ═══════════════════════════════════════════════════════════════
 # TenantContext 依赖注入 — 三级架构 AccessScope + 级联配置
 # ═══════════════════════════════════════════════════════════════
+
 
 async def get_tenant_context(
     current_user: User = Depends(get_current_user),
@@ -263,6 +279,7 @@ async def get_tenant_context(
 # 健康检查
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/health", response_model=MessageResponse)
 async def health_check():
     return MessageResponse(message="ok", detail="Wings 3.0 Core Online")
@@ -271,6 +288,7 @@ async def health_check():
 # ═══════════════════════════════════════════════════════════════
 # 认证
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/auth/login", response_model=LoginResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
@@ -305,13 +323,16 @@ async def change_password(
 
 
 @router.get("/auth/me", response_model=UserOut)
-async def get_me(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def get_me(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
     return await AuthService.get_user_out(db, current_user)
 
 
 # ═══════════════════════════════════════════════════════════════
 # 学校（租户）管理 — 仅德育处管理员
 # ═══════════════════════════════════════════════════════════════
+
 
 @router.post("/schools", response_model=SchoolOut, status_code=201)
 async def create_school(
@@ -330,7 +351,7 @@ async def get_school(
     current_user: User = Depends(get_current_user),
 ):
     """获取学校详情 — P0 修复: school_id 经 verify_school_access 校验"""
-    verify_school_access(school_id, current_user)
+    await verify_school_access(school_id, current_user, db)
     school = await OrgService.get_school(db, school_id)
     if not school:
         raise HTTPException(status_code=404, detail="学校不存在")
@@ -341,6 +362,7 @@ async def get_school(
 # 模块管理
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/schools/{school_id}/modules")
 async def get_school_modules(
     school_id: int,
@@ -348,12 +370,12 @@ async def get_school_modules(
     current_user: User = Depends(get_current_user),
 ):
     """获取某学校的所有模块状态 — P0 修复: school_id 经 verify_school_access 校验"""
-    verify_school_access(school_id, current_user)
+    await verify_school_access(school_id, current_user, db)
     from sqlalchemy import select
+
     from .models import SchoolModule
-    result = await db.execute(
-        select(SchoolModule).where(SchoolModule.school_id == school_id)
-    )
+
+    result = await db.execute(select(SchoolModule).where(SchoolModule.school_id == school_id))
     modules = result.scalars().all()
     return [
         {
@@ -371,9 +393,10 @@ async def get_school_modules(
 # 年级
 # ═══════════════════════════════════════════════════════════════
 
-@router.get("/grades", response_model=List[GradeOut])
+
+@router.get("/grades", response_model=list[GradeOut])
 async def list_grades(
-    school_id: Optional[int] = None,
+    school_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -399,10 +422,11 @@ async def list_grades(
 # 班级
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/classes")
 async def list_classes(
-    school_id: Optional[int] = None,
-    grade_id: Optional[int] = None,
+    school_id: int | None = None,
+    grade_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -428,14 +452,15 @@ async def list_classes(
 # 学生
 # ═══════════════════════════════════════════════════════════════
 
+
 @router.get("/students", response_model=PaginatedResponse)
 async def list_students(
-    school_id: Optional[int] = None,
-    class_id: Optional[int] = None,
-    grade_id: Optional[int] = None,
-    gender: Optional[str] = None,
-    is_active: Optional[bool] = True,
-    search: Optional[str] = None,
+    school_id: int | None = None,
+    class_id: int | None = None,
+    grade_id: int | None = None,
+    gender: str | None = None,
+    is_active: bool | None = True,
+    search: str | None = None,
     page: int = 1,
     per_page: int = 50,
     db: AsyncSession = Depends(get_db),
@@ -458,17 +483,24 @@ async def list_students(
     offset = (page - 1) * per_page
 
     students, total = await OrgService.get_students_with_names(
-        db, sid,
-        class_id=class_id, grade_id=grade_id,
-        gender=gender, is_active=is_active,
+        db,
+        sid,
+        class_id=class_id,
+        grade_id=grade_id,
+        gender=gender,
+        is_active=is_active,
         search=search,
-        limit=per_page, offset=offset,
+        limit=per_page,
+        offset=offset,
     )
 
     pages = (total + per_page - 1) // per_page if total > 0 else 0
     return PaginatedResponse(
-        items=students, total=total,
-        page=page, per_page=per_page, pages=pages,
+        items=students,
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=pages,
     )
 
 
@@ -476,8 +508,8 @@ async def list_students(
 # 学段隔离铁闸 — 测试端点（验证 require_school_phase 拦截）
 # ═══════════════════════════════════════════════════════════════
 
-@router.get("/test/primary-only",
-    dependencies=[Depends(require_school_phase(["primary"]))])
+
+@router.get("/test/primary-only", dependencies=[Depends(require_school_phase(["primary"]))])
 async def test_primary_only():
     """小学专属通道 — 只有 school_phase=primary 的学校可访问"""
     return {
@@ -486,8 +518,9 @@ async def test_primary_only():
     }
 
 
-@router.get("/test/senior-only",
-    dependencies=[Depends(require_school_phase(["senior", "integrated"]))])
+@router.get(
+    "/test/senior-only", dependencies=[Depends(require_school_phase(["senior", "integrated"]))]
+)
 async def test_senior_only():
     """高中专属通道 — 只有 school_phase=senior 或 integrated 的学校可访问"""
     return {

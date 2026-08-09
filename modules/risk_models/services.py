@@ -1244,6 +1244,7 @@ class RiskWarningService:
         warning.handling_note = note
 
         feedback = WarningFeedback(
+            school_id=school_id,  # P1 修复: 多租户隔离，原缺失导致写入 school_id=NULL
             warning_id=warning.id,
             teacher_id=current_user.id,
             action_taken=action,

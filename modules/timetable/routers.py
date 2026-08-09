@@ -18,24 +18,33 @@ timetable 路由层 — 适配生产DB列结构
 
 import logging
 from datetime import datetime
-from typing import Optional
-from fastapi import APIRouter, Depends, Query, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from core.routers import get_db, get_current_user, require_role
 from core.models import User, UserRole
 from core.redis_client import get_redis
-from modules.timetable.services import TimetableService
+from core.routers import (
+    get_current_user,
+    get_db,
+    require_role,
+    verify_entity_ownership,
+)
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from modules.timetable.models import TimetableScheduleInstance
 from modules.timetable.schemas import (
-    ClassroomCreate, ClassroomOut,
-    CourseCreate, CourseOut,
-    CourseSlotCreate, CourseSlotOut,
-    WeeklyScheduleOut, TeacherWeeklyScheduleOut,
-    ConflictCheckResult, ConflictOut,
+    ClassroomCreate,
+    ClassroomOut,
+    ConflictCheckResult,
+    ConflictOut,
+    CourseCreate,
+    CourseOut,
+    CourseSlotCreate,
+    CourseSlotOut,
+    TeacherWeeklyScheduleOut,
     TimetableAdjustmentRequest,
+    WeeklyScheduleOut,
 )
+from modules.timetable.services import TimetableService
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("timetable.routers")
 router = APIRouter()
@@ -43,64 +52,86 @@ router = APIRouter()
 
 # ── 教室 ──
 
+
 @router.get("/classrooms", response_model=list[ClassroomOut])
 async def list_classrooms(
-    room_type: Optional[str] = Query(None),
+    room_type: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     return await TimetableService.list_classrooms(
-        db=db, school_id=current_user.school_id, room_type=room_type,
+        db=db,
+        school_id=current_user.school_id,
+        room_type=room_type,
     )
+
 
 @router.post("/classrooms", status_code=201, response_model=ClassroomOut)
 async def create_classroom(
     body: ClassroomCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     return await TimetableService.create_classroom(
-        db=db, data=body, school_id=current_user.school_id,
+        db=db,
+        data=body,
+        school_id=current_user.school_id,
     )
 
 
 # ── 课程 ──
 
+
 @router.get("/courses", response_model=list[CourseOut])
 async def list_courses(
-    subject_category: Optional[str] = Query(None),
+    subject_category: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     return await TimetableService.list_courses(
-        db=db, school_id=current_user.school_id, subject_category=subject_category,
+        db=db,
+        school_id=current_user.school_id,
+        subject_category=subject_category,
     )
+
 
 @router.post("/courses", status_code=201, response_model=CourseOut)
 async def create_course(
     body: CourseCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     return await TimetableService.create_course(
-        db=db, data=body, school_id=current_user.school_id,
+        db=db,
+        data=body,
+        school_id=current_user.school_id,
     )
 
 
 # ── 课节 ──
 
+
 @router.get("/slots", response_model=list[CourseSlotOut])
 async def list_slots(
-    class_id: Optional[int] = Query(None),
-    teacher_id: Optional[int] = Query(None),
-    semester: Optional[str] = Query(None),
+    class_id: int | None = Query(None),
+    teacher_id: int | None = Query(None),
+    semester: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     return await TimetableService.list_slots(
-        db=db, school_id=current_user.school_id,
-        class_id=class_id, teacher_id=teacher_id, semester=semester,
+        db=db,
+        school_id=current_user.school_id,
+        class_id=class_id,
+        teacher_id=teacher_id,
+        semester=semester,
     )
+
 
 @router.post("/slots")
 async def create_slot(
@@ -108,35 +139,49 @@ async def create_slot(
     auto_resolve: bool = Query(False, description="冲突时是否强制创建"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     return await TimetableService.create_slot(
-        db=db, data=body, school_id=current_user.school_id,
+        db=db,
+        data=body,
+        school_id=current_user.school_id,
         auto_resolve=auto_resolve,
     )
+
 
 @router.delete("/slots/{slot_id}")
 async def delete_slot(
     slot_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
+    # P0 修复: 多租户隔离 — 验证课节归属
+    from modules.timetable.models import CourseSlot
+
+    await verify_entity_ownership(db, CourseSlot, slot_id, current_user, "课节不存在")
     ok = await TimetableService.delete_slot(db, slot_id)
     if not ok:
         raise HTTPException(status_code=404, detail="课节不存在")
     return {"status": "deleted", "slot_id": slot_id}
+
 
 @router.post("/slots/check-conflict", response_model=ConflictCheckResult)
 async def check_conflict(
     body: CourseSlotCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
 ):
     return await TimetableService._check_conflicts(
-        db, body, school_id=current_user.school_id,
+        db,
+        body,
+        school_id=current_user.school_id,
     )
 
 
 # ── 周课表 ──
+
 
 @router.get("/weekly/{class_id}", response_model=WeeklyScheduleOut)
 async def get_weekly_schedule(
@@ -144,14 +189,18 @@ async def get_weekly_schedule(
     semester: str = Query(..., description="学期: 2025-2026-1"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     result = await TimetableService.get_weekly_schedule(
-        db=db, class_id=class_id, semester=semester,
+        db=db,
+        class_id=class_id,
+        semester=semester,
         school_id=current_user.school_id,
     )
     if not result:
         raise HTTPException(status_code=404, detail="班级不存在")
     return result
+
 
 @router.get("/weekly/teacher/{teacher_id}", response_model=TeacherWeeklyScheduleOut)
 async def get_teacher_weekly_schedule(
@@ -159,9 +208,12 @@ async def get_teacher_weekly_schedule(
     semester: str = Query(..., description="学期: 2025-2026-1"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     result = await TimetableService.get_teacher_weekly_schedule(
-        db=db, teacher_id=teacher_id, semester=semester,
+        db=db,
+        teacher_id=teacher_id,
+        semester=semester,
         school_id=current_user.school_id,
     )
     if not result:
@@ -171,18 +223,24 @@ async def get_teacher_weekly_schedule(
 
 # ── 冲突管理 ──
 
+
 @router.get("/conflicts")
 async def list_conflicts(
-    is_resolved: Optional[bool] = Query(None, description="true=已解决, false=未解决"),
+    is_resolved: bool | None = Query(None, description="true=已解决, false=未解决"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     return await TimetableService.list_conflicts(
-        db=db, school_id=current_user.school_id,
-        is_resolved=is_resolved, page=page, page_size=page_size,
+        db=db,
+        school_id=current_user.school_id,
+        is_resolved=is_resolved,
+        page=page,
+        page_size=page_size,
     )
+
 
 @router.put("/conflicts/{conflict_id}/resolve", response_model=ConflictOut)
 async def resolve_conflict(
@@ -190,9 +248,16 @@ async def resolve_conflict(
     resolution: str = Query(..., description="resolved_by_move/resolved_by_cancel/ignored"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN)),
 ):
+    # P0 修复: 多租户隔离 — 验证冲突记录归属
+    from modules.timetable.models import ScheduleConflict
+
+    await verify_entity_ownership(db, ScheduleConflict, conflict_id, current_user, "冲突记录不存在")
     result = await TimetableService.resolve_conflict(
-        db=db, conflict_id=conflict_id, resolution=resolution,
+        db=db,
+        conflict_id=conflict_id,
+        resolution=resolution,
         resolved_by=current_user.id,
     )
     if not result:
@@ -202,6 +267,7 @@ async def resolve_conflict(
 
 # ── 教务变轨 (Wings 3.1 阵地⑦) ──
 
+
 @router.get("/instances")
 async def list_schedule_instances(
     class_id: int = Query(..., description="班级ID"),
@@ -209,6 +275,7 @@ async def list_schedule_instances(
     end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
     """查询班级在指定日期范围内的日历级课表实例"""
     try:
@@ -217,12 +284,16 @@ async def list_schedule_instances(
     except ValueError:
         raise HTTPException(status_code=400, detail="日期格式错误, 需要 YYYY-MM-DD")
 
-    stmt = select(TimetableScheduleInstance).where(
-        TimetableScheduleInstance.school_id == current_user.school_id,
-        TimetableScheduleInstance.class_id == class_id,
-        TimetableScheduleInstance.date >= d_start,
-        TimetableScheduleInstance.date <= d_end,
-    ).order_by(TimetableScheduleInstance.date, TimetableScheduleInstance.period_index)
+    stmt = (
+        select(TimetableScheduleInstance)
+        .where(
+            TimetableScheduleInstance.school_id == current_user.school_id,
+            TimetableScheduleInstance.class_id == class_id,
+            TimetableScheduleInstance.date >= d_start,
+            TimetableScheduleInstance.date <= d_end,
+        )
+        .order_by(TimetableScheduleInstance.date, TimetableScheduleInstance.period_index)
+    )
 
     result = await db.execute(stmt)
     instances = result.scalars().all()
@@ -249,9 +320,7 @@ async def list_schedule_instances(
 async def adjust_timetable_instance(
     instance_id: int,
     payload: TimetableAdjustmentRequest,
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)
-    ),
+    current_user: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -291,8 +360,7 @@ async def adjust_timetable_instance(
         # 如果有调课原因, 记到日志里供审计追溯
         if payload.adjustment_reason:
             logger.info(
-                f"📋 变轨原因: instance_id={instance_id} "
-                f"reason={payload.adjustment_reason}"
+                f"📋 变轨原因: instance_id={instance_id} reason={payload.adjustment_reason}"
             )
 
         await db.commit()

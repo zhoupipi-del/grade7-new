@@ -5,27 +5,28 @@ modules/lineage/routers.py — 血缘追踪 API 端点
 """
 
 import logging
-from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from core.routers import get_db, get_current_user, verify_entity_ownership
-from core.models import User
-from modules.lineage.services import LineageService
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role, verify_entity_ownership
+from fastapi import APIRouter, Depends, HTTPException, Query
+from modules.evaluation.models import ScoreLog
 from modules.lineage.schemas import (
     CausalChain,
     LineageStatsOut,
-    LineageQuery,
-    ScoreTraceOut,
     MigrationBatchCreate,
-    MigrationBatchUpdate,
     MigrationBatchOut,
+    MigrationBatchUpdate,
     MigrationStatsOut,
+    ScoreTraceOut,
 )
-from modules.evaluation.models import ScoreLog
+from modules.lineage.services import LineageService
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("lineage.routers")
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN))],
+)
 
 
 @router.get("/traces/{trace_id}", response_model=CausalChain)
@@ -38,11 +39,27 @@ async def get_trace_chain(
     查询一条完整的因果关系链
     示例: /api/v1/lineage/traces/abc-123-def
     """
+    # P0 修复: 多租户隔离 — 验证因果链归属
+    from modules.lineage.models import CausalChain as CausalChainModel
+
     chain = await LineageService.get_trace_chain(db, trace_id)
     if not chain:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="因果链不存在")
+    # 校验 school_id 归属（CausalChain 如有 school_id 列）
+    if hasattr(chain, "school_id") and chain.school_id is not None:
+        accessible_ids = await __get_accessible_ids(current_user, db)
+        if chain.school_id not in accessible_ids:
+            raise HTTPException(status_code=403, detail="无权访问其他学校的数据")
     return chain
+
+
+async def __get_accessible_ids(current_user: User, db: AsyncSession) -> list[int]:
+    """内部辅助：获取当前用户的 access_scope（避免循环导入）"""
+    from core.tenant_context import get_accessible_school_ids
+
+    return await get_accessible_school_ids(current_user, db)
 
 
 @router.get("/students/{student_id}")
@@ -54,6 +71,10 @@ async def get_student_lineage(
     db: AsyncSession = Depends(get_db),
 ):
     """查询学生全链路血缘"""
+    # P0 修复: 多租户隔离 — 验证学生归属
+    from core.models import Student
+
+    await verify_entity_ownership(db, Student, student_id, current_user, "学生不存在")
     return await LineageService.get_student_lineage(db, student_id, page, page_size)
 
 
@@ -68,8 +89,17 @@ async def get_source_descendants(
     查询某个源实体的全部下游影响
     示例: /api/v1/lineage/sources/discipline_record/42
     """
+    # P0 修复: 多租户隔离 — lineage_events 按 school_id 过滤
+    # source_id 本身是外键引用，通过 WHERE school_id 隔离
+    accessible_ids = await __get_accessible_ids(current_user, db)
     chains = await LineageService.get_source_descendants(db, source_type, source_id)
-    return {"source_type": source_type, "source_id": source_id, "chains": [c.model_dump() for c in chains]}
+    # 过滤出当前用户有权访问的链（基于源实体的 school_id）
+    filtered = [c for c in chains if getattr(c, "school_id", None) in accessible_ids or c.school_id is None]
+    return {
+        "source_type": source_type,
+        "source_id": source_id,
+        "chains": [c.model_dump() for c in filtered],
+    }
 
 
 @router.get("/stats", response_model=LineageStatsOut)
@@ -115,6 +145,7 @@ async def search_lineage(
 # #1193 成绩出生证明
 # ═══════════════════════════════════════════════════════════
 
+
 @router.get("/trace/{score_log_id}", response_model=ScoreTraceOut)
 async def get_score_trace(
     score_log_id: int,
@@ -136,12 +167,9 @@ async def get_score_trace(
 
     权限控制：多租户隔离 + MS_ADMIN/GRADE_LEADER/CLASS_TEACHER
     """
-    # 多租户隔离 — 先查出 ScoreLog 验证 school_id
-    result = await db.execute(
-        select(ScoreLog).where(ScoreLog.id == score_log_id)
-    )
-    score_log = result.scalar_one_or_none()
-    await verify_entity_ownership(score_log, current_user, "ScoreLog")
+    # P0 修复: 多租户隔离 — 使用正确的 verify_entity_ownership 签名
+    # （原调用参数顺序错误：传了 entity 对象而非 db/model_class/entity_id）
+    await verify_entity_ownership(db, ScoreLog, score_log_id, current_user, "评分流水不存在")
 
     trace = await LineageService.get_score_trace(db, score_log_id)
     if not trace:
@@ -153,6 +181,7 @@ async def get_score_trace(
 # ═══════════════════════════════════════════════════════════
 # 数据迁移批次追踪
 # ═══════════════════════════════════════════════════════════
+
 
 @router.post("/migration/batches", status_code=201, response_model=MigrationBatchOut)
 async def create_migration_batch(
@@ -166,7 +195,9 @@ async def create_migration_batch(
     后续逐行写入时携带此 batch_id 关联 sync_batch。
     """
     return await LineageService.create_migration_batch(
-        db=db, data=body, school_id=current_user.school_id,
+        db=db,
+        data=body,
+        school_id=current_user.school_id,
         created_by=current_user.id,
     )
 
@@ -184,6 +215,14 @@ async def update_migration_batch(
     - 迁移完成: status="completed"/"completed_with_errors"/"failed"
     - 增量更新: success_rows/failed_rows/skipped_rows
     """
+    # P0 修复: 多租户隔离 — 验证批次归属
+    result = await LineageService.get_migration_batch(db, batch_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="批次不存在")
+    accessible_ids = await __get_accessible_ids(current_user, db)
+    if getattr(result, "school_id", None) is not None and result.school_id not in accessible_ids:
+        raise HTTPException(status_code=403, detail="无权访问其他学校的数据")
+    # 重新获取以更新（上面已校验过权限）
     result = await LineageService.update_migration_batch(db, batch_id, body)
     if not result:
         raise HTTPException(status_code=404, detail="批次不存在")
@@ -197,9 +236,13 @@ async def get_migration_batch(
     db: AsyncSession = Depends(get_db),
 ):
     """查询单个迁移批次详情"""
+    # P0 修复: 多租户隔离 — 验证批次归属
     result = await LineageService.get_migration_batch(db, batch_id)
     if not result:
         raise HTTPException(status_code=404, detail="批次不存在")
+    accessible_ids = await __get_accessible_ids(current_user, db)
+    if getattr(result, "school_id", None) is not None and result.school_id not in accessible_ids:
+        raise HTTPException(status_code=403, detail="无权访问其他学校的数据")
     return result
 
 
@@ -214,9 +257,12 @@ async def list_migration_batches(
 ):
     """列出数据迁移批次（分页+筛选）"""
     return await LineageService.list_migration_batches(
-        db=db, school_id=current_user.school_id,
-        page=page, page_size=page_size,
-        target_table=target_table, status=status,
+        db=db,
+        school_id=current_user.school_id,
+        page=page,
+        page_size=page_size,
+        target_table=target_table,
+        status=status,
     )
 
 
@@ -227,5 +273,6 @@ async def get_migration_stats(
 ):
     """数据迁移统计概览"""
     return await LineageService.get_migration_stats(
-        db=db, school_id=current_user.school_id,
+        db=db,
+        school_id=current_user.school_id,
     )

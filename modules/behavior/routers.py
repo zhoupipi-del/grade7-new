@@ -18,7 +18,12 @@ modules/behavior/routers.py — 违纪行为管理 API
 from datetime import date
 
 from core.models import User, UserRole
-from core.routers import get_current_user, get_db, require_role
+from core.routers import (
+    get_current_user,
+    get_db,
+    require_role,
+    verify_entity_ownership,
+)
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -125,6 +130,10 @@ async def get_discipline(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # P0 修复: 多租户隔离
+    from .models import DisciplineRecord
+
+    await verify_entity_ownership(db, DisciplineRecord, record_id, current_user, "违纪记录不存在")
     record = await BehaviorService.get_record(db, record_id)
     if not record:
         raise HTTPException(status_code=404, detail="违纪记录不存在")
@@ -139,6 +148,10 @@ async def update_discipline(
     current_user: User = Depends(get_current_user),
 ):
     """编辑违纪记录"""
+    # P0 修复: 多租户隔离
+    from .models import DisciplineRecord
+
+    await verify_entity_ownership(db, DisciplineRecord, record_id, current_user, "违纪记录不存在")
     record = await BehaviorService.update_record(db, record_id, body.model_dump(exclude_none=True))
     if not record:
         raise HTTPException(status_code=404, detail="违纪记录不存在")
@@ -153,6 +166,10 @@ async def delete_discipline(
     _guard: User = Depends(require_role(UserRole.MS_ADMIN)),
 ):
     """删除违纪记录 — 仅德育处管理员"""
+    # P0 修复: 多租户隔离
+    from .models import DisciplineRecord
+
+    await verify_entity_ownership(db, DisciplineRecord, record_id, current_user, "违纪记录不存在")
     ok = await BehaviorService.delete_record(db, record_id)
     if not ok:
         raise HTTPException(status_code=404, detail="违纪记录不存在")
@@ -166,6 +183,10 @@ async def resolve_discipline(
     current_user: User = Depends(get_current_user),
 ):
     """标记违纪已解决"""
+    # P0 修复: 多租户隔离
+    from .models import DisciplineRecord
+
+    await verify_entity_ownership(db, DisciplineRecord, record_id, current_user, "违纪记录不存在")
     record = await BehaviorService.resolve_record(db, record_id)
     if not record:
         raise HTTPException(status_code=400, detail="无法解决该违纪记录（可能已解决或不存在）")
@@ -202,6 +223,10 @@ async def escalation_risk(
     current_user: User = Depends(get_current_user),
 ):
     """查询学生的累计扣分升级风险"""
+    # P0+P1-D 修复: 多租户隔离 + 防止跨校信息泄露
+    from core.models import Student
+
+    await verify_entity_ownership(db, Student, student_id, current_user, "学生不存在")
     return await BehaviorService.get_escalation_risk(db, student_id)
 
 
@@ -263,8 +288,13 @@ async def review_appeal(
     body: AppealReview,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _guard: User = Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)),
 ):
-    """审核申诉（班主任/年级组长/德育处）"""
+    """审核申诉（仅德育处/年级组长/班主任）"""
+    # P0 修复: 多租户隔离
+    from .models import DisciplineAppeal
+
+    await verify_entity_ownership(db, DisciplineAppeal, appeal_id, current_user, "申诉不存在")
     appeal = await BehaviorService.review_appeal(
         db,
         appeal_id,

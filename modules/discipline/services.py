@@ -15,7 +15,7 @@ from datetime import date, timedelta
 
 from core.event_bus import EventBus
 from core.models import Class, Student, UserRole, get_local_now
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,6 +27,7 @@ from .models import (
     DisciplineLevel,
     DisciplineSanction,
     DisciplineStatus,
+    SanctionAppeal,
 )
 
 logger = logging.getLogger(__name__)
@@ -235,6 +236,8 @@ class DisciplineService:
             return False
         if sanction.status not in (DisciplineStatus.PENDING, DisciplineStatus.DRAFT_PENDING):
             raise ValueError("仅待初审/草稿状态的处分可删除")
+        # P1 修复: 先清理关联的申诉记录（FK 约束 sanction_appeals.sanction_id）
+        await db.execute(delete(SanctionAppeal).where(SanctionAppeal.sanction_id == sanction_id))
         await db.delete(sanction)
         await db.commit()
         return True
@@ -904,6 +907,9 @@ class DisciplineService:
         if draft.status != DisciplineStatus.DRAFT_PENDING:
             raise ValueError(f"只能废弃草稿状态的记录，当前状态: {draft.status.value}")
 
+        # P1 修复: 先清理关联的申诉记录（FK 约束 sanction_appeals.sanction_id）
+        await db.execute(delete(SanctionAppeal).where(SanctionAppeal.sanction_id == draft_id))
+
         await db.delete(draft)
         await db.commit()
         logger.info(f"🗑️ 草稿已废弃: id={draft_id} student_id={draft.student_id}")
@@ -920,19 +926,11 @@ class DisciplineService:
         grade_id: int | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
-        class_id: int | None = None,
     ) -> dict:
-        """
-        处分统计概览
-
-        W3-BE-RBAC-002 补充修复: 新增可选 class_id 维度，供 CLASS_TEACHER
-        强制绑定本班范围使用，避免班主任读取全校聚合计数。
-        """
+        """处分统计概览"""
         conditions = [DisciplineSanction.school_id == school_id]
         if grade_id:
             conditions.append(DisciplineSanction.grade_id == grade_id)
-        if class_id:
-            conditions.append(DisciplineSanction.class_id == class_id)
         if start_date:
             conditions.append(DisciplineSanction.punish_date >= start_date)
         if end_date:

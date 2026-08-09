@@ -11,6 +11,7 @@ import logging
 from celery.result import AsyncResult
 from core.models import User
 from core.routers import UserRole, get_current_user, get_db, require_role
+from core.ratelimit import ai_prescription_rate_limit
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from modules.ai_prescription.aggregator import AIPrescriptionAggregator
 from modules.ai_prescription.models import (
@@ -46,6 +47,7 @@ router = APIRouter(tags=["AI 德育处方"])
     response_model=PrescriptionTaskOut,
     status_code=202,
     summary="发起班级月度诊断（异步）",
+    dependencies=[Depends(ai_prescription_rate_limit)],
 )
 async def create_class_diagnosis(
     body: ClassDiagnosisRequest,
@@ -98,6 +100,7 @@ async def create_class_diagnosis(
     response_model=PrescriptionTaskOut,
     status_code=202,
     summary="发起学生心理干预话术生成（异步）",
+    dependencies=[Depends(ai_prescription_rate_limit)],
 )
 async def create_student_intervention(
     body: StudentInterventionRequest,
