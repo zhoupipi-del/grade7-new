@@ -21,6 +21,7 @@ from core.models import User, UserRole
 from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from modules.reports.celery_app import celery_engine
 from modules.reports.schemas import (
     ClassTeacherReportResponse,
     ExportGradeReportRequest,
@@ -93,8 +94,15 @@ async def get_task_status(
       - PROGRESS: 生成中 → {progress: 0-100, status_text: "正在..."}
       - SUCCESS:  完成   → {result: {filename, download_url, file_size_kb}}
       - FAILURE:  失败   → {error: "错误信息"}
+
+    无效 task_id 一律 404，不泄露后端异常细节（INC-DEPLOY-20260810-001 教训）。
     """
-    task_result = AsyncResult(task_id, app=None)
+    try:
+        task_result = AsyncResult(task_id, app=celery_engine)
+        # 主动触发 state 解析，无效 task 会被 celery 抛 InvalidStateError
+        _ = task_result.state
+    except Exception:
+        raise HTTPException(status_code=404, detail="任务不存在")
 
     response = {
         "task_id": task_id,
@@ -143,9 +151,17 @@ async def download_task_report(
 
     安全修复: 报告 PDF 从公开 static 目录迁至私有目录,
     下载必须持有效 JWT 且通过归属校验（school_id + created_by）。
+
+    无效 task_id 一律 404，避免后端异常污染日志。
     """
-    task_result = AsyncResult(task_id, app=None)
-    if task_result.state != "SUCCESS":
+    try:
+        task_result = AsyncResult(task_id, app=celery_engine)
+        _ = task_result.state
+        if task_result.state != "SUCCESS":
+            raise HTTPException(status_code=404, detail="报告不存在或尚未生成")
+    except HTTPException:
+        raise
+    except Exception:
         raise HTTPException(status_code=404, detail="报告不存在或尚未生成")
 
     result = task_result.result if isinstance(task_result.result, dict) else {}
