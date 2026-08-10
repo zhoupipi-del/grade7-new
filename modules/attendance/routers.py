@@ -159,6 +159,10 @@ async def get_student_attendance(
     """查询某学生的考勤历史"""
     # P0 多租户隔离：校验 student_id 是否属于当前用户学校
     await verify_entity_ownership(db, Student, student_id, current_user, '学生不存在')
+    # S0-1 P2 修复（SEC-INC-20260810-001）：校级校验挡不住同校跨班/跨孩。
+    # 此前对任何 student_id 都 200 + 空集 → fail-open。现复用 /calendar 的范式
+    # 做行级归属：PARENT 仅本人孩子 / 班主任本班 / 年级组长本年级 / MS_ADMIN 本校。
+    await get_student_or_403(db, current_user, student_id)
     records = await AttendanceService.get_student_history(
         db=db,
         school_id=current_user.school_id,
