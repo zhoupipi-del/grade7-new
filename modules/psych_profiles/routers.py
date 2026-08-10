@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import User, Student, Class, Grade, get_local_now
 from core.routers import get_db, get_current_user
+from core.access import get_student_or_403
 from modules.psych_profiles.models import PsyProfile, PsyScreeningRecord
 from modules.psych_profiles import services as svc
 from modules.psych_profiles.schemas import (
