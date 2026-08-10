@@ -1140,10 +1140,31 @@ async def list_class_portraits(
         require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
     ),
 ):
-    """班级心理画像列表（十维度雷达图数据）"""
+    """班级心理画像列表（十维度雷达图数据）
+
+    范围 fail-close：班主任仅本班、年级组长仅本年级，未绑定一律 403，
+    不信任前端 grade_id 传参（仅管理员可用其做筛选）。
+    """
     conditions = [PsychClassPortrait.school_id == current_user.school_id]
-    if grade_id:
-        conditions.append(PsychClassPortrait.grade_id == grade_id)
+    user_role = (
+        current_user.role if isinstance(current_user.role, UserRole) else UserRole(current_user.role)
+    )
+
+    if user_role == UserRole.CLASS_TEACHER:
+        bound_cid = getattr(current_user, "class_id", None)
+        if not bound_cid:
+            raise HTTPException(status_code=403, detail="班主任未绑定班级，无权查看班级画像")
+        conditions.append(PsychClassPortrait.class_id == bound_cid)
+    elif user_role == UserRole.GRADE_LEADER:
+        bound_gid = getattr(current_user, "grade_id", None)
+        if not bound_gid:
+            raise HTTPException(status_code=403, detail="年级组长未绑定年级，无权查看班级画像")
+        conditions.append(PsychClassPortrait.grade_id == bound_gid)
+    elif user_role == UserRole.MS_ADMIN:
+        if grade_id:
+            conditions.append(PsychClassPortrait.grade_id == grade_id)
+    else:
+        raise HTTPException(status_code=403, detail="权限不足")
 
     stmt = (
         select(PsychClassPortrait)

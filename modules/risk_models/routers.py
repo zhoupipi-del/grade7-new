@@ -383,22 +383,32 @@ async def get_dashboard_metrics(
 
     供 RDI 风险看板页 (RdiDashboard.vue) 使用。聚合 risk_warnings(active) + Student + Class。
 
-    权限:
-      - class_teacher: 自动限制本班
-      - grade_leader: 自动限制本年级
+    权限（fail-close，范围一律以账号绑定为准，不信任前端传参）:
+      - class_teacher: 强制本班，未绑班 403
+      - grade_leader: 强制本年级，未绑年级 403
       - ms_admin: 看全校
+      - 其余角色: 403
     """
-    if current_user.role not in [UserRole.CLASS_TEACHER, UserRole.GRADE_LEADER, UserRole.MS_ADMIN]:
-        raise HTTPException(status_code=403, detail="权限不足")
+    user_role = (
+        current_user.role if isinstance(current_user.role, UserRole) else UserRole(current_user.role)
+    )
 
-    if current_user.role == UserRole.CLASS_TEACHER:
+    if user_role == UserRole.MS_ADMIN:
+        pass  # 全校范围，沿用前端传参做筛选
+    elif user_role == UserRole.CLASS_TEACHER:
+        # 强制覆盖：防止班主任主动传别班 class_id 横向越权
+        class_id = getattr(current_user, "class_id", None)
+        grade_id = None
         if not class_id:
-            class_id = getattr(current_user, "class_id", None)
-        if not class_id:
-            raise HTTPException(status_code=400, detail="班主任缺少班级信息")
-    elif current_user.role == UserRole.GRADE_LEADER:
+            raise HTTPException(status_code=403, detail="班主任未绑定班级，无权查看风险看板")
+    elif user_role == UserRole.GRADE_LEADER:
+        # 强制覆盖：防止年级组长主动传别年级 grade_id 跨年级越权
+        grade_id = getattr(current_user, "grade_id", None)
+        class_id = None
         if not grade_id:
-            grade_id = getattr(current_user, "grade_id", None)
+            raise HTTPException(status_code=403, detail="年级组长未绑定年级，无权查看风险看板")
+    else:
+        raise HTTPException(status_code=403, detail="权限不足")
 
     metrics = await _aggregate_dashboard_metrics(
         db, current_user.school_id, class_id, grade_id, limit_events
