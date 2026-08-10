@@ -427,15 +427,27 @@ async def list_grades(
 # ═══════════════════════════════════════════════════════════════
 
 
+# P0 修复（2026-08-09 开学前审计）：班级名录属校内管理数据，家长/学生一律禁止访问
+STAFF_ROLES = (
+    UserRole.MS_ADMIN,
+    UserRole.GROUP_ADMIN,
+    UserRole.BRANCH_ADMIN,
+    UserRole.GRADE_LEADER,
+    UserRole.CLASS_TEACHER,
+    UserRole.TEACHER,
+    UserRole.COUNSELOR,
+)
+
+
 @router.get("/classes")
 async def list_classes(
     school_id: int | None = None,
     grade_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
 ):
     """
-    获取班级列表。
+    获取班级列表（家长/学生 403）。
     - MS_ADMIN 可传 school_id 查询其他学校
     - 其他角色强制使用 current_user.school_id（school_id 参数被忽略）
     """
