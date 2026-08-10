@@ -30,7 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 # ApprovalRequest 定义在 evaluation/models.py 中
 from modules.evaluation.models import ApprovalRequest
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -49,6 +49,7 @@ from .schemas import (
     TenantApprovalChainUpdate,
     UrgeResponse,
 )
+from core.access import get_student_or_403, student_id_scope
 from .services import ApprovalChainService, get_local_now, normalize_chain_config
 
 logger = logging.getLogger(__name__)
@@ -169,10 +170,10 @@ async def list_chains(
     active_only: bool = Query(default=False, description="仅显示活跃链"),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_require_staff),
     db: AsyncSession = Depends(get_db),
 ):
-    """列出当前学校的审批链"""
+    """列出当前学校的审批链（家长/学生 403）"""
     items, total = await ApprovalChainService.list_chains(
         db,
         school_id=user.school_id,
@@ -206,10 +207,10 @@ async def create_chain(
 @router.get("/chains/{chain_id}", response_model=TenantApprovalChainResponse)
 async def get_chain(
     chain_id: int,
-    user: User = Depends(get_current_user),
+    user: User = Depends(_require_staff),
     db: AsyncSession = Depends(get_db),
 ):
-    """获取审批链详情"""
+    """获取审批链详情（家长/学生 403）"""
     chain = await ApprovalChainService.get_chain(db, chain_id, user.school_id)
     if not chain:
         raise HTTPException(status_code=404, detail="审批链不存在")
@@ -267,15 +268,22 @@ async def deactivate_chain(
 
 @router.get("/pending-count", response_model=PendingCountResponse)
 async def get_pending_count(
-    user: User = Depends(get_current_user),
+    user: User = Depends(_require_staff),
     db: AsyncSession = Depends(get_db),
 ):
-    """获取当前学校的待审批工单数量"""
-    result = await db.execute(
-        select(func.count(ApprovalRequest.id)).where(
-            ApprovalRequest.school_id == user.school_id,
-            ApprovalRequest.current_status == "pending",
+    """获取当前用户可见范围内的待审批工单数量（家长/学生 403）"""
+    conditions = [
+        ApprovalRequest.school_id == user.school_id,
+        ApprovalRequest.current_status == "pending",
+    ]
+    # 行级范围收敛: None=本校全部 / []=零可见 / [..]=白名单
+    scope = await student_id_scope(db, user)
+    if scope is not None:
+        conditions.append(
+            ApprovalRequest.student_id.in_(scope) if scope else false()
         )
+    result = await db.execute(
+        select(func.count(ApprovalRequest.id)).where(and_(*conditions))
     )
     count = result.scalar() or 0
     return PendingCountResponse(pending=count)
@@ -289,7 +297,7 @@ async def get_pending_count(
 @router.get("/tickets", response_model=list[ApprovalTicketResponse])
 async def get_tickets(
     type: str = Query(default="todo", description="todo=待审批, done=已完成"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_require_staff),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -304,6 +312,12 @@ async def get_tickets(
 
     # 构建查询条件
     conditions = [ApprovalRequest.school_id == user.school_id]
+    # 行级范围收敛: None=本校全部 / []=零可见 / [..]=白名单
+    scope = await student_id_scope(db, user)
+    if scope is not None:
+        conditions.append(
+            ApprovalRequest.student_id.in_(scope) if scope else false()
+        )
     if type == "todo":
         conditions.append(ApprovalRequest.current_status == "pending")
     else:
@@ -399,11 +413,17 @@ async def list_requests(
     status: str | None = Query(default=None, description="按状态筛选"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
-    user: User = Depends(get_current_user),
+    user: User = Depends(_require_staff),
     db: AsyncSession = Depends(get_db),
 ):
-    """分页查询审批请求列表"""
+    """分页查询审批请求列表（家长/学生 403；按角色收敛到本年级/本班）"""
     conditions = [ApprovalRequest.school_id == user.school_id]
+    # 行级范围收敛: None=本校全部 / []=零可见 / [..]=白名单
+    scope = await student_id_scope(db, user)
+    if scope is not None:
+        conditions.append(
+            ApprovalRequest.student_id.in_(scope) if scope else false()
+        )
     if status:
         conditions.append(ApprovalRequest.current_status == status)
 
@@ -452,10 +472,10 @@ async def list_requests(
 @router.get("/requests/{req_id}", response_model=ApprovalRequestResponse)
 async def get_request(
     req_id: int,
-    user: User = Depends(get_current_user),
+    user: User = Depends(_require_staff),
     db: AsyncSession = Depends(get_db),
 ):
-    """获取单个审批请求详情"""
+    """获取单个审批请求详情（家长/学生 403；非管辖学生 403）"""
     result = await db.execute(
         select(ApprovalRequest).where(
             ApprovalRequest.id == req_id,
@@ -463,6 +483,9 @@ async def get_request(
         )
     )
     ar = result.scalar_one_or_none()
+    # 行级归属校验: 非本人管辖的学生工单一律 403
+    if ar is not None:
+        await get_student_or_403(db, user, ar.student_id)
     if not ar:
         raise HTTPException(status_code=404, detail="审批请求不存在")
 
