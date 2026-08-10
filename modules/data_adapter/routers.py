@@ -58,7 +58,17 @@ async def health():
 async def list_templates(
     current_user: User = Depends(get_current_user),
 ):
-    """获取所有可用的清洗模板"""
+    """获取所有可用的清洗模板
+
+    S0-3 修复：排除 PARENT/STUDENT —— 清洗模板是教师/管理员工具，
+    家长读模板无业务价值。
+    """
+    require_role(
+        UserRole.MS_ADMIN,
+        UserRole.GRADE_LEADER,
+        UserRole.CLASS_TEACHER,
+        UserRole.COUNSELOR,
+    )(current_user)
     templates = get_all_templates()
     template_outs = []
     for t in templates:

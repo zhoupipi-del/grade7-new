@@ -168,7 +168,13 @@ async def api_get_profile(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_psych_read),
 ):
-    """心理档案详情 — 含学生基本信息 + 最近筛查/咨询记录"""
+    """心理档案详情 — 含学生基本信息 + 最近筛查/咨询记录
+
+    S0-3 P0 修复：行级归属校验。家长/学生被 require_psych_read 排除，
+    班主任/年级组长必须满足行级 scope 才能读该学生档案。
+    """
+    # S0-3 P0：行级归属（家长→bound_student_id / 班主任→本班 / 年级组长→本年级 / MS_ADMIN→本校）
+    await get_student_or_403(db, current_user, student_id)
     profile = await svc.get_profile(db, current_user.school_id, student_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="该学生暂无心理档案")
@@ -402,7 +408,11 @@ async def api_student_screenings(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_psych_read),
 ):
-    """学生筛查历史"""
+    """学生筛查历史
+
+    S0-3 P0 修复：行级归属校验。
+    """
+    await get_student_or_403(db, current_user, student_id)
     records = await svc.get_student_screenings(db, current_user.school_id, student_id, limit)
     return {
         "student_id": student_id,
@@ -466,7 +476,11 @@ async def api_student_nexus(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_psych_read),
 ):
-    """单个学生双轨详细画像 — 学业预警历史 + 筛查历史 + RDI四维 + 咨询摘要"""
+    """单个学生双轨详细画像 — 学业预警历史 + 筛查历史 + RDI四维 + 咨询摘要
+
+    S0-3 P0 修复：行级归属校验。
+    """
+    await get_student_or_403(db, current_user, student_id)
     detail = await svc.get_student_nexus_detail(db, current_user.school_id, student_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="学生不存在")
