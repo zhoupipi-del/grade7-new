@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from celery.result import AsyncResult
-from core.models import User
+from core.models import User, Student, Class as SchoolClass
 from core.routers import UserRole, get_current_user, get_db, require_role
 from core.ratelimit import ai_prescription_rate_limit
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -31,6 +31,7 @@ from modules.ai_prescription.tasks import (
     generate_student_intervention,
 )
 from sqlalchemy import select, text
+from sqlalchemy import or_
 
 logger = logging.getLogger(__name__)
 
@@ -268,10 +269,90 @@ async def list_prescription_history(
     支持按类型 + 目标 ID + 目标类型过滤
     """
 
+    # S0-2 P0 修复（SEC-INC-20260810-001）：
+    #   此前端点零守卫 + 仅 school_id 过滤 → 家长/学生可读全校 AI 干预记录，
+    #   含 full_text/raw_snapshot 涉心理/处分/成绩敏感字段。
+    #   修法：角色闸排除 PARENT/STUDENT；教师/年级组长按行级 scope 收口。
+    _role = current_user.role if isinstance(current_user.role, UserRole) else UserRole(current_user.role)
+    if _role not in (UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER):
+        raise HTTPException(status_code=403, detail="无权查看 AI 处方")
+
     school_id = current_user.school_id
 
     # 构建查询（条件列表复用）
     conditions = [AIPrescription.school_id == school_id]
+
+    # 行级 scope（按 prescription_type/target_type 分流强制覆盖）
+    if _role == UserRole.CLASS_TEACHER:
+        bound_cid = getattr(current_user, "class_id", None)
+        if not bound_cid:
+            raise HTTPException(status_code=403, detail="班主任未绑定班级，无权查看 AI 处方")
+        if prescription_type == "CLASS_DIAGNOSIS" or target_type == "class":
+            conditions.append(AIPrescription.target_id == bound_cid)
+        elif prescription_type == "STUDENT_INTV" or target_type == "student":
+            conditions.append(
+                AIPrescription.target_id.in_(
+                    select(Student.id).where(
+                        Student.class_id == bound_cid,
+                        Student.school_id == school_id,
+                    )
+                )
+            )
+        else:
+            # 未指定类型：限定 target_id 是本班 OR 本班学生
+            conditions.append(
+                or_(
+                    AIPrescription.target_id == bound_cid,
+                    AIPrescription.target_id.in_(
+                        select(Student.id).where(
+                            Student.class_id == bound_cid,
+                            Student.school_id == school_id,
+                        )
+                    ),
+                )
+            )
+    elif _role == UserRole.GRADE_LEADER:
+        bound_gid = getattr(current_user, "grade_id", None)
+        if not bound_gid:
+            raise HTTPException(status_code=403, detail="年级组长未绑定年级，无权查看 AI 处方")
+        if prescription_type == "CLASS_DIAGNOSIS" or target_type == "class":
+            conditions.append(
+                AIPrescription.target_id.in_(
+                    select(SchoolClass.id).where(
+                        SchoolClass.grade_id == bound_gid,
+                        SchoolClass.school_id == school_id,
+                    )
+                )
+            )
+        elif prescription_type == "STUDENT_INTV" or target_type == "student":
+            conditions.append(
+                AIPrescription.target_id.in_(
+                    select(Student.id).where(
+                        Student.grade_id == bound_gid,
+                        Student.school_id == school_id,
+                    )
+                )
+            )
+        else:
+            # 未指定类型：本年级班级 OR 本年级学生
+            conditions.append(
+                or_(
+                    AIPrescription.target_id.in_(
+                        select(SchoolClass.id).where(
+                            SchoolClass.grade_id == bound_gid,
+                            SchoolClass.school_id == school_id,
+                        )
+                    ),
+                    AIPrescription.target_id.in_(
+                        select(Student.id).where(
+                            Student.grade_id == bound_gid,
+                            Student.school_id == school_id,
+                        )
+                    ),
+                )
+            )
+    # MS_ADMIN: 保持全校
+
     if prescription_type:
         conditions.append(AIPrescription.prescription_type == prescription_type)
     if target_id is not None:
@@ -339,6 +420,11 @@ async def get_prescription_detail(
     current_user=Depends(get_current_user),
 ):
     """获取历史处方的完整内容（含 full_text）"""
+    # S0-2 P0 修复（SEC-INC-20260810-001）：角色闸 + 行级归属校验
+    _role = current_user.role if isinstance(current_user.role, UserRole) else UserRole(current_user.role)
+    if _role not in (UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER):
+        raise HTTPException(status_code=403, detail="无权查看 AI 处方")
+
     record = await db.scalar(
         select(AIPrescription).where(
             AIPrescription.id == record_id,
@@ -347,6 +433,47 @@ async def get_prescription_detail(
     )
     if not record:
         raise HTTPException(status_code=404, detail="处方记录不存在")
+
+    # 行级归属校验（按 target_type 决定查 Student 还是 SchoolClass）
+    if _role == UserRole.CLASS_TEACHER:
+        bound_cid = getattr(current_user, "class_id", None)
+        if not bound_cid:
+            raise HTTPException(status_code=403, detail="班主任未绑定班级，无权查看 AI 处方")
+        if record.target_type == "class":
+            if record.target_id != bound_cid:
+                raise HTTPException(status_code=403, detail="无权查看其他班级的处方")
+        elif record.target_type == "student":
+            stu = await db.scalar(
+                select(Student).where(
+                    Student.id == record.target_id,
+                    Student.school_id == current_user.school_id,
+                )
+            )
+            if not stu or stu.class_id != bound_cid:
+                raise HTTPException(status_code=403, detail="无权查看其他班级学生的处方")
+    elif _role == UserRole.GRADE_LEADER:
+        bound_gid = getattr(current_user, "grade_id", None)
+        if not bound_gid:
+            raise HTTPException(status_code=403, detail="年级组长未绑定年级，无权查看 AI 处方")
+        if record.target_type == "class":
+            cls = await db.scalar(
+                select(SchoolClass).where(
+                    SchoolClass.id == record.target_id,
+                    SchoolClass.school_id == current_user.school_id,
+                )
+            )
+            if not cls or cls.grade_id != bound_gid:
+                raise HTTPException(status_code=403, detail="无权查看其他年级班级的处方")
+        elif record.target_type == "student":
+            stu = await db.scalar(
+                select(Student).where(
+                    Student.id == record.target_id,
+                    Student.school_id == current_user.school_id,
+                )
+            )
+            if not stu or stu.grade_id != bound_gid:
+                raise HTTPException(status_code=403, detail="无权查看其他年级学生的处方")
+    # MS_ADMIN: pass
 
     return {
         "record_id": record.id,
