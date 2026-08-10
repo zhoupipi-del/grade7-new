@@ -49,7 +49,7 @@ from .schemas import (
     TenantApprovalChainUpdate,
     UrgeResponse,
 )
-from .services import ApprovalChainService, get_local_now
+from .services import ApprovalChainService, get_local_now, normalize_chain_config
 
 logger = logging.getLogger(__name__)
 
@@ -96,12 +96,7 @@ def _map_chain_nodes(
       pending + node_index != current_step → waiting
     """
     # 防御: 旧数据 chain_config 可能是 list 而非 dict，归一化为标准结构
-    if isinstance(chain_config, list):
-        chain_config = {
-            "nodes": chain_config,
-            "total_timeout_hours": 48,
-            "approval_mode": "serial_and",
-        }
+    chain_config = normalize_chain_config(chain_config)
     nodes = chain_config.get("nodes", [])
     result = []
 
@@ -155,12 +150,7 @@ def _build_ticket_title(event_type: str, student_name: str) -> str:
 def _calculate_deadline(created_at, chain_config: dict | list) -> str:
     """计算截止时间 = 创建时间 + 总超时小时数"""
     # 防御: 旧数据 chain_config 可能是 list 而非 dict
-    if isinstance(chain_config, list):
-        chain_config = {
-            "nodes": chain_config,
-            "total_timeout_hours": 48,
-            "approval_mode": "serial_and",
-        }
+    chain_config = normalize_chain_config(chain_config)
     if not created_at:
         return ""
     total_hours = chain_config.get("total_timeout_hours", 48)
@@ -336,14 +326,8 @@ async def get_tickets(
 
     tickets = []
     for ar, student_name, school_name in rows:
-        chain = ar.chain_config or {}
         # 防御: 旧数据 chain_config 可能是 list 而非 dict
-        if isinstance(chain, list):
-            chain = {
-                "nodes": chain,
-                "total_timeout_hours": 48,
-                "approval_mode": "serial_and",
-            }
+        chain = normalize_chain_config(ar.chain_config)
         nodes = _map_chain_nodes(chain, ar.current_step or 0)
         title = _build_ticket_title(ar.event_type, student_name or "未知学生")
 
@@ -450,7 +434,7 @@ async def list_requests(
                 source_id=ar.source_id,
                 severity=ar.severity,
                 approval_mode=ar.approval_mode,
-                chain_config=ar.chain_config or {},
+                chain_config=normalize_chain_config(ar.chain_config),
                 current_status=ar.current_status,
                 current_step=ar.current_step or 0,
                 created_at=ar.created_at,
@@ -490,7 +474,7 @@ async def get_request(
         source_id=ar.source_id,
         severity=ar.severity,
         approval_mode=ar.approval_mode,
-        chain_config=ar.chain_config or {},
+        chain_config=normalize_chain_config(ar.chain_config),
         current_status=ar.current_status,
         current_step=ar.current_step or 0,
         created_at=ar.created_at,
@@ -524,7 +508,10 @@ async def approve_request(
     if ar.current_status != "pending":
         raise HTTPException(status_code=400, detail="该审批已处理，不可重复操作")
 
-    chain = ar.chain_config or {}
+    # 归一化 + 自愈: 历史裸 list 快照在首次审批动作时被规整为标准 dict 并落库
+    chain = normalize_chain_config(ar.chain_config)
+    if chain is not ar.chain_config:
+        ar.chain_config = chain
     nodes = chain.get("nodes", [])
     now = get_local_now()
 
@@ -605,7 +592,10 @@ async def reject_request(
     if ar.current_status != "pending":
         raise HTTPException(status_code=400, detail="该审批已处理，不可重复操作")
 
-    chain = ar.chain_config or {}
+    # 归一化 + 自愈: 历史裸 list 快照在首次审批动作时被规整为标准 dict 并落库
+    chain = normalize_chain_config(ar.chain_config)
+    if chain is not ar.chain_config:
+        ar.chain_config = chain
     nodes = chain.get("nodes", [])
     now = get_local_now()
 

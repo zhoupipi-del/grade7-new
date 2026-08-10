@@ -702,6 +702,7 @@ class AppealProxyService:
                 if sanction:
                     # 路由到审批模块 — 创建审批工单（字段对齐 ApprovalRequest ORM）
                     try:
+                        from modules.approval.services import build_appeal_chain_config
                         from modules.evaluation.models import ApprovalRequest
 
                         approval = ApprovalRequest(
@@ -712,11 +713,16 @@ class AppealProxyService:
                             source_id=sanction.id,
                             severity="major",
                             approval_mode="serial_and",
-                            chain_config=[
-                                {"role": "class_teacher", "status": "pending"},
-                                {"role": "grade_leader", "status": "pending"},
-                                {"role": "ms_admin", "status": "pending"},
-                            ],
+                            # 必须是标准 dict 快照 — 裸 list 会击穿审批列表/审批动作/超时扫描
+                            chain_config=build_appeal_chain_config(
+                                event_type="discipline_appeal",
+                                roles=[
+                                    ("class_teacher", 24),
+                                    ("grade_leader", 48),
+                                    ("ms_admin", 72),
+                                ],
+                                approval_mode="serial_and",
+                            ),
                             current_status="pending",
                         )
                         db.add(approval)
@@ -750,6 +756,7 @@ class AppealProxyService:
                 behavior = behavior_result.scalar_one_or_none()
                 if behavior:
                     try:
+                        from modules.approval.services import build_appeal_chain_config
                         from modules.evaluation.models import ApprovalRequest
 
                         approval = ApprovalRequest(
@@ -760,10 +767,15 @@ class AppealProxyService:
                             source_id=behavior.id,
                             severity="minor",
                             approval_mode="parallel_or",
-                            chain_config=[
-                                {"role": "class_teacher", "status": "pending"},
-                                {"role": "grade_leader", "status": "pending"},
-                            ],
+                            # 必须是标准 dict 快照 — 裸 list 会击穿审批列表/审批动作/超时扫描
+                            chain_config=build_appeal_chain_config(
+                                event_type="behavior_appeal",
+                                roles=[
+                                    ("class_teacher", 24),
+                                    ("grade_leader", 24),
+                                ],
+                                approval_mode="parallel_or",
+                            ),
                             current_status="pending",
                         )
                         db.add(approval)

@@ -48,6 +48,80 @@ ROLE_LABELS = {
 
 
 # ═══════════════════════════════════════════════════════════════
+# chain_config 形态归一化 (兼容历史裸 list 快照)
+# ═══════════════════════════════════════════════════════════════
+
+DEFAULT_CHAIN_TIMEOUT_HOURS = 48
+
+
+def normalize_chain_config(raw: Any) -> Dict[str, Any]:
+    """
+    将任意历史形态的 chain_config 归一化为标准 dict 快照。
+
+    标准形态: {"nodes": [...], "approval_mode": str, "total_timeout_hours": int, ...}
+
+    历史脏形态:
+      - 裸 list  → 早期 parent_portal 申诉路由直写节点数组，包成 {"nodes": [...]}
+      - None/""  → 返回空壳 {"nodes": []}
+
+    幂等: 已是 dict 的原样返回（不拷贝，保持 ORM JSON 字段的对象引用，
+          调用方对 nodes 元素的原地修改配合 flag_modified 仍可正常落库）。
+
+    该函数为纯函数，无 IO / 无副作用，可安全用于 router 与 Celery task。
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list):
+        # 裸节点数组 — 补齐标准字段，node_index 按位置回填
+        for idx, node in enumerate(raw):
+            if isinstance(node, dict) and "node_index" not in node:
+                node["node_index"] = idx
+        return {
+            "nodes": raw,
+            "approval_mode": "serial_and",
+            "total_timeout_hours": DEFAULT_CHAIN_TIMEOUT_HOURS,
+            "escalation_strategy": "escalate",
+            "_normalized_from": "list",
+        }
+    return {"nodes": [], "approval_mode": "serial_and",
+            "total_timeout_hours": DEFAULT_CHAIN_TIMEOUT_HOURS}
+
+
+def build_appeal_chain_config(
+    event_type: str,
+    roles: List[Tuple[str, int]],
+    approval_mode: str = "serial_and",
+) -> Dict[str, Any]:
+    """
+    构建申诉类工单的标准 chain_config 快照。
+
+    roles: [(role_code, timeout_hours), ...] 按审批顺序排列
+    """
+    nodes = [
+        {
+            "node_index": idx,
+            "role": role,
+            "label": ROLE_LABELS.get(role, role),
+            "timeout_hours": hours,
+            "action_on_timeout": "escalate",
+            "status": "pending",
+            "approver_id": None,
+            "approved_at": None,
+            "comment": None,
+        }
+        for idx, (role, hours) in enumerate(roles)
+    ]
+    return {
+        "mode": approval_mode,
+        "approval_mode": approval_mode,
+        "event_type": event_type,
+        "nodes": nodes,
+        "total_timeout_hours": sum(h for _, h in roles),
+        "escalation_strategy": "escalate",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
 # 模板 → 快照 转换器 (L3 执行层隔离的核心)
 # ═══════════════════════════════════════════════════════════════
 

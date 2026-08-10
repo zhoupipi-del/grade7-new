@@ -75,6 +75,7 @@ async def _scan_approval_requests_async() -> dict:
 
     幂等: 读取时记录 updated_at 快照，更新时校验快照一致性
     """
+    from modules.approval.services import normalize_chain_config
     from modules.evaluation.models import ApprovalRequest
 
     await _task_engine.dispose()
@@ -105,7 +106,11 @@ async def _scan_approval_requests_async() -> dict:
             total_scanned += 1
 
             # 1. 解析审批链快照
-            chain = ar.chain_config or {}
+            #    归一化 + 自愈: 历史裸 list 快照会让 chain.get() 抛 AttributeError，
+            #    进而击穿整轮扫描（循环外 commit 全量回滚）。此处统一规整并回写。
+            chain = normalize_chain_config(ar.chain_config)
+            if chain is not ar.chain_config:
+                ar.chain_config = chain
             nodes = chain.get("nodes", [])
 
             # 2. 检测超时模式
@@ -669,16 +674,26 @@ async def _check_timeout_approvals_async() -> dict:
 
     elapsed = round((time.time() - t0) * 1000, 0)
 
+    # 任一轨失败必须反映在总状态上 — 否则轨道崩溃被 "status: ok" 掩盖，
+    # 监控无感知（历史上 A 轨曾连续崩溃 34 天而任务始终报 succeeded）
+    failed_tracks = [
+        name for name, res in (("A", result_a), ("B", result_b))
+        if res.get("status") == "error"
+    ]
+
     summary = {
-        "status": "ok",
+        "status": "partial_error" if failed_tracks else "ok",
+        "failed_tracks": failed_tracks,
         "track_a": result_a,
         "track_b": result_b,
         "total_elapsed_ms": elapsed,
     }
-    logger.info(
+    log = logger.error if failed_tracks else logger.info
+    log(
         f"[APPROVAL] 双轨扫描完成 | "
         f"A轨={result_a.get('total_scanned', 0)}条 "
         f"B轨={result_b.get('total_scanned', 0)}条 "
+        f"失败轨={failed_tracks or '无'} "
         f"总耗时={elapsed}ms"
     )
     return summary
