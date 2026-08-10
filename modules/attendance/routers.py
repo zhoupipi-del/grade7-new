@@ -33,6 +33,7 @@ from .schemas import (
     BatchLeaveApprovalResult,
 )
 from .services import AttendanceService
+from .exceptions import NoPermissionError
 
 router = APIRouter(tags=["attendance"])
 
@@ -474,6 +475,19 @@ async def list_leaves(
 
     # 角色自动范围限定（query param 可覆盖）
     _gid, _cid, _sid = _apply_scope(current_user, grade_id, class_id)
+
+    # S0-1 P0 修复（SEC-INC-20260810-001）：
+    #   PARENT 角色 student_id 必须强制等于 bound_student_id。
+    #   根因：原 student_id=student_id or _sid —— 用户传值覆盖 scope，
+    #   致家长可越权读到任意学生的病假（含 reason）。
+    role = _resolve_role(current_user.role)
+    if role == UserRole.PARENT:
+        bound_sid = getattr(current_user, "bound_student_id", None)
+        if not bound_sid:
+            raise NoPermissionError("家长账号未绑定学生，无权查看请假")
+        if student_id is not None and student_id != bound_sid:
+            raise NoPermissionError("无权查看该学生的请假记录")
+        student_id = bound_sid  # 强制覆盖：忽略任何越界 student_id
 
     data = await AttendanceService.list_leaves(
         db=db,
