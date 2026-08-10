@@ -32,7 +32,7 @@ from core.models import Class, Student, User, UserRole
 from modules.attendance.models import AttendanceRecord
 from modules.behavior.models import DisciplineRecord
 from modules.evaluation.models import StudentScore
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
@@ -1157,15 +1157,21 @@ class RiskWarningService:
         if risk_level:
             query = query.where(RiskWarning.risk_level == risk_level)
 
-        # 范围限制: 班主任仅本班, 级组长仅本年级, 德育处全校
-        if current_user.role == UserRole.CLASS_TEACHER:
+        # 范围限制: 班主任仅本班, 级组长仅本年级, 德育处/心理教师全校
+        # ⚠️ fail-close 纵深防御: 未绑定班级/年级 -> 恒假条件(零可见)，
+        #    绝不能因字段为空而退化成「全校可见」；未列举角色同样零可见。
+        try:
+            _role = UserRole(current_user.role)
+        except ValueError:
+            _role = None
+        if _role == UserRole.CLASS_TEACHER:
             cid = getattr(current_user, "class_id", None)
-            if cid:
-                query = query.where(RiskWarning.class_id == cid)
-        elif current_user.role == UserRole.GRADE_LEADER:
+            query = query.where(RiskWarning.class_id == cid if cid else false())
+        elif _role == UserRole.GRADE_LEADER:
             gid = getattr(current_user, "grade_id", None)
-            if gid:
-                query = query.where(RiskWarning.grade_id == gid)
+            query = query.where(RiskWarning.grade_id == gid if gid else false())
+        elif _role not in (UserRole.MS_ADMIN, UserRole.COUNSELOR):
+            query = query.where(false())
 
         query = query.order_by(RiskWarning.warned_at.desc())
         result = await db.execute(query)

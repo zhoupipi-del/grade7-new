@@ -14,6 +14,7 @@ modules/risk_models/routers.py — 风险预警雷达 API 路由
 
 import logging
 
+from core.access import get_student_or_403
 from core.models import Class, Student, User, UserRole, get_local_now
 from core.routers import get_current_user, get_db
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -40,6 +41,27 @@ from .services import RiskDeviationIndexCalculator, RiskMonitorService, RiskWarn
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["风险预警雷达"])
+
+
+# ── 访问守卫 ──
+# 风险预警载荷含 student_name / student_no / psych_deviation / psych_veto_triggered，
+# 属未成年人敏感个人信息衍生数据，仅教职工可读。
+# ⚠️ fail-close: 未列举角色(PARENT/STUDENT 等)一律 403，不得落到分支底部静默放行。
+_RISK_STAFF_ROLES = frozenset(
+    {UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER, UserRole.COUNSELOR}
+)
+
+
+def _require_risk_staff(user: User) -> UserRole:
+    """返回归一化 UserRole；生产库 role 为 str/Enum 混合，必须先归一化再比较。"""
+    try:
+        role = UserRole(user.role)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="无权访问学生风险预警数据")
+    if role not in _RISK_STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="无权访问学生风险预警数据")
+    return role
+
 
 # ── RDI 计算 ──
 
@@ -408,16 +430,18 @@ async def get_monitor_panel(
       - 按 RDI 降序排列
       - 班级分布统计
     """
-    # 权限自动范围限制
-    if current_user.role == UserRole.CLASS_TEACHER:
+    # 权限自动范围限制（fail-close: 非教职工在此 403）
+    role = _require_risk_staff(current_user)
+    if role == UserRole.CLASS_TEACHER:
+        # 强制覆盖前端传参，班主任只能看本班
+        class_id = getattr(current_user, "class_id", None)
         if not class_id:
-            class_id = getattr(current_user, "class_id", None)
-        if not class_id:
-            raise HTTPException(status_code=400, detail="班主任缺少班级信息")
-    elif current_user.role == UserRole.GRADE_LEADER:
+            raise HTTPException(status_code=403, detail="班主任未绑定班级，无法访问")
+    elif role == UserRole.GRADE_LEADER:
+        grade_id = getattr(current_user, "grade_id", None)
         if not grade_id:
-            grade_id = getattr(current_user, "grade_id", None)
-    # ms_admin 不限制
+            raise HTTPException(status_code=403, detail="年级组长未绑定年级，无法访问")
+    # ms_admin / counselor 不限制
 
     panel = await RiskMonitorService.get_monitor_panel(
         db, current_user.school_id, class_id=class_id, grade_id=grade_id
@@ -442,6 +466,8 @@ async def list_warnings(
 
     默认返回最近7天的活跃预警
     """
+    # fail-close: 非教职工 403（载荷含姓名/学号/心理偏差分）
+    _require_risk_staff(current_user)
     # 默认查活跃预警; 班主任/级组长按归属范围自动收缩
     if status is None:
         status = "active"
@@ -504,6 +530,9 @@ async def get_baselines(
 
     返回: 均值、标准差、样本量、EWMA值
     """
+    # fail-close 角色门禁 + 行级归属校验（防 student_id 遍历 IDOR）
+    _require_risk_staff(current_user)
+    await get_student_or_403(db, current_user, student_id)
     baseline = await RiskWarningService.get_baseline(
         db, current_user.school_id, student_id, baseline_type
     )

@@ -80,28 +80,69 @@ router = APIRouter(tags=["psych-screening"])
 # 辅助 Dependency — 角色权限
 # ═══════════════════════════════════════════════════════════════
 
+# 允许访问学生心理健康数据的教职工角色白名单。
+# ⚠️ fail-close 铁律: 未列举的角色(PARENT/STUDENT 等)一律 403。
+#    禁止再出现「未匹配任何分支 → 落到函数底部 → 静默放行全校」的白名单式过滤。
+_PSYCH_STAFF_ROLES = frozenset(
+    {
+        UserRole.MS_ADMIN,
+        UserRole.GRADE_LEADER,
+        UserRole.CLASS_TEACHER,
+        UserRole.TEACHER,
+        UserRole.COUNSELOR,
+    }
+)
+
+_PSYCH_DENY_MSG = "无权访问学生心理健康数据"
+
+
+def _assert_psych_staff(user: User) -> UserRole:
+    """心理数据访问守卫（fail-close）。
+
+    返回归一化后的 UserRole —— 生产库 users.role 存在 str 与 Enum 混合，
+    直接比较会漏判，必须先 UserRole(...) 归一化。
+    """
+    try:
+        role = UserRole(user.role)
+    except ValueError:
+        raise HTTPException(http_status.HTTP_403_FORBIDDEN, _PSYCH_DENY_MSG)
+    if role not in _PSYCH_STAFF_ROLES:
+        raise HTTPException(http_status.HTTP_403_FORBIDDEN, _PSYCH_DENY_MSG)
+    return role
+
+
 def _verify_student_scope(
     user: User,
     target_class_id: Optional[int] = None,
     target_grade_id: Optional[int] = None,
 ):
     """验证用户权限 scope：班主任只能看自己班，年级组长只能看自己年级"""
-    if user.role == UserRole.MS_ADMIN:
-        return  # 德育处管理员放行
-    if user.role == UserRole.GRADE_LEADER:
+    role = _assert_psych_staff(user)
+    if role in (UserRole.MS_ADMIN, UserRole.COUNSELOR):
+        return  # 德育处管理员 / 心理教师全校放行
+    if role == UserRole.GRADE_LEADER:
+        if not user.grade_id:
+            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "年级组长未绑定年级，无法访问")
         if target_grade_id and user.grade_id != target_grade_id:
             raise HTTPException(http_status.HTTP_403_FORBIDDEN, "年级组长只能查看本年级数据")
-    if user.role in (UserRole.CLASS_TEACHER, UserRole.TEACHER):
+    if role in (UserRole.CLASS_TEACHER, UserRole.TEACHER):
+        if not user.class_id:
+            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "教师未绑定班级，无法访问")
         if target_class_id and user.class_id != target_class_id:
             raise HTTPException(http_status.HTTP_403_FORBIDDEN, "班主任只能查看本班数据")
 
 
 def _get_scope_params(user: User):
-    """根据角色返回 grade_id / class_id 过滤参数"""
+    """根据角色返回 grade_id / class_id 过滤参数（fail-close）"""
+    role = _assert_psych_staff(user)
     params = {}
-    if user.role == UserRole.GRADE_LEADER and user.grade_id:
+    if role == UserRole.GRADE_LEADER:
+        if not user.grade_id:
+            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "年级组长未绑定年级，无法访问")
         params["grade_id"] = user.grade_id
-    elif user.role in (UserRole.CLASS_TEACHER, UserRole.TEACHER) and user.class_id:
+    elif role in (UserRole.CLASS_TEACHER, UserRole.TEACHER):
+        if not user.class_id:
+            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "教师未绑定班级，无法访问")
         params["class_id"] = user.class_id
     return params
 
