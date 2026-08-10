@@ -5,7 +5,7 @@ modules/class_mgmt/routers.py — 班级管理 API 路由
 import logging
 
 from core.models import User, UserRole
-from core.routers import get_current_user, get_db, require_role, verify_school_access
+from core.routers import get_db, require_role, verify_school_access
 from fastapi import APIRouter, Depends, HTTPException, Query
 from modules.class_mgmt.schemas import (
     AssignStudentsRequest,
@@ -23,6 +23,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["class-mgmt"])
 
 MGMT_ROLES = (UserRole.MS_ADMIN, UserRole.GRADE_LEADER)
+
+# P0 修复（2026-08-09 开学前审计）：班级名录属校内管理数据，家长/学生一律禁止访问
+STAFF_ROLES = (
+    UserRole.MS_ADMIN,
+    UserRole.GROUP_ADMIN,
+    UserRole.BRANCH_ADMIN,
+    UserRole.GRADE_LEADER,
+    UserRole.CLASS_TEACHER,
+    UserRole.TEACHER,
+    UserRole.COUNSELOR,
+)
 
 
 @router.post("/classes", response_model=ClassOut, status_code=201)
@@ -46,9 +57,9 @@ async def list_classes(
     page_size: int = Query(50, ge=1, le=200),
     grade_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
 ):
-    """班级列表"""
+    """班级列表（家长/学生 403）"""
     items, total = await ClassMgmtService.list_classes(
         db, current_user.school_id, grade_id, page, page_size
     )
@@ -59,13 +70,14 @@ async def list_classes(
 async def get_class(
     class_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
 ):
-    """班级详情"""
+    """班级详情（家长/学生 403）"""
     result = await ClassMgmtService.get_class(db, class_id)
     if not result:
         raise HTTPException(status_code=404, detail="班级不存在")
-    verify_school_access(result["school_id"], current_user, db)
+    # P0 修复（2026-08-09）：原代码漏 await，协程从未执行 → 跨校校验形同虚设
+    await verify_school_access(result["school_id"], current_user, db)
     return result
 
 
@@ -156,9 +168,14 @@ async def assign_teacher(
 async def get_class_students(
     class_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
 ):
-    """班级学生名单"""
+    """班级学生名单（家长/学生 403；跨校 403）"""
+    # P0 修复（2026-08-09）：原端点零校级校验，可跨校读取任意班级学生名单
+    cls = await ClassMgmtService.get_class(db, class_id)
+    if not cls:
+        raise HTTPException(status_code=404, detail="班级不存在")
+    await verify_school_access(cls["school_id"], current_user, db)
     students = await ClassMgmtService.get_class_students(db, class_id)
     return {"class_id": class_id, "total": len(students), "students": students}
 
@@ -166,7 +183,7 @@ async def get_class_students(
 @router.get("/stats", response_model=ClassStatsOut)
 async def get_stats(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
 ):
-    """班级统计"""
+    """班级统计（家长/学生 403）"""
     return await ClassMgmtService.get_stats(db, current_user.school_id)

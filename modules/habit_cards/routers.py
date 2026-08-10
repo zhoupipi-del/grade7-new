@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from core.access import get_student_or_403
 from core.models import User, Student
 from core.routers import get_db, get_current_user
 from modules.habit_cards.models import (
@@ -121,6 +122,9 @@ async def get_student_wallet(
     current_user: User = Depends(get_current_user),
 ):
     """调阅学生卡牌钱包及 AI 即时表彰信"""
+    # P0 归属校验（2026-08-09 开学前审计）：原实现仅在 SQL 里带 school_id，
+    # 跨校请求返回空钱包但 HTTP 200（可用于探测），同校跨班则真实泄露。
+    await get_student_or_403(db, current_user, student_id)
     school_id = current_user.school_id
 
     stmt = select(StudentCardWallet, HabitCard).join(

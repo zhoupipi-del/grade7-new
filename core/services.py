@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from sqlalchemy import select
+from sqlalchemy import false, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Class, Grade, School, SchoolModule, Student, User, UserRole
@@ -369,9 +369,18 @@ class OrgService:
         search: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        student_ids: list[int] | None = None,
     ) -> tuple[list[dict], int]:
-        """分页查询学生列表，附班级名和年级名（单次 JOIN 无 N+1）"""
+        """
+        分页查询学生列表，附班级名和年级名（单次 JOIN 无 N+1）。
+
+        student_ids 语义（P0 行级范围过滤，2026-08-09 开学前审计）:
+          None → 本校全部；[] → 零可见；[..] → 白名单
+        """
         conditions = [Student.school_id == school_id]
+        # [] 必须落成恒假条件，否则"零可见"会退化为"看全校"
+        if student_ids is not None:
+            conditions.append(Student.id.in_(student_ids) if student_ids else false())
         if is_active is not None:
             conditions.append(Student.is_active == is_active)
         if class_id:

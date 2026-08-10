@@ -26,6 +26,7 @@ import logging
 import os
 from datetime import date
 
+from core.access import get_student_or_403
 from core.models import Student, User, UserRole
 from core.routers import get_current_user, get_db, require_role, verify_entity_ownership
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -383,6 +384,9 @@ async def check_escalation(
     current_user: User = Depends(get_current_user),
 ):
     """评估学生是否需要从违纪升级为处分 — 限管理角色"""
+    # P0 归属校验（2026-08-09 开学前审计）：原实现只有 require_role，
+    # 任一管理角色可跨校/跨班评估任意 student_id。此处收口到本人可见范围。
+    await get_student_or_403(db, current_user, student_id)
     return await DisciplineService.check_escalation(db, student_id)
 
 
@@ -408,6 +412,9 @@ async def escalate_to_sanction(
       3. 关联扣分最大的违纪记录作为溯源
       4. 创建 PENDING 处分 → 等待德育处审批
     """
+    # P0 归属校验（2026-08-09 开学前审计）：写操作，越权将给他校/他班学生
+    # 凭空创建处分草案。必须在落库前拦截。
+    await get_student_or_403(db, current_user, student_id)
     try:
         sanction = await DisciplineService.escalate_to_sanction(
             db,

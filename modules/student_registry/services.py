@@ -9,7 +9,7 @@ import logging
 from datetime import date, datetime
 from typing import Optional, List, Tuple
 
-from sqlalchemy import select, func, update, and_, or_
+from sqlalchemy import select, func, update, and_, or_, false
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -222,10 +222,21 @@ class StudentRegistryService:
         grade_id: Optional[int] = None,
         status: Optional[str] = None,
         keyword: Optional[str] = None,
+        student_ids: Optional[List[int]] = None,
     ) -> Tuple[List[dict], int]:
-        """分页查询学籍列表"""
+        """
+        分页查询学籍列表。
+
+        student_ids 语义（P0 行级范围过滤，2026-08-09 开学前审计）:
+          None → 本校全部（调用方为全校可见角色），行为与历史一致
+          []   → 零可见，必须返回空结果（不是"不过滤"）
+          [..] → 仅返回白名单内的学生
+        """
         # 构建基础查询
         conditions = [Student.school_id == school_id]
+        # 行级范围过滤必须先于其他筛选条件生效，且 [] 要落成恒假而非被忽略
+        if student_ids is not None:
+            conditions.append(Student.id.in_(student_ids) if student_ids else false())
         if class_id:
             conditions.append(Student.class_id == class_id)
         if grade_id:

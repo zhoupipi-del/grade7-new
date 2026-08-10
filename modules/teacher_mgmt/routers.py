@@ -26,7 +26,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.routers import get_db, get_current_user, require_role
+from core.routers import get_db, require_role
 from core.models import User, UserRole
 from modules.teacher_mgmt.services import TeacherService
 from modules.teacher_mgmt.schemas import (
@@ -42,6 +42,17 @@ from modules.teacher_mgmt.schemas import (
 logger = logging.getLogger("teacher_mgmt.routers")
 router = APIRouter()
 
+# P0 修复（2026-08-09 开学前审计）：教师名录属校内管理数据，家长/学生一律禁止访问
+STAFF_ROLES = (
+    UserRole.MS_ADMIN,
+    UserRole.GROUP_ADMIN,
+    UserRole.BRANCH_ADMIN,
+    UserRole.GRADE_LEADER,
+    UserRole.CLASS_TEACHER,
+    UserRole.TEACHER,
+    UserRole.COUNSELOR,
+)
+
 
 # ═════════════════════════════════════════════════════════════════════════════════
 # 教师列表 + 创建
@@ -54,10 +65,10 @@ async def list_teachers(
     role: Optional[str] = Query(None, description="class_teacher / teacher"),
     is_active: Optional[bool] = Query(None),
     keyword: Optional[str] = Query(None, description="搜索姓名"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
-    """教师列表（支持按角色/状态/姓名筛选）"""
+    """教师列表（支持按角色/状态/姓名筛选；家长/学生 403）"""
     return await TeacherService.list_teachers(
         db=db, school_id=current_user.school_id,
         page=page, page_size=page_size,
@@ -91,11 +102,14 @@ async def create_teacher(
 @router.get("/teachers/{user_id}", response_model=TeacherDetailOut)
 async def get_teacher_detail(
     user_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
-    """教师详情（含扩展信息、任教学科、班主任班级）"""
-    detail = await TeacherService.get_teacher_detail(db, user_id)
+    """教师详情（含扩展信息、任教学科、班主任班级；家长/学生 403；跨校 404）"""
+    # P0 修复（2026-08-09）：原查询无 school_id 过滤，可跨校读取任意教师详情
+    detail = await TeacherService.get_teacher_detail(
+        db, user_id, school_id=current_user.school_id
+    )
     if not detail:
         raise HTTPException(status_code=404, detail="教师不存在")
     return detail
@@ -139,7 +153,7 @@ async def assign_subjects(
 @router.get("/teachers/{user_id}/workloads", response_model=list[WorkloadOut])
 async def list_workloads(
     user_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     """查询教师所有学期工作量"""
@@ -164,7 +178,7 @@ async def add_workload(
 @router.get("/teachers/{user_id}/workload-stats", response_model=WorkloadStatsOut)
 async def get_workload_stats(
     user_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     """教师工作量统计汇总"""
@@ -209,10 +223,10 @@ async def assign_role(
 async def list_roles(
     user_id: int,
     is_active: Optional[bool] = Query(None, description="筛选启用/停用"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询教师角色分配列表"""
+    """查询教师角色分配列表（家长/学生 403）"""
     roles = await TeacherService.list_roles(
         db=db, school_id=current_user.school_id,
         user_id=user_id, is_active=is_active,
@@ -262,7 +276,7 @@ async def delete_role(
 @router.get("/teachers/{user_id}/effective-roles", response_model=EffectiveRolesOut)
 async def get_effective_roles(
     user_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(*STAFF_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
     """

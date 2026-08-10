@@ -241,10 +241,13 @@ class TeacherService:
 
     @staticmethod
     async def get_teacher_detail(
-        db: AsyncSession, user_id: int,
+        db: AsyncSession, user_id: int, school_id: Optional[int] = None,
     ) -> Optional[TeacherDetailOut]:
-        """查询教师详情"""
-        user_result = await db.execute(select(User).where(User.id == user_id))
+        """查询教师详情（传 school_id 时强制同校，跨校返回 None → 路由层 404）"""
+        conditions = [User.id == user_id]
+        if school_id is not None:
+            conditions.append(User.school_id == school_id)
+        user_result = await db.execute(select(User).where(*conditions))
         user = user_result.scalar_one_or_none()
         if not user or user.role not in ("class_teacher", "teacher"):
             return None

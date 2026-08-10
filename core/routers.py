@@ -412,7 +412,9 @@ async def list_grades(
         user_role = UserRole(user_role)
 
     if user_role == UserRole.MS_ADMIN and school_id is not None:
-        sid = school_id  # 超管显式指定学校
+        # P0（2026-08-09 开学前审计）：原实现直接采信前端传参，
+        # MS_ADMIN 传任意 school_id 即可跨校取数。必须过 access_scope。
+        sid = await verify_school_access(school_id, current_user, db)
     else:
         sid = current_user.school_id  # 其他角色 / 超管未指定: 使用自己的学校
 
@@ -442,7 +444,8 @@ async def list_classes(
         user_role = UserRole(user_role)
 
     if user_role == UserRole.MS_ADMIN and school_id is not None:
-        sid = school_id
+        # P0（2026-08-09 开学前审计）：跨校传参必须过 access_scope
+        sid = await verify_school_access(school_id, current_user, db)
     else:
         sid = current_user.school_id
 
@@ -478,11 +481,19 @@ async def list_students(
         user_role = UserRole(user_role)
 
     if user_role == UserRole.MS_ADMIN and school_id is not None:
-        sid = school_id
+        # P0（2026-08-09 开学前审计）：跨校传参必须过 access_scope
+        sid = await verify_school_access(school_id, current_user, db)
     else:
         sid = current_user.school_id
 
     offset = (page - 1) * per_page
+
+    # P0 行级范围过滤（2026-08-09 开学前审计）：
+    # 该端点返回学生 PII，原实现仅按 school_id 过滤，家长/班主任可拉全校名单。
+    # 语义见 core.access.student_id_scope：None=全校 / []=零可见 / [..]=白名单。
+    from .access import student_id_scope
+
+    scope = await student_id_scope(db, current_user)
 
     students, total = await OrgService.get_students_with_names(
         db,
@@ -494,6 +505,7 @@ async def list_students(
         search=search,
         limit=per_page,
         offset=offset,
+        student_ids=scope,
     )
 
     pages = (total + per_page - 1) // per_page if total > 0 else 0

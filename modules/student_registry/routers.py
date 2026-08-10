@@ -9,7 +9,7 @@ modules/student_registry/routers.py — 学籍管理 API 路由
 
 import logging
 
-from core.access import get_student_or_403
+from core.access import get_student_or_403, student_id_scope
 from core.models import User, UserRole
 from core.routers import get_current_user, get_db, require_role, verify_school_access
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -74,6 +74,12 @@ async def list_students(
     current_user: User = Depends(get_current_user),
 ):
     """学籍列表（分页/筛选/搜索）"""
+    # P0 行级范围过滤（2026-08-09 开学前审计）：
+    # 原实现只按 school_id 过滤 —— 家长可拉全校 1170 人花名册（含学号/班级等 PII），
+    # 班主任可拉全校学生。detail 端点 2026-07-24 已修，list 一直漏网。
+    # 语义见 core.access.student_id_scope：None=全校 / []=零可见 / [..]=白名单。
+    # 必须写 `is not None`，写成 `if scope:` 会把"零可见"退化成"不过滤"。
+    scope = await student_id_scope(db, current_user)
     items, total = await StudentRegistryService.list_students(
         db,
         current_user.school_id,
@@ -83,6 +89,7 @@ async def list_students(
         grade_id,
         status,
         keyword,
+        student_ids=scope,
     )
     return {"total": total, "page": page, "page_size": page_size, "items": items}
 
@@ -107,7 +114,8 @@ async def get_student(
     if not result:
         raise HTTPException(status_code=404, detail="学生不存在")
     # 纵深防御：保留学校级校验（归属校验已含此层，双重保险）
-    verify_school_access(result["school_id"], current_user, db)
+    # P0 修复（2026-08-09）：原代码漏 await，该层从未执行
+    await verify_school_access(result["school_id"], current_user, db)
     return result
 
 
@@ -119,11 +127,14 @@ async def update_student(
     current_user: User = Depends(require_role(*REGISTRY_ROLES)),
 ):
     """更新学籍信息"""
+    # P0 修复（2026-08-09）：原实现先落库再"校验"，且校验漏 await 从未执行
+    # → 跨校/跨班写越权。归属校验前置，越权请求不触碰数据。
+    await get_student_or_403(db, current_user, student_id)
     try:
         student = await StudentRegistryService.update_student(db, student_id, body)
         result = await StudentRegistryService.get_student(db, student.id)
         if result:
-            verify_school_access(result["school_id"], current_user, db)
+            await verify_school_access(result["school_id"], current_user, db)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

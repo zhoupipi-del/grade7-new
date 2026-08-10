@@ -18,6 +18,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.access import get_student_or_403
 from core.models import User, UserRole, Student, Class as SchoolClass, Grade
 from core.routers import get_db, get_current_user, verify_entity_ownership
 from .schemas import (
@@ -184,6 +185,9 @@ async def get_student_calendar(
     """
     # P0 多租户隔离：校验 student_id 是否属于当前用户学校
     await verify_entity_ownership(db, Student, student_id, current_user, '学生不存在')
+    # P0 行级归属（2026-08-09 开学前审计）：校级校验挡不住同校跨班，
+    # 班主任/家长枚举 student_id 即可拖走全校考勤。此处按班级/绑定关系收口。
+    await get_student_or_403(db, current_user, student_id)
     calendar = await AttendanceService.get_student_calendar(
         db=db,
         school_id=current_user.school_id,

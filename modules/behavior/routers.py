@@ -17,6 +17,7 @@ modules/behavior/routers.py — 违纪行为管理 API
 
 from datetime import date
 
+from core.access import get_student_or_403, student_id_scope
 from core.models import User, UserRole
 from core.routers import (
     get_current_user,
@@ -100,6 +101,10 @@ async def list_discipline(
     current_user: User = Depends(get_current_user),
 ):
     """分页查询违纪记录列表"""
+    # P0 行级范围过滤（2026-08-09 开学前审计）：
+    # 原实现只按 school_id 过滤 —— 班主任可读全校各班违纪明细（含学生真实姓名
+    # 与违纪描述），家长同样可读。语义见 core.access.student_id_scope。
+    scope = await student_id_scope(db, current_user)
     offset = (page - 1) * per_page
     records, total = await BehaviorService.list_records(
         db,
@@ -113,6 +118,7 @@ async def list_discipline(
         end_date=end_date,
         limit=per_page,
         offset=offset,
+        student_ids=scope,
     )
     pages = (total + per_page - 1) // per_page if total > 0 else 0
     return {
@@ -207,12 +213,16 @@ async def discipline_stats(
     current_user: User = Depends(get_current_user),
 ):
     """违纪统计概览（按类型/分类/班级/月份分组）"""
+    # P0 修复（2026-08-09 开学前审计）：聚合端点同样是越权口子
+    # 铁律「修 list 必须同步修 stats」——否则家长/班主任仍能看到全校各班违纪数
+    scope = await student_id_scope(db, current_user)
     return await BehaviorService.get_stats(
         db,
         current_user.school_id,
         grade_id=grade_id,
         start_date=start_date,
         end_date=end_date,
+        student_ids=scope,
     )
 
 
@@ -227,6 +237,8 @@ async def escalation_risk(
     from core.models import Student
 
     await verify_entity_ownership(db, Student, student_id, current_user, "学生不存在")
+    # P0 行级归属（2026-08-09 开学前审计）：补齐同校跨班拦截
+    await get_student_or_403(db, current_user, student_id)
     return await BehaviorService.get_escalation_risk(db, student_id)
 
 

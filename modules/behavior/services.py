@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from core.models import Class, Student
-from sqlalchemy import func, select
+from sqlalchemy import false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -291,9 +291,20 @@ class BehaviorService:
         end_date: date | None = None,
         limit: int = 50,
         offset: int = 0,
+        student_ids: list[int] | None = None,
     ) -> tuple[list[DisciplineRecord], int]:
-        """分页查询违纪记录，返回 (records, total)"""
+        """
+        分页查询违纪记录，返回 (records, total)。
+
+        student_ids 语义（P0 行级范围过滤，2026-08-09 开学前审计）:
+          None → 本校全部；[] → 零可见；[..] → 白名单内学生的记录
+        """
         conditions = [DisciplineRecord.school_id == school_id]
+        # 行级范围过滤：[] 必须落成恒假，否则"零可见"会退化成"看全校"
+        if student_ids is not None:
+            conditions.append(
+                DisciplineRecord.student_id.in_(student_ids) if student_ids else false()
+            )
         if class_id:
             conditions.append(DisciplineRecord.class_id == class_id)
         if grade_id:
@@ -446,9 +457,21 @@ class BehaviorService:
         grade_id: int | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
+        student_ids: list[int] | None = None,
     ) -> dict:
-        """违纪统计概览"""
+        """
+        违纪统计概览
+
+        student_ids 语义（core.access.student_id_scope）：
+          None  → 本校全部，不加过滤（保持原行为）
+          []    → 零可见，恒假条件（fail-closed）
+          [...] → 白名单 IN 过滤
+        """
         conditions = [DisciplineRecord.school_id == school_id]
+        if student_ids is not None:
+            conditions.append(
+                DisciplineRecord.student_id.in_(student_ids) if student_ids else false()
+            )
         if grade_id:
             conditions.append(DisciplineRecord.grade_id == grade_id)
         if start_date:

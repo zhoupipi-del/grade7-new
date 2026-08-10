@@ -21,6 +21,7 @@ modules/evaluation/routers.py — 素质评价 API 端点
 
 import logging
 
+from core.access import get_student_or_403
 from core.models import User, UserRole
 from core.routers import get_current_user, get_db, require_role
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -321,6 +322,10 @@ async def get_student_scores(
     current_user: User = Depends(get_current_user),
 ):
     """获取单个学生的五维分 + 总分"""
+    # P0 归属校验（2026-08-09 开学前审计）：原实现零守卫，任意登录用户可枚举
+    # student_id 拿到他校/他班学生分数；查无快照时还会返回零值占位对象，
+    # 造成"越权也有返回"的假数据。守卫前置后越权直接 404/403。
+    await get_student_or_403(db, current_user, student_id)
     result = await EvaluationService.get_dimension_scores(db, student_id, semester)
     if not result:
         # 该学生还没有评分快照，返回空数据
@@ -390,6 +395,8 @@ async def get_score_logs(
     current_user: User = Depends(get_current_user),
 ):
     """评分流水审计 — 家长质疑"为什么扣分"时的精确回溯"""
+    # P0 归属校验（2026-08-09 开学前审计）：流水含教师姓名与扣分理由
+    await get_student_or_403(db, current_user, student_id)
     offset = (page - 1) * per_page
     logs, total = await EvaluationService.get_score_logs(db, student_id, per_page, offset)
 
@@ -462,6 +469,8 @@ async def get_final_evaluation(
       - final_grade: A/B/C/D
       - grade_label: 等级中文（优秀/良好/合格/不合格）
     """
+    # P0 归属校验（2026-08-09 开学前审计）：含处分明细，属敏感数据
+    await get_student_or_403(db, current_user, student_id)
     result = await EvaluationService.get_final_evaluation(
         db, student_id, current_user.school_id, semester
     )
@@ -480,6 +489,8 @@ async def check_student_veto(
 
     若 is_veto=True，学期总评直接覆写 D 等，无需其他计算。
     """
+    # P0 归属校验（2026-08-09 开学前审计）：暴露学生是否处于处分期
+    await get_student_or_403(db, current_user, student_id)
     return await EvaluationService.check_discipline_veto(db, student_id, semester)
 
 
