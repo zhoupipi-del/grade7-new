@@ -132,11 +132,17 @@ async def api_list_profiles(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_psych_read),
 ):
-    """心理档案列表 — 支持风险等级/标签筛选"""
+    """心理档案列表 — 支持风险等级/标签筛选
+
+    S0-3 P0 修复：通过 core.access.student_id_scope 注入本班/本年级学生白名单。
+    """
+    from core.access import student_id_scope
+    scope = await student_id_scope(db, current_user)
     profiles, total = await svc.list_profiles(
         db, school_id=current_user.school_id,
         risk_level=risk_level, tag=tag,
         page=page, page_size=page_size,
+        student_ids=scope,
     )
 
     # 批量获取学生姓名
@@ -365,11 +371,14 @@ async def api_list_screenings(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_psych_read),
 ):
-    """筛查快照列表"""
+    """筛查快照列表 — S0-3 P0 修复：行级 scope 透传"""
+    from core.access import student_id_scope
+    scope = await student_id_scope(db, current_user)
     records, total = await svc.list_screenings(
         db, school_id=current_user.school_id,
         student_id=student_id, scale_name=scale_name,
         page=page, page_size=page_size,
+        student_ids=scope,
     )
     return {
         "total": total, "page": page, "page_size": page_size,
@@ -436,12 +445,17 @@ async def api_comprehensive_risks(
       - risk_warnings (RDI 四维)
       - psy_profiles (心理档案)
       - psy_screening_records (筛查快照)
+
+    S0-3 P0 修复：通过 student_id_scope 注入本班/本年级学生白名单。
     """
+    from core.access import student_id_scope
+    scope = await student_id_scope(db, current_user)
     data = await svc.get_comprehensive_risks(
         db, school_id=current_user.school_id,
         co_trigger_only=co_trigger_only,
         min_priority=min_priority,
         page=page, page_size=page_size,
+        student_ids=scope,
     )
     return data
 
@@ -467,8 +481,19 @@ async def api_dashboard(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_psych_read),
 ):
-    """心理档案仪表盘聚合统计"""
-    data = await svc.get_dashboard_stats(db, current_user.school_id)
+    """心理档案仪表盘聚合统计
+
+    S0-3 P0 修复（SEC-INC-20260810-001）：
+      此前 require_psych_read 排除 PARENT/STUDENT 但 CLASS_TEACHER/GRADE_LEADER
+      仍看全校 331 个 profile + top_risk_students 全员列表（实测 4 账号数据完全一致）。
+      修法：通过 core.access.student_id_scope 注入本班/本年级学生白名单。
+      MS_ADMIN/COUNSELOR scope=None → 不加限制；未绑定 → [] → 零可见（fail-close）。
+    """
+    from core.access import student_id_scope
+    scope = await student_id_scope(db, current_user)
+    data = await svc.get_dashboard_stats(
+        db, current_user.school_id, student_ids=scope,
+    )
     return data
 
 

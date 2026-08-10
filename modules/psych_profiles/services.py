@@ -100,11 +100,19 @@ async def list_profiles(
     tag: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
+    *,
+    student_ids: Optional[List[int]] = None,
 ) -> tuple:
-    """档案列表 — 支持风险等级/标签筛选"""
+    """档案列表 — 支持风险等级/标签筛选
+
+    S0-3 P0 修复：加 student_ids 行级过滤参数。
+    """
     conditions = [PsyProfile.school_id == school_id]
     if risk_level:
         conditions.append(PsyProfile.risk_level == risk_level)
+    if student_ids is not None:
+        # 严格 None 检查 —— [] 是"零可见"，与 None "不加限制" 必须区分
+        conditions.append(PsyProfile.student_id.in_(student_ids))
 
     where_clause = and_(*conditions)
 
@@ -361,12 +369,17 @@ async def list_screenings(
     scale_name: Optional[str] = None,
     page: int = 1,
     page_size: int = 20,
+    *,
+    student_ids: Optional[List[int]] = None,
 ) -> tuple:
+    """S0-3 P0 修复：加 student_ids 行级过滤参数"""
     conditions = [PsyScreeningRecord.school_id == school_id]
     if student_id:
         conditions.append(PsyScreeningRecord.student_id == student_id)
     if scale_name:
         conditions.append(PsyScreeningRecord.scale_name == scale_name)
+    if student_ids is not None:
+        conditions.append(PsyScreeningRecord.student_id.in_(student_ids))
 
     where_clause = and_(*conditions)
     count_stmt = select(func.count(PsyScreeningRecord.id)).where(where_clause)
@@ -409,9 +422,14 @@ async def get_comprehensive_risks(
     min_priority: str = "WATCH",
     page: int = 1,
     page_size: int = 50,
+    *,
+    student_ids: Optional[List[int]] = None,
 ) -> dict:
     """
     学业×心理双轨预警合成视图 (四源 union 引擎)
+
+    S0-3 P0 修复：加 student_ids 行级过滤参数。
+    教师/年级组长调用时仅查本班/本年级学生。
 
     联表:
       1. student_risk_alerts (data_adapter) — Z-Score 学业预警
@@ -471,6 +489,15 @@ async def get_comprehensive_risks(
 
     if not all_student_ids:
         return {"total": 0, "critical_count": 0, "urgent_count": 0, "watch_count": 0, "items": []}
+
+    # S0-3 P0 修复：行级过滤透传（教师/年级组长只看本班/本年级）
+    if student_ids is not None:
+        if not student_ids:
+            # [] = 零可见
+            return {"total": 0, "critical_count": 0, "urgent_count": 0, "watch_count": 0, "items": []}
+        all_student_ids &= set(student_ids)
+        if not all_student_ids:
+            return {"total": 0, "critical_count": 0, "urgent_count": 0, "watch_count": 0, "items": []}
 
     # ── Step 1.5: 批量获取心理档案 (部分学生可能没有档案) ──
     profile_stmt = select(PsyProfile).where(
@@ -889,18 +916,49 @@ async def get_student_nexus_detail(
 # ============================================================
 # 四、仪表盘
 # ============================================================
-async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
-    """心理档案仪表盘聚合统计"""
+async def get_dashboard_stats(
+    db: AsyncSession,
+    school_id: int,
+    *,
+    student_ids: Optional[List[int]] = None,
+) -> dict:
+    """心理档案仪表盘聚合统计
+
+    S0-3 P0 修复（SEC-INC-20260810-001）：
+      加 student_ids 行级过滤参数。教师/年级组长调用时，
+      路由层通过 core.access.student_id_scope 注入本班/本年级学生白名单，
+      避免看到全校 331 个 profile + top_risk_students 全员列表。
+      MS_ADMIN/COUNSELOR 调用时不传 → None → 不加限制（全校）。
+
+      ⚠️ student_ids is None（不加限制）与 student_ids == []（零可见）必须严格区分，
+      所以判断用 `is not None` 而不是 truthy。
+    """
+    # 行级过滤：仅当显式提供 student_ids 时加入
+    profile_student_filter = [PsyProfile.student_id.in_(student_ids)] if student_ids is not None else []
+    screening_student_filter = [PsyScreeningRecord.student_id.in_(student_ids)] if student_ids is not None else []
+    consult_student_filter = []
+    alert_student_filter = []
+    rw_filter = []
+    if student_ids is not None:
+        from modules.psych_counseling.models import PsyConsultRecord
+        consult_student_filter = [PsyConsultRecord.student_id.in_(student_ids)]
+        from modules.data_adapter.models import StudentRiskAlert
+        alert_student_filter = [StudentRiskAlert.student_id.in_(student_ids)]
+        from modules.risk_models.models import RiskWarning
+        rw_filter = [RiskWarning.student_id.in_(student_ids)]
+
     # 档案总数
     total_profiles = (await db.execute(
-        select(func.count(PsyProfile.id)).where(PsyProfile.school_id == school_id)
+        select(func.count(PsyProfile.id)).where(
+            PsyProfile.school_id == school_id, *profile_student_filter,
+        )
     )).scalar() or 0
 
     # 风险分布
     risk_dist = {"green": 0, "yellow": 0, "orange": 0, "red": 0}
     dist_stmt = (
         select(PsyProfile.risk_level, func.count(PsyProfile.id))
-        .where(PsyProfile.school_id == school_id)
+        .where(PsyProfile.school_id == school_id, *profile_student_filter)
         .group_by(PsyProfile.risk_level)
     )
     for level, cnt in (await db.execute(dist_stmt)).all():
@@ -909,7 +967,9 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
 
     # 筛查总数
     total_screenings = (await db.execute(
-        select(func.count(PsyScreeningRecord.id)).where(PsyScreeningRecord.school_id == school_id)
+        select(func.count(PsyScreeningRecord.id)).where(
+            PsyScreeningRecord.school_id == school_id, *screening_student_filter,
+        )
     )).scalar() or 0
 
     # 咨询总数
@@ -917,7 +977,9 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
     try:
         from modules.psych_counseling.models import PsyConsultRecord
         total_counselings = (await db.execute(
-            select(func.count(PsyConsultRecord.id)).where(PsyConsultRecord.school_id == school_id)
+            select(func.count(PsyConsultRecord.id)).where(
+                PsyConsultRecord.school_id == school_id, *consult_student_filter,
+            )
         )).scalar() or 0
     except ImportError:
         pass
@@ -925,18 +987,22 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
     # 转介总数
     total_referrals = (await db.execute(
         select(func.count(PsyProfile.id)).where(
-            and_(PsyProfile.school_id == school_id, PsyProfile.is_referred == True)
+            and_(PsyProfile.school_id == school_id, PsyProfile.is_referred == True),
+            *profile_student_filter,
         )
     )).scalar() or 0
 
-    # 双预警学生数
-    nexus = await get_comprehensive_risks(db, school_id, co_trigger_only=True, page_size=9999)
+    # 双预警学生数（get_comprehensive_risks 自身需要行级）
+    nexus = await get_comprehensive_risks(
+        db, school_id, co_trigger_only=True, page_size=9999,
+        student_ids=student_ids,  # S0-3 P0：行级过滤透传
+    )
     co_trigger_count = nexus["total"]
 
     # 最近筛查 (5条)
     recent_stmt = (
         select(PsyScreeningRecord)
-        .where(PsyScreeningRecord.school_id == school_id)
+        .where(PsyScreeningRecord.school_id == school_id, *screening_student_filter)
         .order_by(desc(PsyScreeningRecord.test_date))
         .limit(5)
     )
@@ -956,6 +1022,7 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
         .where(and_(
             PsyProfile.school_id == school_id,
             PsyProfile.risk_level.in_(["orange", "red"]),
+            *profile_student_filter,
         ))
         .order_by(desc(_risk_rank_col(PsyProfile.risk_level)), desc(PsyProfile.updated_at))
         .limit(5)
@@ -982,6 +1049,7 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
             .where(and_(
                 StudentRiskAlert.school_id == school_id,
                 StudentRiskAlert.status == "active",
+                *alert_student_filter,
             ))
             .group_by(StudentRiskAlert.risk_level)
         )
@@ -996,11 +1064,11 @@ async def get_dashboard_stats(db: AsyncSession, school_id: int) -> dict:
 
     try:
         from modules.risk_models.models import RiskWarning
-        total_rdi_warnings = (await db.execute(
-            select(func.count(RiskWarning.id)).where(
-                and_(RiskWarning.school_id == school_id, RiskWarning.status == "active")
-            )
-        )).scalar() or 0
+        rw_stmt = select(func.count(RiskWarning.id)).where(
+            and_(RiskWarning.school_id == school_id, RiskWarning.status == "active"),
+            *rw_filter,
+        )
+        total_rdi_warnings = (await db.execute(rw_stmt)).scalar() or 0
     except ImportError:
         pass
 
