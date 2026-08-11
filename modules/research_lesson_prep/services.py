@@ -17,7 +17,9 @@ from datetime import datetime
 import json
 import os
 import logging
-import httpx
+from core.deepseek_provider import DeepSeekProvider
+
+_deepseek = DeepSeekProvider()
 
 from core.models import get_local_now
 from core.models import User, Student
@@ -795,23 +797,13 @@ async def generate_ai_bias(
 
 async def _call_deepseek_text(prompt: str, system_prompt: str, timeout: float = 45.0) -> str:
     """调用DeepSeek API, 返回纯文本 (非JSON模式)"""
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            _LLM_API_URL,
-            headers={
-                "Authorization": f"Bearer {_LLM_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": _LLM_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.4,
-                "max_tokens": 2048,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"]
+    content, _ = await _deepseek.acall(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        timeout=timeout,
+        temperature=0.4,
+        max_tokens=2048,
+    )
+    return content

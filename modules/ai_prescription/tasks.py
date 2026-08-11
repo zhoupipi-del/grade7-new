@@ -23,7 +23,9 @@ import os
 import time
 from datetime import datetime, timezone
 
-import httpx
+from core.deepseek_provider import DeepSeekProvider
+
+_deepseek = DeepSeekProvider()
 from celery import Task
 from celery.exceptions import Retry
 from sqlalchemy import Engine, create_engine
@@ -96,29 +98,16 @@ def _call_deepseek(prompt: str, system_prompt: str, timeout: int = 60) -> dict:
             _circuit_failures = 0
 
     try:
-        with httpx.Client(timeout=timeout) as client:
-            resp = client.post(
-                LLM_API_URL,
-                headers={
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": LLM_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.3,
-                    "max_tokens": 4096,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        # 解析 LLM 输出
-        content = data["choices"][0]["message"]["content"]
+        content, _ = _deepseek.call(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            timeout=timeout,
+            json_mode=True,
+            temperature=0.3,
+            max_tokens=4096,
+        )
         result = json.loads(content)
 
         # 成功 → 重置熔断器

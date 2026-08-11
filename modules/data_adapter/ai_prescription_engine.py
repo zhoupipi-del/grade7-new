@@ -18,7 +18,9 @@ import logging
 import os
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-import httpx
+from core.deepseek_provider import DeepSeekProvider
+
+_deepseek = DeepSeekProvider()
 
 from modules.data_adapter.models import StudentRiskAlert, StudentWeaknessPrescription
 
@@ -74,32 +76,20 @@ async def _call_deepseek_async(
       - temperature: 0.3
       - max_tokens: 2048
     """
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            LLM_API_URL,
-            headers={
-                "Authorization": f"Bearer {LLM_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": LLM_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                "response_format": {"type": "json_object"},
-                "temperature": 0.3,
-                "max_tokens": 2048,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-    content = data["choices"][0]["message"]["content"]
+    content, usage = await _deepseek.acall(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        timeout=timeout,
+        json_mode=True,
+        temperature=0.3,
+        max_tokens=2048,
+    )
     result = json.loads(content)
 
-    # 附带 token 消耗元数据
-    usage = data.get("usage", {})
+    # 附带 token 消耗元数据（来自 Provider 返回的 usage）
+    usage = usage or {}
     result["_meta"] = {
         "model": LLM_MODEL,
         "prompt_tokens": usage.get("prompt_tokens", 0),
