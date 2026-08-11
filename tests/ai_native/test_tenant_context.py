@@ -1,29 +1,28 @@
 """
 tests/ai_native/test_tenant_context.py — Inv 2: ResourceScopeResolver tenant 契约
 
-RED GATE 测试（Phase E Slice 1）：组件 `ai_native.governance.resource_scope`
-尚未实现，全部测试预期 FAIL（需求未实现导致的正确失败，非 collection error）。
+Slice 1 RED→GREEN 测试（GOVERNANCE GATE）：组件 `ai_native.governance.resource_scope`
+已实现，本文件锁定 Inv 2 全量契约（含 REVISE 轮的 fail-close 与 ResourceScope model）。
 
-契约（未来实现必须满足）：
-    resource_scope.resolve_scope(requested, authorized) -> effective
+契约（canonical）：
+    ResourceScope（dataclass）字段：
+        school_id / grade_ids / class_ids / student_ids
 
-    requested / authorized / effective 均为 dict：
-        {"school_id": int | None,
-         "grade_ids": set[int] | None,
-         "class_ids": set[int] | None,
-         "student_ids": set[int] | None}
+    resolve_scope(requested, authorized) -> ResourceScope
+        入参可为 ResourceScope 或 dict（边界 normalize，内部 canonical 为 ResourceScope）。
+        RequestedScope ∩ AuthorizedScope = EffectiveScope。
 
     authorized 的 student_ids 语义严格复用 core/access.py student_id_scope：
-        None  → 不限制（该校全部可见，等于放行请求）
+        None  → 不限制（当前租户内全可见，等于放行请求）
         []    → 零可见（effective 必须为空集合，不是"不过滤"）
         {..}  → 白名单（effective = requested ∩ authorized）
 
-    school 维度：
-        requested.school_id 不在 authorized 授权范围 → effective 全空（deny）
+    ★ tenant fail-close：authorized.school_id 缺失或 None → DENY（全空），
+       绝不允许拿 None 代表"所有租户可见"（fail-open 禁止）。
 
-    安全约束：即使 LLM 参数自带 school_id / student_id，effective scope
-    必须由 authorized 决定，越权 id 一律裁剪，不得绕过 AuthorizedScope。
-    不得 mock 出与 core/access.py 无关的第二套 RBAC。
+    安全约束：即使 LLM 参数自带 school_id / student_id，effective scope 由
+    authorized 决定，越权 id 一律裁剪。不得 mock 出与 core/access.py 无关的
+    第二套 RBAC。
 """
 
 from __future__ import annotations
@@ -52,15 +51,43 @@ def _scope(school_id=None, grade_ids=None, class_ids=None, student_ids=None):
     }
 
 
+class TestResourceScopeCanonicalModel:
+    def test_model_has_four_fields(self):
+        mod = _require_resource_scope()
+        scope = mod.ResourceScope(school_id=1, student_ids={1, 2})
+        assert scope.school_id == 1
+        assert scope.grade_ids is None
+        assert scope.class_ids is None
+        assert scope.student_ids == {1, 2}
+
+    def test_from_dict_normalizes_boundary(self):
+        mod = _require_resource_scope()
+        scope = mod.ResourceScope.from_dict(
+            {"school_id": 1, "grade_ids": {7}, "class_ids": None, "student_ids": []}
+        )
+        assert scope.school_id == 1
+        assert scope.grade_ids == {7}
+        assert scope.student_ids == set()
+
+    def test_resolver_accepts_model_and_dict(self):
+        mod = _require_resource_scope()
+        requested = mod.ResourceScope(school_id=1, student_ids={1, 2, 3})
+        authorized = _scope(school_id=1, student_ids={2, 3})
+        effective = mod.resolve_scope(requested, authorized)
+        assert isinstance(effective, mod.ResourceScope)
+        assert effective.student_ids == {2, 3}
+
+
 class TestInv2RequestedSchoolWithinAuthorized:
     def test_requested_school_match_authorized_allows(self):
         mod = _require_resource_scope()
         requested = _scope(school_id=1, student_ids={101, 102})
         authorized = _scope(school_id=1)  # school 级授权，student_ids=None=全校
         effective = mod.resolve_scope(requested, authorized)
-        assert effective["school_id"] == 1
+        assert isinstance(effective, mod.ResourceScope)
+        assert effective.school_id == 1
         # authorized None 语义（复用 core/access）：不额外裁剪
-        assert effective["student_ids"] == {101, 102}
+        assert effective.student_ids == {101, 102}
 
     def test_requested_school_outside_authorized_yields_empty(self):
         mod = _require_resource_scope()
@@ -68,7 +95,7 @@ class TestInv2RequestedSchoolWithinAuthorized:
         authorized = _scope(school_id=1)  # 只授权 school 1
         effective = mod.resolve_scope(requested, authorized)
         # 跨校 → 零可见，绝不能保留 school=2 的任何 id
-        assert effective["student_ids"] == set()
+        assert effective.student_ids == set()
 
 
 class TestInv2StudentIntersection:
@@ -77,21 +104,44 @@ class TestInv2StudentIntersection:
         requested = _scope(school_id=1, student_ids={1, 2, 3, 4})
         authorized = _scope(school_id=1, student_ids={2, 3})
         effective = mod.resolve_scope(requested, authorized)
-        assert effective["student_ids"] == {2, 3}
+        assert effective.student_ids == {2, 3}
 
     def test_authorized_empty_list_means_zero_visibility(self):
         mod = _require_resource_scope()
         requested = _scope(school_id=1, student_ids={1, 2})
         authorized = _scope(school_id=1, student_ids=[])  # 零可见
         effective = mod.resolve_scope(requested, authorized)
-        assert effective["student_ids"] == set()
+        assert effective.student_ids == set()
 
     def test_authorized_none_means_no_student_restriction(self):
         mod = _require_resource_scope()
         requested = _scope(school_id=1, student_ids={7, 8})
         authorized = _scope(school_id=1, student_ids=None)  # 全校（core/access 语义）
         effective = mod.resolve_scope(requested, authorized)
-        assert effective["student_ids"] == {7, 8}
+        assert effective.student_ids == {7, 8}
+
+
+class TestInv2TenantFailClosed:
+    def test_authorized_school_id_none_denies(self):
+        mod = _require_resource_scope()
+        requested = _scope(school_id=2, student_ids={201})
+        authorized = _scope(school_id=None)  # tenant 未指定 → fail-close
+        effective = mod.resolve_scope(requested, authorized)
+        assert effective.student_ids == set()
+
+    def test_authorized_school_id_missing_denies(self):
+        mod = _require_resource_scope()
+        requested = _scope(school_id=2, student_ids={201})
+        authorized = _scope()  # school_id 缺失（None）
+        effective = mod.resolve_scope(requested, authorized)
+        assert effective.student_ids == set()
+
+    def test_requested_school_id_none_denies(self):
+        mod = _require_resource_scope()
+        requested = _scope(school_id=None, student_ids={201})
+        authorized = _scope(school_id=1)
+        effective = mod.resolve_scope(requested, authorized)
+        assert effective.student_ids == set()
 
 
 class TestInv2NoBypassViaArgs:
@@ -101,7 +151,7 @@ class TestInv2NoBypassViaArgs:
         requested = _scope(school_id=1, student_ids={999})
         authorized = _scope(school_id=1, student_ids={1, 2})
         effective = mod.resolve_scope(requested, authorized)
-        assert 999 not in effective["student_ids"]
+        assert 999 not in effective.student_ids
 
     def test_school_id_in_args_cannot_extend_scope(self):
         mod = _require_resource_scope()
@@ -109,4 +159,4 @@ class TestInv2NoBypassViaArgs:
         authorized = _scope(school_id=1)
         effective = mod.resolve_scope(requested, authorized)
         # 越权 school 被拒绝：不得保留 school=99 的可见性
-        assert effective["student_ids"] == set()
+        assert effective.student_ids == set()

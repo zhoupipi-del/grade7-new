@@ -219,6 +219,16 @@ class TestInv13MonotonicTaint:
         values = [dc.public, dc.internal, dc.student_pii, dc.psych_sensitive]
         assert [v.value for v in values] == CLASSIFICATION_ORDER
 
+    def test_enum_is_string_enum(self):
+        mod = _require_classification()
+        dc = self._dc(mod)
+        # str, Enum：Runtime 可安全 `model.data_classification = dc.internal`
+        assert isinstance(dc.internal, str)
+        assert dc.internal == "internal"
+        assert dc.public == "public"
+        assert dc.student_pii == "student_pii"
+        assert dc.psych_sensitive == "psych_sensitive"
+
 
 class TestInv13PrePostCallOrdering:
     def test_precall_declared_upgrade_happens_before_provider_routing(self):
