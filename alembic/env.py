@@ -77,8 +77,49 @@ for module_dir in sorted(_modules_dir.iterdir()):
     except Exception as e:
         _skipped.append((module_name, str(e)))
 
+# ═══════════════════════════════════════════════════════════════
+#  AI Native Control Plane — ai_native/models/*.py 单独扫描
+#  （ai_native 在仓库根，不在 modules/ 下；§0-E/B0 §6：绿地包）
+#  ★ B1 FAIL-CLOSE：AI Native 是 frozen 9 Models，任何 import 失败 /
+#    数量 ≠ 9 必须 STOP，不允许像旧 modules/* 那样 skip 后继续。
+# ═══════════════════════════════════════════════════════════════
+_ai_native_models_dir = BACKEND_ROOT / "ai_native" / "models"
+_ai_native_loaded = 0
+if not _ai_native_models_dir.is_dir():
+    raise RuntimeError(
+        "[B1 FAIL-CLOSE] ai_native/models/ 目录缺失；frozen 9 Models 必须存在"
+    )
+
+_ai_native_errors: list[tuple[str, str]] = []
+try:
+    # 先 import ai_native 根包（确保子包路径可解析）
+    importlib.import_module("ai_native")
+    for models_file in sorted(_ai_native_models_dir.glob("*.py")):
+        if models_file.name == "__init__.py":
+            continue
+        module_name = f"ai_native.models.{models_file.stem}"
+        try:
+            importlib.import_module(module_name)
+            _ai_native_loaded += 1
+        except Exception as e:
+            _ai_native_errors.append((module_name, str(e)))
+except Exception as e:
+    _ai_native_errors.append(("ai_native", str(e)))
+
+if _ai_native_errors:
+    raise RuntimeError(
+        "[B1 FAIL-CLOSE] ai_native.models 导入失败，必须 STOP：\n"
+        + "\n".join(f"  {mod}: {err}" for mod, err in _ai_native_errors)
+    )
+if _ai_native_loaded != 9:
+    raise RuntimeError(
+        f"[B1 FAIL-CLOSE] AI Native frozen 9 Models，实际加载 {_ai_native_loaded} 个；"
+        f"必须 9/9，禁止带残缺 schema 迁移"
+    )
+
 print(
-    f"[alembic-env] 已加载 {_loaded_count} 个模块的 models"
+    f"[alembic-env] 已加载 {_loaded_count} 个业务模块的 models"
+    + f" + {_ai_native_loaded} 个 ai_native 模型"
     + (f", 跳过 {len(_skipped)} 个有错误的模块" if _skipped else "")
 )
 

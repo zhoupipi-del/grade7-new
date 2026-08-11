@@ -1,0 +1,1 @@
+"""tests/ai_native — WINGS AI Native 2.1 schema contract tests."""
