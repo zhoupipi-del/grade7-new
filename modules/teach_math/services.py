@@ -14,6 +14,9 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import httpx
+from core.deepseek_provider import DeepSeekProvider
+
+_deepseek = DeepSeekProvider()
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, text as sa_text, bindparam
 
@@ -195,28 +198,17 @@ def _call_deepseek(prompt: str, system_prompt: str, timeout: int = 60) -> tuple[
         tuple[dict, Optional[str]]: (LLM 响应 JSON, 错误信息)
     """
     try:
-        with httpx.Client(timeout=timeout) as client:
-            resp = client.post(
-                LLM_API_URL,
-                headers={
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": LLM_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.3,
-                    "max_tokens": 4096,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"]
-            return json.loads(content), None
+        content, _ = _deepseek.call(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            timeout=timeout,
+            json_mode=True,
+            temperature=0.3,
+            max_tokens=4096,
+        )
+        return json.loads(content), None
     except httpx.HTTPStatusError as e:
         return {}, f"HTTP {e.response.status_code}: {e.response.text[:200]}"
     except httpx.TimeoutException:

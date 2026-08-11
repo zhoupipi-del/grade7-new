@@ -15,7 +15,9 @@ import logging
 import os
 from datetime import date, datetime
 
-import httpx
+from core.deepseek_provider import DeepSeekProvider
+
+_deepseek = DeepSeekProvider()
 from core.db_utils import require_db_url
 from core.event_bus import EventBus
 from core.models import Class, Student, get_local_now
@@ -1051,29 +1053,17 @@ async def run_ai_analysis(
     )
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                LLM_API_URL,
-                headers={
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": LLM_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": data_summary},
-                    ],
-                    "temperature": 0.5,
-                    "max_tokens": 4096,
-                },
-            )
-            if resp.status_code == 200:
-                body = resp.json()
-                report = body["choices"][0]["message"]["content"].strip()
-                return {"report": report, "error": None}
-            else:
-                return {"error": f"LLM API 返回 {resp.status_code}", "report": None}
+        content, _ = await _deepseek.acall(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": data_summary},
+            ],
+            timeout=60.0,
+            temperature=0.5,
+            max_tokens=4096,
+        )
+        report = content.strip()
+        return {"report": report, "error": None}
     except Exception as e:
         logger.warning(f"[psych_screening] AI analysis failed: {e}")
         return {"error": f"AI 分析生成失败: {str(e)}", "report": None}

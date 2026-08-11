@@ -9,7 +9,9 @@ Habit Cards 核心业务服务层
 import os
 from datetime import datetime
 
-import httpx
+from core.deepseek_provider import DeepSeekProvider
+
+_deepseek = DeepSeekProvider()
 from core.db_utils import require_db_url
 from core.event_bus import EventBus
 from modules.habit_cards.models import (
@@ -318,27 +320,17 @@ async def generate_ai_praise_letter(
 2. 拒绝任何官话套话，要让家长读完后忍不住想转发朋友圈展示。
 3. 控制在 180 字以内，只输出表彰信正文，不加标题前缀。"""
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        try:
-            resp = await client.post(
-                LLM_API_URL,
-                headers={
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": LLM_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.8,  # 表彰信用更高温度增加文采
-                    "max_tokens": 512,
-                },
-            )
-            if resp.status_code == 200:
-                body = resp.json()
-                letter = body["choices"][0]["message"]["content"].strip()
-                return {"status": "success", "letter": letter}
-        except Exception:
-            pass  # 兜底文案在调用方处理
+    try:
+        content, _ = await _deepseek.acall(
+            [{"role": "user", "content": prompt}],
+            timeout=15.0,
+            temperature=0.8,
+            max_tokens=512,
+        )
+        letter = content.strip()
+        return {"status": "success", "letter": letter}
+    except Exception:
+        pass  # 兜底文案在调用方处理
 
     # 兜底：不发空信
     if records:

@@ -14,7 +14,9 @@ error_funnel/services.py — 错题断层漏斗引擎核心
 
 import os
 import json
-import httpx
+from core.deepseek_provider import DeepSeekProvider
+
+_deepseek = DeepSeekProvider()
 import logging
 from sqlalchemy import select, func, and_, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -652,28 +654,17 @@ async def generate_ai_prescription(
 
 async def _call_deepseek(prompt: str, system_prompt: str, timeout: float = 30.0) -> dict:
     """调用 DeepSeek API"""
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            LLM_API_URL,
-            headers={
-                "Authorization": f"Bearer {LLM_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": LLM_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                "response_format": {"type": "json_object"},
-                "temperature": 0.3,
-                "max_tokens": 2048,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
-        return json.loads(content)
+    content, _ = await _deepseek.acall(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        timeout=timeout,
+        json_mode=True,
+        temperature=0.3,
+        max_tokens=2048,
+    )
+    return json.loads(content)
 
 
 # ──────────────────────────────────────────────
