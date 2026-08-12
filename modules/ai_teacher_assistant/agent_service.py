@@ -156,31 +156,33 @@ class AgentCopilotService:
         step_views: list[dict[str, Any]] = []
 
         # ── 7. Bounded multi-tool ──
+        # Pre-register compare tool if not in registry
+        if self.registry.get("compare_exam_performance") is None:
+            from ai_native.runtime.tool_descriptor import ToolDescriptor
+            from modules.ai_teacher_assistant.tools.compare_exam_performance import (
+                compare_exam_performance_handler,
+            )
+            self.registry.register(ToolDescriptor(
+                name="compare_exam_performance", version="0.1.0",
+                description="比较多次考试间的科目表现变化",
+                declared_output_classification="student_pii",
+                approval_policy="none", idempotent=True,
+                timeout_seconds=60, action="read",
+                side_effect="none", required_scope="grade",
+                allowed_input_classification="student_pii",
+                supported_roles=["grade_leader", "class_teacher", "ms_admin"],
+                handler=compare_exam_performance_handler,
+            ))
+
         for step in plan.steps:
             descriptor = self.registry.get(step.tool)
             if descriptor is None:
-                # Tool not in registry → try dynamic load
-                from modules.ai_teacher_assistant.tools.read_class_grade_summary import (
-                    build_read_class_grade_summary_descriptor,
-                )
+                # Only summary might need dynamic load
                 if step.tool == "read_class_grade_summary":
+                    from modules.ai_teacher_assistant.tools.read_class_grade_summary import (
+                        build_read_class_grade_summary_descriptor,
+                    )
                     descriptor = build_read_class_grade_summary_descriptor()
-                elif step.tool == "compare_exam_performance":
-                    from ai_native.runtime.tool_descriptor import ToolDescriptor
-                    from modules.ai_teacher_assistant.tools.compare_exam_performance import (
-                        compare_exam_performance_handler,
-                    )
-                    descriptor = ToolDescriptor(
-                        name="compare_exam_performance", version="0.1.0",
-                        description="比较多次考试间的科目表现变化",
-                        declared_output_classification="student_pii",
-                        approval_policy="none", idempotent=True,
-                        timeout_seconds=60, action="read",
-                        side_effect="none", required_scope="grade",
-                        allowed_input_classification="student_pii",
-                        supported_roles=["grade_leader", "class_teacher", "ms_admin"],
-                        handler=compare_exam_performance_handler,
-                    )
 
             if descriptor is None or descriptor.handler is None:
                 raise HTTPException(status_code=500, detail=f"Tool {step.tool} 不可用")
