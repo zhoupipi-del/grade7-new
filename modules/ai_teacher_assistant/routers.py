@@ -46,7 +46,7 @@ async def class_grade_summary(
         )
         return ClassGradeSummaryResponse(
             status="completed",
-            output=output,
+            output=output.model_dump() if hasattr(output, "model_dump") else output,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
