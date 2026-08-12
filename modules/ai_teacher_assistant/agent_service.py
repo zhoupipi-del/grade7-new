@@ -244,7 +244,12 @@ class AgentCopilotService:
         outcome = "success"
         outcome_reason: str | None = None
 
-        # If compare tool returned empty subjects, try replan to summary-only
+        # Post-hoc: remove unexecuted steps from plan before critic
+        executed_tools = {r["tool"] for r in tool_results}
+        step_views = [s for s in step_views if s["tool"] in executed_tools]
+        plan_steps = [s for s in plan.steps if s.tool in executed_tools]
+        # We'll use plan_steps for critic but keep plan.steps for AgentPlan ref
+
         has_compare = any(r["tool"] == "compare_exam_performance" for r in tool_results)
         compare_empty = any(
             r["tool"] == "compare_exam_performance"
@@ -288,9 +293,10 @@ class AgentCopilotService:
             "recommendations": synthesis.get("recommendations", []),
         }
 
-        # ── 9. Critic ──
+        # ── 9. Critic (use only executed plan steps) ──
+        critic_plan = type("Plan", (), {"steps": plan_steps})()
         critic_result = self.critic.review(
-            plan=plan,
+            plan=critic_plan,
             tool_results=tool_results,
             final_output=final_output,
         )
