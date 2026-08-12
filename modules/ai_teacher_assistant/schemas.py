@@ -28,3 +28,45 @@ class ClassGradeSummaryResponse(BaseModel):
     status: str = "completed"
     output: Optional[dict] = None
     error: Optional[str] = None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Agent Copilot V1 schemas
+# ═══════════════════════════════════════════════════════════════
+
+from typing import Any as _Any
+
+
+class CopilotRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str = Field(min_length=2, max_length=500)
+    grade_id: int
+    class_id: int | None = None
+    exam_id: int | None = None
+    compare_exam_ids: list[int] | None = None
+
+
+class CopilotStepView(BaseModel):
+    tool: str
+    status: str
+    reason: str
+
+
+class CopilotCriticView(BaseModel):
+    passed: bool
+    issues: list[str]
+
+
+class CopilotRunResponse(BaseModel):
+    status: str
+    run_id: int
+    goal: str
+    plan: list[CopilotStepView]
+    overview: dict[str, _Any]
+    findings: list[str]
+    recommendations: list[str]
+    critic: CopilotCriticView
+    provider: str
+    model: str
+    trust: dict[str, _Any]

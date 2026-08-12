@@ -14,8 +14,12 @@ from core.models import User
 from core.routers import get_current_user, get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .schemas import ClassGradeSummaryRequest, ClassGradeSummaryResponse
+from .schemas import (
+    ClassGradeSummaryRequest, ClassGradeSummaryResponse,
+    CopilotRunRequest, CopilotRunResponse,
+)
 from .services import ClassGradeSummaryService
+from .agent_service import AgentCopilotService
 
 router = APIRouter(tags=["AI 教师助手"])
 
@@ -55,3 +59,31 @@ async def class_grade_summary(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"AI 分析失败: {exc}",
         )
+
+
+@router.post(
+    "/agent/run",
+    response_model=CopilotRunResponse,
+    summary="AI Agent 自动分析（多工具编排）",
+)
+async def run_copilot(
+    payload: CopilotRunRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CopilotRunResponse:
+    """自然语言输入 → Planner 分配 Tool → 执行 → Synthesizer → Critic → 返回。
+
+    输出不含学生个人信息（student_id / student_name / 单生分数明细）。
+    """
+    if current_user.school_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="未绑定学校")
+
+    service = AgentCopilotService(db=db, user=current_user)
+    result = await service.run(
+        goal=payload.goal,
+        grade_id=payload.grade_id,
+        class_id=payload.class_id,
+        exam_id=payload.exam_id,
+        compare_exam_ids=payload.compare_exam_ids,
+    )
+    return CopilotRunResponse(**result)
