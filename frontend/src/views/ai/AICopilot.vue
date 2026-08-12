@@ -222,15 +222,15 @@ import { runCopilot, toolLabel, OUTCOME_LABELS, DOMAIN_ICONS, DOMAIN_NAMES, DOMA
 import { useUserStore } from '@/store/user'
 import type { CopilotRunResponse } from '@/api/aiCopilot'
 
-const goal = ref(`帮我看看${userStore.userInfo?.grade_name ?? '当前年级'}最近有什么值得重点关注的问题`)
+const userStore = useUserStore()
+const gradeId = computed(() => userStore.userInfo?.grade_id ?? 0)
+const gradeName = computed(() => userStore.userInfo?.grade_name ?? '当前年级')
+
+const goal = ref('帮我看看本周重点问题')
 const loading = ref(false)
 const error = ref('')
 const result = ref<CopilotRunResponse | null>(null)
 const showDrawer = ref(false)
-
-const userStore = useUserStore()
-const gradeId = computed(() => userStore.userInfo?.grade_id ?? 0)
-const gradeName = computed(() => userStore.userInfo?.grade_name ?? '当前年级')
 
 const outcomeClass = computed(() => {
   if (!result.value) return ''
