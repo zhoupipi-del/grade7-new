@@ -55,7 +55,11 @@ async def compare_exam_performance_handler(
         )
 
     if len(exam_ids) < 2:
-        raise ValueError("compare_exam_performance 至少需要两个 exam_id")
+        return CompareExamPerformanceOutput(
+            exam_ids=exam_ids,
+            student_count=len(effective_student_ids),
+            subjects=[],
+        )
 
     # V1 只比较最后两个
     selected_exam_ids = exam_ids[-2:]
