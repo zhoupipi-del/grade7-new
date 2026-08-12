@@ -318,14 +318,23 @@ function quickAndRun(q: string) {
 
 async function run() {
   if (!goal.value.trim()) return
+
+  // 🔪 Computed/Ref 必须解包后才能进 HTTP payload（Axios JSON.stringify 撞循环引用）
+  const currentGradeId = Number(gradeId.value)
+
+  if (!currentGradeId) {
+    error.value = '当前账号未找到可访问年级，请联系管理员绑定年级'
+    return
+  }
+
   loading.value = true
   error.value = ''
   result.value = null
 
   try {
     result.value = await runCopilot({
-      goal: goal.value,
-      grade_id: gradeId,
+      goal: goal.value.trim(),
+      grade_id: currentGradeId,
     })
   } catch (e: any) {
     error.value = e?.response?.data?.detail?.message
