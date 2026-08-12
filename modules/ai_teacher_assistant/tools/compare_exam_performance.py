@@ -54,6 +54,15 @@ async def compare_exam_performance_handler(
             subjects=[],
         )
 
+    # Auto-discover latest exams if not provided or insufficient
+    if not exam_ids or len(exam_ids) < 2:
+        discovered = await _discover_latest_exam_ids(
+            db=db,
+            effective_student_ids=effective_student_ids,
+            limit=2,
+        )
+        exam_ids = discovered if discovered else exam_ids
+
     if len(exam_ids) < 2:
         return CompareExamPerformanceOutput(
             exam_ids=exam_ids,
@@ -61,7 +70,6 @@ async def compare_exam_performance_handler(
             subjects=[],
         )
 
-    # V1 只比较最后两个
     selected_exam_ids = exam_ids[-2:]
 
     stmt = (
@@ -129,3 +137,32 @@ async def compare_exam_performance_handler(
         student_count=len(effective_student_ids),
         subjects=result,
     )
+
+
+async def _discover_latest_exam_ids(
+    *,
+    db: AsyncSession,
+    effective_student_ids: set[int],
+    limit: int = 2,
+) -> list[int]:
+    """Auto-discover the most recent exams with actual grade records."""
+    if not effective_student_ids:
+        return []
+
+    from sqlalchemy import func as _func, distinct as _distinct
+
+    stmt = (
+        select(GradeRecord.exam_id)
+        .where(
+            GradeRecord.student_id.in_(effective_student_ids),
+            GradeRecord.exam_id.is_not(None),
+            GradeRecord.score.is_not(None),
+        )
+        .group_by(GradeRecord.exam_id)
+        .having(_func.count(_distinct(GradeRecord.student_id)) > 0)
+        .order_by(GradeRecord.exam_id.desc())
+        .limit(limit)
+    )
+
+    rows = (await db.execute(stmt)).scalars().all()
+    return [int(x) for x in rows]
