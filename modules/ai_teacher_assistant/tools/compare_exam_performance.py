@@ -75,10 +75,17 @@ async def compare_exam_performance_handler(
         )
         exam_ids = discovered if discovered else exam_ids
 
+    # Sort by exam_date ascending: [earlier, ..., latest]
+    exam_rows_date = (await db.execute(
+        select(GradeExam.id, GradeExam.exam_date).where(GradeExam.id.in_(exam_ids))
+    )).all()
+    id_with_date = [(int(r[0]), r[1]) for r in exam_rows_date if r[1] is not None]
+    id_with_date.sort(key=lambda x: x[1])  # chronological
+    exam_ids = [x[0] for x in id_with_date]
+
     if len(exam_ids) < 2:
         return CompareExamPerformanceOutput(scope_students=len(effective_student_ids))
 
-    # Get exam metadata
     prev_id, curr_id = exam_ids[-2], exam_ids[-1]
     exam_rows = (await db.execute(
         select(GradeExam).where(GradeExam.id.in_([prev_id, curr_id]))
@@ -87,6 +94,14 @@ async def compare_exam_performance_handler(
 
     prev_exam = _build_exam_meta(exam_map.get(prev_id))
     curr_exam = _build_exam_meta(exam_map.get(curr_id))
+
+    # ── Temporal consistency guard ──
+    if prev_exam and curr_exam and prev_exam.exam_date and curr_exam.exam_date:
+        if prev_exam.exam_date >= curr_exam.exam_date:
+            raise ValueError(
+                f"compare_exam_performance: previous exam date ({prev_exam.exam_date}) "
+                f">= current exam date ({curr_exam.exam_date}) — ordering broken"
+            )
 
     # ── Matched cohort: students who took BOTH exams ──
     prev_students = set(await _exam_student_ids(db, prev_id, effective_student_ids))
