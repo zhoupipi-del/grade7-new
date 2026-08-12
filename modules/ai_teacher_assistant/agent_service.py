@@ -192,6 +192,8 @@ class AgentCopilotService:
                         declared_output_classification="student_pii",
                         approval_policy="none", idempotent=True,
                         timeout_seconds=60, action="read",
+                        side_effect="none", required_scope="grade",
+                        allowed_input_classification="student_pii",
                         supported_roles=["grade_leader", "class_teacher", "ms_admin"],
                         handler=compare_exam_performance_handler,
                     )
