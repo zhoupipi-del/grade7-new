@@ -207,8 +207,8 @@ class AgentCopilotService:
             args["db"] = self.db
 
             # compare tool needs exam_ids from request context
-            if step.tool == "compare_exam_performance" and compare_exam_ids:
-                args["exam_ids"] = compare_exam_ids
+            if step.tool == "compare_exam_performance":
+                args["exam_ids"] = compare_exam_ids or []
 
             result = await _maybe_await(
                 descriptor.handler(**args)
