@@ -317,14 +317,23 @@ function quickAndRun(q: string) {
 }
 
 async function run() {
-  if (!goal.value.trim()) return
+  const currentGoal = String(goal?.value ?? '').trim()
+  const currentGradeId = Number(gradeId?.value)
 
-  // 🔪 Computed/Ref 必须解包后才能进 HTTP payload（Axios JSON.stringify 撞循环引用）
-  const currentGradeId = Number(gradeId.value)
+  if (!currentGoal) {
+    error.value = '请输入分析任务'
+    return
+  }
 
-  if (!currentGradeId) {
+  if (!Number.isFinite(currentGradeId) || currentGradeId <= 0) {
     error.value = '当前账号未找到可访问年级，请联系管理员绑定年级'
     return
+  }
+
+  // 🔪 硬切断：只构造纯 primitive DTO，任何 ref/computed/proxy 都不进 payload
+  const payload = {
+    goal: currentGoal,
+    grade_id: currentGradeId,
   }
 
   loading.value = true
@@ -332,15 +341,27 @@ async function run() {
   result.value = null
 
   try {
-    result.value = await runCopilot({
-      goal: goal.value.trim(),
-      grade_id: currentGradeId,
-    })
+    // 序列化硬验证：若这里抛错，说明 payload 里仍有响应式对象
+    const serialized = JSON.stringify(payload)
+    console.log('[COPILOT] payload', payload, 'json', serialized)
+
+    const response = await runCopilot(payload)
+    result.value = (response as any)?.data ?? response
   } catch (e: any) {
-    error.value = e?.response?.data?.detail?.message
-      ?? e?.response?.data?.detail
-      ?? e?.message
-      ?? '执行失败'
+    console.error('[COPILOT] error', e)
+    if (e?.response) {
+      // HTTP 错误（403/422/500...）
+      error.value = e?.response?.data?.detail?.message
+        ?? e?.response?.data?.detail
+        ?? (typeof e?.response?.data?.message === 'string' ? e.response.data.message : null)
+        ?? `请求失败 (HTTP ${e.response.status})`
+    } else if (e?.request) {
+      // 请求已发出但无响应（网络层）
+      error.value = '网络异常，请检查网络连接或稍后重试'
+    } else {
+      // 前端代码错误（序列化/逻辑），非网络问题
+      error.value = `页面处理失败：${e?.message ?? '未知错误'}`
+    }
   } finally {
     loading.value = false
   }

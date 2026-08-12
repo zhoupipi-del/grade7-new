@@ -53,8 +53,15 @@ service.interceptors.response.use(
     const { response } = error
 
     if (!response) {
-      // Network error or timeout
-      ElMessage.error('网络异常，请检查网络连接或稍后重试')
+      const msg: string = error?.message ?? ''
+      if (/circular|stringify|serialize/i.test(msg)) {
+        // 前端 payload 序列化错误（ref/computed/proxy 未解包）— 非网络问题
+        console.error('[Payload Serialization Error]', error)
+        ElMessage.error('页面数据处理失败，请检查输入内容后重试')
+      } else {
+        // 请求已发出但无响应 — 网络错误或超时
+        ElMessage.error('网络异常，请检查网络连接或稍后重试')
+      }
       return Promise.reject(error)
     }
 
