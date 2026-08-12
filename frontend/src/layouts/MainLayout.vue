@@ -306,6 +306,13 @@ const allMenuGroups: MenuGroup[] = [
         roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
       },
       {
+        index: '/ai-copilot',
+        title: 'AI 智能助手',
+        icon: 'MagicStick',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+        phases: ['junior', 'senior', 'integrated'],
+      },
+      {
         index: '/ai-prescription',
         title: 'AI 德育处方',
         icon: 'MagicStick',

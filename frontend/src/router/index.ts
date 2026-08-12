@@ -104,6 +104,17 @@ const routes: RouteRecordRaw[] = [
           roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'] as UserRole[],
         },
       },
+      // AI 智能助手 — Agent V1
+      {
+        path: 'ai-copilot',
+        name: 'AICopilot',
+        component: () => import('@/views/ai/AICopilot.vue'),
+        meta: {
+          title: 'AI 智能助手',
+          icon: 'MagicStick',
+          roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'] as UserRole[],
+        },
+      },
       // 审题助手 — 数学题翻译引擎
       {
         path: 'teach-math/coach',
