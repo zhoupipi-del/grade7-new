@@ -227,6 +227,41 @@ class AgentCopilotService:
                 "reason": step.reason,
             })
 
+        # ── 7a. Check outcome + replan ──
+        outcome = "success"
+        outcome_reason: str | None = None
+
+        # If compare tool returned empty subjects, try replan to summary-only
+        has_compare = any(r["tool"] == "compare_exam_performance" for r in tool_results)
+        compare_empty = any(
+            r["tool"] == "compare_exam_performance"
+            and len(r.get("result", {}).get("subjects", [])) == 0
+            for r in tool_results
+        )
+        summary_empty = any(
+            r["tool"] == "read_class_grade_summary"
+            and len(r.get("result", {}).get("subjects", [])) == 0
+            for r in tool_results
+        )
+
+        if has_compare and compare_empty and not summary_empty:
+            # Replan: drop compare, keep only summary findings
+            outcome = "needs_data"
+            outcome_reason = "insufficient_comparable_exams"
+            tool_results = [r for r in tool_results if r["tool"] != "compare_exam_performance"]
+            step_views = [s for s in step_views if s["tool"] != "compare_exam_performance"]
+        elif summary_empty:
+            outcome = "needs_data"
+            outcome_reason = "no_grade_data_available"
+
+        # Extract student counts from summary result
+        student_count = 0
+        examined_count = 0
+        for r in tool_results:
+            counts = r.get("result", {}).get("counts", {})
+            student_count = max(student_count, counts.get("students", 0))
+            examined_count = max(examined_count, counts.get("examined", 0))
+
         # ── 8. Synthesizer ──
         synthesis = self.synthesizer.generate(
             run=run_state,
@@ -293,4 +328,8 @@ class AgentCopilotService:
                 "student_pii_sent": False,
                 "provenance_recorded": True,
             },
+            "outcome": outcome,
+            "outcome_reason": outcome_reason,
+            "student_count": student_count,
+            "examined_count": examined_count,
         }

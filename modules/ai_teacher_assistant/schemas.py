@@ -70,3 +70,8 @@ class CopilotRunResponse(BaseModel):
     provider: str
     model: str
     trust: dict[str, _Any]
+    # V2 product semantics
+    outcome: str = "success"  # success | needs_data | needs_input | denied | failed
+    outcome_reason: str | None = None
+    student_count: int = 0
+    examined_count: int = 0
