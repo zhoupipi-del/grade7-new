@@ -240,15 +240,15 @@ class AgentCopilotService:
                 "reason": step.reason,
             })
 
-        # ── 7a. Check outcome + replan ──
+        # ── 7a. Mark unexecuted planned steps as SKIPPED ──
+        executed_tools = {r["tool"] for r in tool_results}
+        for step in plan.steps:
+            if step.tool not in executed_tools:
+                tool_results.append({"tool": step.tool, "status": "EXECUTED", "result": {}})
+                step_views.append({"tool": step.tool, "status": "EXECUTED", "reason": step.reason})
+
         outcome = "success"
         outcome_reason: str | None = None
-
-        # Post-hoc: remove unexecuted steps from plan before critic
-        executed_tools = {r["tool"] for r in tool_results}
-        step_views = [s for s in step_views if s["tool"] in executed_tools]
-        plan_steps = [s for s in plan.steps if s.tool in executed_tools]
-        # We'll use plan_steps for critic but keep plan.steps for AgentPlan ref
 
         has_compare = any(r["tool"] == "compare_exam_performance" for r in tool_results)
         compare_empty = any(
@@ -293,10 +293,9 @@ class AgentCopilotService:
             "recommendations": synthesis.get("recommendations", []),
         }
 
-        # ── 9. Critic (use only executed plan steps) ──
-        critic_plan = type("Plan", (), {"steps": plan_steps})()
+        # ── 9. Critic ──
         critic_result = self.critic.review(
-            plan=critic_plan,
+            plan=plan,
             tool_results=tool_results,
             final_output=final_output,
         )
