@@ -191,7 +191,7 @@ class AgentCopilotService:
                         description="比较多次考试间的科目表现变化",
                         declared_output_classification="student_pii",
                         approval_policy="none", idempotent=True,
-                        timeout_seconds=60,
+                        timeout_seconds=60, action="read",
                         supported_roles=["grade_leader", "class_teacher", "ms_admin"],
                         handler=compare_exam_performance_handler,
                     )
