@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections import defaultdict
 from statistics import median as calc_median
 from typing import Any, Dict, List, Optional
@@ -97,7 +98,7 @@ def read_class_grade_summary_handler(run=None, **kwargs):  # noqa: ARG001
     # ProviderRouter（禁止直接 DeepSeekProvider）
     router = ProviderRouter()
     provider = router.route(
-        model="deepseek-chat", data_classification=data_classification,
+        model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"), data_classification=data_classification,
     )
 
     data_json = ctx.get("data_json", "{}")
@@ -125,7 +126,7 @@ def read_class_grade_summary_handler(run=None, **kwargs):  # noqa: ARG001
         "actual_classification": "student_pii",
         "model_call": {
             "provider": "deepseek",
-            "model": "deepseek-chat",
+            "model": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
             "usage": usage,
             "cost_amount": "0.001",
             "cost_currency": "CNY",

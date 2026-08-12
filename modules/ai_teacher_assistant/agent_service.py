@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 from typing import Any
 
 from fastapi import HTTPException
@@ -67,7 +68,7 @@ class CopilotSynthesizer:
 
         classification = run.get("data_classification", "internal")
         provider = self.provider_router.route(
-            model="deepseek-chat", data_classification=classification,
+            model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"), data_classification=classification,
         )
 
         content, usage = provider.call(
@@ -279,7 +280,7 @@ class AgentCopilotService:
             "recommendations": final_output["recommendations"],
             "critic": {"passed": True, "issues": []},
             "provider": "deepseek",
-            "model": "deepseek-chat",
+            "model": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
             "trust": {
                 "permission_checked": True,
                 "aggregate_before_provider": True,
