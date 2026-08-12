@@ -1,126 +1,165 @@
 <template>
-  <div class="copilot-page">
-    <!-- ① Header -->
-    <div class="hero">
-      <div>
-        <span class="eyebrow">WINGS AI COPILOT</span>
-        <h1>让学校数据主动找到你</h1>
-        <p>基于真实业务数据、权限范围和 AI Agent，自动完成分析、比较与管理建议。</p>
+  <div class="copilot">
+    <!-- ═══════════════ Empty State ═══════════════ -->
+    <template v-if="!result && !loading && !error">
+      <div class="hero-empty">
+        <div class="hero-icon">✦</div>
+        <h1>WINGS AI</h1>
+        <p class="hero-sub">下午好，AI 已准备好分析您负责的年级数据</p>
       </div>
-      <span class="service-badge"><span class="dot" /> AI 服务正常</span>
-    </div>
 
-    <!-- ② 输入区 -->
-    <div class="card">
-      <div class="input-row">
+      <div class="input-block">
         <textarea
           v-model="goal"
           :disabled="loading"
-          placeholder="例如：帮我看看一年级最近考试有什么值得本周重点关注的问题"
-          rows="3"
+          placeholder="帮我看看一年级最近有什么值得本周重点关注的问题"
+          rows="2"
           @keydown.ctrl.enter="run"
         />
-        <button class="btn-run" :disabled="loading || !goal.trim()" @click="run">
-          {{ loading ? 'AI 正在分析…' : '开始分析' }}
-        </button>
+        <button class="btn-go" :disabled="loading || !goal.trim()" @click="run">→</button>
       </div>
+
       <div class="quick-row">
-        <button @click="setQuick('分析一年级最近一次考试')">📊 分析最近考试</button>
-        <button @click="setQuick('比较一年级最近两次考试的变化趋势')">📈 比较考试变化</button>
-        <button @click="setQuick('帮我看看一年级最近有什么值得本周重点关注的问题')">✨ 找出本周重点</button>
+        <button @click="setQuick('分析一年级最近一次考试')">📊 最近考试分析</button>
+        <button @click="setQuick('比较一年级最近两次考试的变化趋势')">📈 考试趋势</button>
+        <button @click="setQuick('帮我看看一年级最近有什么值得本周重点关注的问题')">✨ 本周重点</button>
+      </div>
+    </template>
+
+    <!-- ═══════════════ Loading ═══════════════ -->
+    <div v-if="loading" class="hero-empty">
+      <div class="hero-icon spinner" />
+      <h1>AI 正在分析</h1>
+      <p class="hero-sub">正在读取数据、执行分析并进行安全自检…</p>
+    </div>
+
+    <!-- ═══════════════ Error ═══════════════ -->
+    <div v-if="error" class="hero-empty">
+      <div class="hero-icon">⚠</div>
+      <h1>分析未能完成</h1>
+      <p class="hero-sub">{{ error }}</p>
+      <button class="btn-go" @click="run">重试</button>
+    </div>
+
+    <!-- ═══════════════ NEEDS_DATA ═══════════════ -->
+    <div v-if="result && result.outcome === 'needs_data'" class="needs-data">
+      <div class="hero-icon">📊</div>
+      <h2>还缺一些数据</h2>
+      <p class="nd-sub">
+        AI 已确认：<br />
+        <template v-if="result.student_count > 0">
+          ✓ 该年级有 {{ result.student_count }} 名学生<br />
+          ✓ 您具有该年级数据权限<br />
+        </template>
+        ✓ 成绩分析工具正常<br />
+        <br />
+        目前暂未找到满足条件的考试数据，<br />
+        AI 没有强行生成趋势结论。
+      </p>
+      <div class="nd-tag">AI 在数据不足时不编造结论</div>
+      <div class="quick-row" style="justify-content:center;margin-top:16px">
+        <button @click="setQuick('分析一年级最近一次考试'); run()">分析最近一次考试</button>
+        <button @click="setQuick('帮我看看一年级最近有什么值得本周重点关注的问题'); run()">查找本周重点</button>
       </div>
     </div>
 
-    <!-- ③ Loading -->
-    <div v-if="loading" class="card working">
-      <div class="working-title"><span class="spinner" /> 正在执行 AI Agent...</div>
-      <p class="working-tip">AI 只会访问您被授权的数据范围。分析完成后将自动进行安全自检。</p>
-    </div>
-
-    <!-- Error -->
-    <div v-if="error" class="card error-card">
-      <strong>分析失败</strong>
-      <p>{{ error }}</p>
-      <button @click="run">重新分析</button>
-    </div>
-
-    <!-- ④ 结果 -->
-    <template v-if="result">
-      <!-- 指标卡 -->
-      <div class="metrics">
-        <div class="metric"><span>运行状态</span><strong>{{ result.status.toUpperCase() }}</strong></div>
-        <div v-for="(v, k) in displayMetrics" :key="k" class="metric">
-          <span>{{ k }}</span><strong>{{ v }}</strong>
-        </div>
-      </div>
-
-      <!-- ⑤ 执行过程 -->
-      <div class="card">
-        <div class="card-title">⚙️ Agent 执行过程</div>
-        <div v-for="s in result.plan" :key="s.tool" class="step-row">
-          <span class="step-ok">✓</span>
-          <div><strong>{{ toolLabel(s.tool) }}</strong><p>{{ s.reason }}</p></div>
-          <span class="step-tag">{{ s.status }}</span>
-        </div>
-      </div>
-
-      <!-- ⑥ 发现 + 建议 -->
-      <div class="two-col">
-        <div class="card">
-          <div class="card-title">🔎 核心发现</div>
-          <div v-for="(item, i) in result.findings" :key="i" class="item">
-            <span class="idx">{{ i + 1 }}</span>
-            <span>{{ item }}</span>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title">💡 本周建议</div>
-          <div v-for="(item, i) in result.recommendations" :key="i" class="item">
-            <span class="idx">{{ i + 1 }}</span>
-            <p>{{ item }}</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- ⑦ Trust Bar -->
-      <div class="card trust-bar">
+    <!-- ═══════════════ SUCCESS Dashboard ═══════════════ -->
+    <template v-if="result && result.outcome === 'success'">
+      <!-- Header -->
+      <div class="dash-header">
         <div>
-          <h3>AI 分析安全可信</h3>
-          <div class="trust-checks">
-            <span v-if="result.trust.permission_checked">✓ 已校验数据权限</span>
-            <span v-if="result.trust.aggregate_before_provider">✓ 学生数据聚合后才发送给 AI</span>
-            <span v-if="!result.trust.student_pii_sent">✓ 未向模型发送学生原始 PII</span>
-            <span v-if="result.trust.provenance_recorded">✓ AI 操作已全链记录</span>
-            <span v-if="result.critic.passed">✓ AI 安全自检通过</span>
-          </div>
+          <span class="dash-eyebrow">一年级 · 分析完成</span>
+          <h2>最近考试分析</h2>
         </div>
-        <div class="trust-meta">
-          <strong>Run #{{ result.run_id }}</strong>
-          <span>{{ result.model }}</span>
-          <button class="btn-detail" @click="drawerOpen = true">查看运行详情</button>
+        <span class="dash-badge">✓ 分析完成</span>
+      </div>
+
+      <!-- KPI -->
+      <div class="kpi-row">
+        <div class="kpi">
+          <span class="kpi-num">{{ result.student_count || overviewVal('student_count') || '—' }}</span>
+          <span class="kpi-label">覆盖学生</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-num">{{ result.examined_count || overviewVal('examined_students') || '—' }}</span>
+          <span class="kpi-label">参考学生</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-num">{{ overviewVal('subjects') || overviewVal('subject_count') || '—' }}</span>
+          <span class="kpi-label">分析科目</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-num">{{ overviewVal('grade_records') || '—' }}</span>
+          <span class="kpi-label">成绩记录</span>
+        </div>
+      </div>
+
+      <!-- Findings -->
+      <div class="findings-block" v-if="result.findings.length">
+        <div class="section-title">🔎 核心发现</div>
+        <div class="finding" v-for="(item, i) in result.findings" :key="i">
+          <span class="f-idx">{{ i + 1 }}</span>
+          <span>{{ item }}</span>
+        </div>
+      </div>
+
+      <!-- Recommendations -->
+      <div class="recs-block" v-if="result.recommendations.length">
+        <div class="section-title">✨ AI 建议</div>
+        <div class="rec" v-for="(item, i) in result.recommendations" :key="i">
+          <span class="r-idx">{{ String(i + 1).padStart(2, '0') }}</span>
+          <p>{{ item }}</p>
         </div>
       </div>
     </template>
 
-    <!-- ⑧ Drawer -->
+    <!-- ═══════════════ Trust Footer ═══════════════ -->
+    <footer v-if="result" class="trust-footer">
+      <span>AI 分析安全可信</span>
+      <span>·</span>
+      <span v-if="result.trust.permission_checked">权限已校验</span>
+      <span>·</span>
+      <span v-if="!result.trust.student_pii_sent">无学生 PII 泄露</span>
+      <span>·</span>
+      <span>{{ result.model }}</span>
+      <span>·</span>
+      <span>Critic {{ result.critic.passed ? 'PASS' : 'FAIL' }}</span>
+      <span>·</span>
+      <button class="btn-trust" @click="drawerOpen = true">Run #{{ result.run_id }}</button>
+    </footer>
+
+    <!-- ═══════════════ Input (after result) ═══════════════ -->
+    <div v-if="result" class="input-block secondary">
+      <textarea
+        v-model="goal"
+        :disabled="loading"
+        placeholder="继续提问…"
+        rows="2"
+        @keydown.ctrl.enter="run"
+      />
+      <button class="btn-go" :disabled="loading || !goal.trim()" @click="run">→</button>
+    </div>
+
+    <!-- ═══════════════ Drawer ═══════════════ -->
     <div v-if="drawerOpen && result" class="drawer-mask" @click.self="drawerOpen = false">
       <aside class="drawer">
         <button class="drawer-close" @click="drawerOpen = false">×</button>
-        <h2>Agent 运行详情</h2>
+        <h3>运行详情</h3>
 
-        <div class="detail-row"><span>Run</span><strong>#{{ result.run_id }}</strong></div>
-        <div class="detail-row"><span>状态</span><strong>{{ result.status }}</strong></div>
-        <div class="detail-row"><span>模型</span><strong>{{ result.model }}</strong></div>
-        <div class="detail-row"><span>Critic</span><strong :class="result.critic.passed ? 'green' : 'red'">{{ result.critic.passed ? 'PASS' : 'FAIL' }}</strong></div>
+        <div class="dr"><span>Run</span><strong>#{{ result.run_id }}</strong></div>
+        <div class="dr"><span>状态</span><strong>Agent {{ result.status.toUpperCase() }}</strong></div>
+        <div class="dr"><span>结果</span><strong :class="outcomeClass">{{ outcomeLabel }}</strong></div>
+        <div class="dr"><span>模型</span><strong>{{ result.model }}</strong></div>
+        <div class="dr"><span>Critic</span><strong :class="result.critic.passed ? 'g' : 'r'">{{ result.critic.passed ? 'PASS' : 'FAIL' }}</strong></div>
 
-        <h3>执行工具</h3>
-        <div v-for="s in result.plan" :key="s.tool" class="detail-tool">✓ {{ toolLabel(s.tool) }}</div>
+        <h4>执行步骤</h4>
+        <div v-for="s in result.plan" :key="s.tool" class="dr"><span>{{ toolLabel(s.tool) }}</span><strong class="g">{{ s.status }}</strong></div>
 
-        <h3>数据安全</h3>
-        <div class="detail-tool">✓ 权限范围已校验</div>
-        <div class="detail-tool">✓ 聚合后才发送模型</div>
-        <div class="detail-tool">✓ 无学生原始 PII 泄露</div>
-        <div class="detail-tool">✓ 全链 provenance 已记录</div>
+        <h4>安全验证</h4>
+        <div class="dr"><span>权限校验</span><strong class="g">✓</strong></div>
+        <div class="dr"><span>数据聚合</span><strong class="g">✓</strong></div>
+        <div class="dr"><span>PII 保护</span><strong class="g">✓</strong></div>
+        <div class="dr"><span>全链记录</span><strong class="g">✓</strong></div>
       </aside>
     </div>
   </div>
@@ -135,124 +174,113 @@ const loading = ref(false)
 const error = ref('')
 const result = ref<CopilotRunResponse | null>(null)
 const drawerOpen = ref(false)
-
-// 演示版本锁 grade_id=1（一年级）
 const gradeId = 1
 
-function setQuick(text: string) {
-  goal.value = text
+const toolLabels: Record<string, string> = {
+  read_class_grade_summary: '读取成绩摘要',
+  compare_exam_performance: '比较考试变化',
 }
+function toolLabel(t: string) { return toolLabels[t] ?? t }
+
+const outcomeLabels: Record<string, string> = {
+  success: '任务完成',
+  needs_data: '需要更多数据',
+  needs_input: '需要补充信息',
+  denied: '权限不足',
+  failed: '执行失败',
+}
+const outcomeLabel = computed(() => outcomeLabels[result.value?.outcome ?? ''] ?? result.value?.outcome ?? '—')
+const outcomeClass = computed(() => result.value?.outcome === 'success' ? 'g' : result.value?.outcome === 'needs_data' ? 'y' : 'r')
+
+function overviewVal(key: string) {
+  const o = result.value?.overview
+  if (!o) return null
+  return o[key]
+}
+
+function setQuick(text: string) { goal.value = text }
 
 async function run() {
   if (!goal.value.trim()) return
   loading.value = true
   error.value = ''
   result.value = null
-
   try {
-    const r = await runCopilot({ goal: goal.value, grade_id: gradeId })
-    result.value = r
+    result.value = await runCopilot({ goal: goal.value, grade_id: gradeId })
   } catch (e: any) {
-    error.value = e?.response?.data?.detail?.message
-      ?? e?.response?.data?.detail
-      ?? e?.message
-      ?? 'AI Agent 执行失败，请稍后重试'
+    error.value = e?.response?.data?.detail?.message ?? e?.response?.data?.detail ?? e?.message ?? '执行失败'
   } finally {
     loading.value = false
   }
 }
-
-const toolLabels: Record<string, string> = {
-  read_class_grade_summary: '读取成绩摘要',
-  compare_exam_performance: '比较考试变化',
-}
-
-function toolLabel(t: string) { return toolLabels[t] ?? t }
-
-const keyLabels: Record<string, string> = {
-  student_count: '学生人数',
-  examined_students: '参考人数',
-  grade_records: '成绩记录',
-  subject_count: '分析科目',
-  subjects: '分析科目',
-}
-
-const displayMetrics = computed(() => {
-  const m: Record<string, any> = {}
-  const o = result.value?.overview
-  if (!o) return m
-  for (const [k, v] of Object.entries(o)) {
-    m[keyLabels[k] ?? k] = v
-  }
-  return m
-})
-
 </script>
 
 <style scoped>
-.copilot-page { max-width: 1280px; margin: 0 auto; padding: 24px; color: #172033; min-height: 100vh; }
-.hero { display: flex; justify-content: space-between; gap: 20px; padding: 28px; border-radius: 20px; background: #fff; border: 1px solid #e8ebf2; }
-.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .15em; color: #6366f1; }
-.hero h1 { margin: 8px 0; font-size: 30px; font-weight: 700; }
-.hero p { margin: 0; color: #657086; }
-.service-badge { align-self: flex-start; padding: 8px 14px; border-radius: 999px; background: #ecfdf3; color: #137a45; font-size: 13px; white-space: nowrap; }
-.dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #22c55e; }
+.copilot { max-width: 800px; margin: 0 auto; padding: 40px 24px; color: #172033; }
 
-.card { margin-top: 16px; padding: 20px; border-radius: 16px; background: #fff; border: 1px solid #e8ebf2; }
-.card-title { margin-bottom: 14px; font-size: 16px; font-weight: 700; }
-.input-row { display: flex; gap: 12px; }
-textarea { flex: 1; resize: none; border: 1px solid #dfe3ec; border-radius: 12px; padding: 12px; font-size: 15px; outline: none; font-family: inherit; }
-textarea:focus { border-color: #6366f1; }
-.btn-run { width: 120px; border: 0; border-radius: 12px; background: #4f46e5; color: #fff; font-weight: 700; cursor: pointer; font-size: 14px; }
-.btn-run:disabled { opacity: .5; }
-.quick-row { display: flex; gap: 10px; margin-top: 12px; }
-.quick-row button { padding: 7px 12px; border-radius: 8px; border: 1px solid #e1e5ee; background: #fafbfc; cursor: pointer; font-size: 13px; }
+/* ── Hero empty ── */
+.hero-empty { text-align: center; padding: 60px 0 30px; }
+.hero-icon { font-size: 48px; margin-bottom: 12px; }
+.hero-empty h1 { font-size: 32px; font-weight: 800; margin: 0 0 8px; }
+.hero-sub { color: #657086; font-size: 16px; margin: 0; }
+
+/* ── Input ── */
+.input-block { display: flex; gap: 10px; background: #fff; border: 1px solid #dfe3ec; border-radius: 16px; padding: 10px 12px; margin: 24px 0; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+.input-block textarea { flex: 1; border: 0; resize: none; outline: none; font-size: 15px; font-family: inherit; padding: 6px 0; background: transparent; }
+.btn-go { width: 44px; height: 44px; border: 0; border-radius: 12px; background: #4f46e5; color: #fff; font-size: 20px; cursor: pointer; flex-shrink: 0; }
+.btn-go:disabled { opacity: .4; }
+.input-block.secondary { margin-top: 32px; }
+
+.quick-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.quick-row button { padding: 8px 14px; border-radius: 10px; border: 1px solid #e1e5ee; background: #fafbfc; cursor: pointer; font-size: 13px; }
 .quick-row button:hover { background: #f0f2f8; }
 
-.working { text-align: center; }
-.working-title { font-weight: 700; font-size: 17px; }
-.working-tip { color: #8490a5; font-size: 13px; margin-top: 10px; }
-.spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #dfe3ec; border-top-color: #6366f1; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 8px; }
+/* ── Needs Data ── */
+.needs-data { text-align: center; padding: 40px 0; }
+.needs-data h2 { font-size: 24px; margin: 12px 0; }
+.nd-sub { color: #465269; font-size: 15px; line-height: 1.7; }
+.nd-tag { display: inline-block; margin-top: 16px; padding: 8px 16px; border-radius: 10px; background: #eef2ff; color: #4f46e5; font-size: 13px; font-weight: 600; }
+
+/* ── Dashboard ── */
+.dash-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+.dash-eyebrow { font-size: 12px; font-weight: 600; color: #6366f1; text-transform: uppercase; letter-spacing: .1em; }
+.dash-header h2 { margin: 4px 0 0; font-size: 26px; }
+.dash-badge { padding: 6px 14px; border-radius: 999px; background: #ecfdf3; color: #137a45; font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+.kpi { padding: 18px; background: #fff; border: 1px solid #e8ebf2; border-radius: 14px; text-align: center; }
+.kpi-num { display: block; font-size: 28px; font-weight: 800; color: #172033; }
+.kpi-label { display: block; margin-top: 4px; font-size: 12px; color: #818ca0; }
+
+.section-title { font-size: 17px; font-weight: 700; margin-bottom: 14px; }
+
+.findings-block { background: #fff; border: 1px solid #e8ebf2; border-radius: 16px; padding: 20px; margin-bottom: 16px; }
+.finding { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f0f2f6; }
+.finding:last-child { border: 0; }
+.f-idx { flex: 0 0 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: #eef2ff; color: #4f46e5; border-radius: 8px; font-weight: 700; font-size: 13px; }
+
+.recs-block { background: #fff; border: 1px solid #e8ebf2; border-radius: 16px; padding: 20px; }
+.rec { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid #f0f2f6; }
+.rec:last-child { border: 0; }
+.rec p { margin: 0; }
+.r-idx { flex: 0 0 28px; font-size: 13px; font-weight: 700; color: #6366f1; }
+
+/* ── Trust footer ── */
+.trust-footer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 24px; padding: 12px 0; border-top: 1px solid #e8ebf2; color: #8490a5; font-size: 12px; }
+.btn-trust { border: 0; background: none; color: #4f46e5; cursor: pointer; font-size: 12px; font-weight: 600; }
+
+/* ── Drawer ── */
+.drawer-mask { position: fixed; inset: 0; background: rgba(15,23,42,.25); z-index: 999; }
+.drawer { position: absolute; right: 0; top: 0; width: 360px; height: 100%; overflow-y: auto; background: #fff; padding: 24px; box-shadow: -12px 0 30px rgba(15,23,42,.08); }
+.drawer-close { float: right; border: 0; background: transparent; font-size: 24px; cursor: pointer; }
+.drawer h3, .drawer h4 { margin: 16px 0 10px; }
+.dr { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f2f6; font-size: 14px; }
+.g { color: #16a34a; } .r { color: #dc2626; } .y { color: #d97706; }
+
+.spinner { display: inline-block; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.error-card { color: #b42318; background: #fff7f6; }
-.error-card button { margin-top: 10px; }
-
-.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
-.metric { padding: 16px; background: #fff; border: 1px solid #e8ebf2; border-radius: 14px; }
-.metric span { display: block; color: #818ca0; font-size: 12px; }
-.metric strong { display: block; margin-top: 6px; font-size: 20px; }
-
-.step-row { display: grid; grid-template-columns: 20px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #f0f2f6; }
-.step-row p { margin: 2px 0 0; color: #778398; font-size: 13px; }
-.step-ok { color: #16a34a; }
-.step-tag { font-size: 12px; color: #137a45; background: #ecfdf3; padding: 4px 8px; border-radius: 999px; }
-
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f0f2f6; }
-.item p { margin: 0; }
-.idx { flex: 0 0 24px; height: 24px; display: flex; align-items: center; justify-content: center; background: #eef2ff; color: #4f46e5; border-radius: 6px; font-weight: 700; font-size: 12px; }
-
-.trust-bar { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
-.trust-bar h3 { margin: 0 0 10px; font-size: 15px; }
-.trust-checks { display: flex; flex-wrap: wrap; gap: 8px 16px; color: #40506a; font-size: 13px; }
-.trust-meta { text-align: right; }
-.trust-meta span { display: block; margin: 4px 0 10px; color: #8792a5; font-size: 13px; }
-.btn-detail { border: 1px solid #dfe3ec; background: #fff; padding: 7px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
-
-.drawer-mask { position: fixed; inset: 0; background: rgba(15,23,42,.25); z-index: 999; }
-.drawer { position: absolute; right: 0; top: 0; width: 400px; height: 100%; overflow-y: auto; background: #fff; padding: 28px; box-shadow: -16px 0 40px rgba(15,23,42,.10); }
-.drawer-close { float: right; border: 0; background: transparent; font-size: 26px; cursor: pointer; }
-.drawer h2 { margin-top: 0; }
-.detail-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #edf0f5; }
-.detail-tool { padding: 7px 0; color: #40506a; font-size: 14px; }
-.green { color: #16a34a; }
-.red { color: #dc2626; }
-
-@media (max-width: 900px) {
-  .metrics { grid-template-columns: 1fr 1fr; }
-  .two-col { grid-template-columns: 1fr; }
-  .input-row { flex-direction: column; }
-  .btn-run { width: 100%; height: 42px; }
+@media (max-width: 700px) {
+  .kpi-row { grid-template-columns: 1fr 1fr; }
 }
 </style>

@@ -132,31 +132,15 @@ class AgentCopilotService:
         # ── 3. POLICY_CHECK ──
         await agent_run.transition("POLICY_CHECK")
 
-        # ── 4. Scope ──
-        visible_student_ids = await student_id_scope(self.db, self.user)
-        if visible_student_ids is None:
-            # School-wide access → resolve for requested grade/class
-            from core.models import Student
-            from sqlalchemy import select as _select
-            conds = [Student.school_id == self.user.school_id]
-            if grade_id:
-                conds.append(Student.grade_id == grade_id)
-            if class_id:
-                conds.append(Student.class_id == class_id)
-            rows = (await self.db.execute(_select(Student.id).where(*conds))).scalars().all()
-            effective_student_ids: set[int] = set(rows)
-        elif not visible_student_ids:
-            effective_student_ids = set()
-        else:
-            effective_student_ids = set(visible_student_ids)
+        # ── 4. Scope → delegate to tools (each resolves internally via student_id_scope) ──
+        effective_student_ids: set[int] | None = await student_id_scope(self.db, self.user)
+        if effective_student_ids is not None:
+            effective_student_ids = set(effective_student_ids)
 
-        if not effective_student_ids:
+        if not effective_student_ids and effective_student_ids is not None:
             raise HTTPException(status_code=403, detail="无权访问请求的数据范围")
 
-        # ── 5. Permission (双保险：scope 非空 + student_id_scope) ──
-        # student_id_scope() already enforces RBAC fail-close.
-        # effective_student_ids empty → already blocked above at step 4.
-        # Additional PermissionChecker gate kept for audit trail.
+        # ── 5. Permission (双保险) ──
 
         # ── 6. EXECUTING ──
         await agent_run.transition("EXECUTING")
@@ -201,12 +185,39 @@ class AgentCopilotService:
             if descriptor is None or descriptor.handler is None:
                 raise HTTPException(status_code=500, detail=f"Tool {step.tool} 不可用")
 
-            # Prepare args — inject effective_student_ids (never from LLM)
+            # Prepare args
             args = dict(step.args)
-            args["effective_student_ids"] = effective_student_ids
+
+            # ── Tool execution: summary via full service (Aggregator + LLM) ──
+            if step.tool == "read_class_grade_summary":
+                from .services import ClassGradeSummaryService
+                svc = ClassGradeSummaryService(self.db, self.user)
+                output = await svc.generate_summary(
+                    class_id=args.get("class_id"),
+                    grade_id=args.get("grade_id"),
+                    exam_id=args.get("exam_id"),
+                )
+                result_dict = output.model_dump() if hasattr(output, "model_dump") else output
+                tool_results.append({"tool": step.tool, "status": "EXECUTED", "result": result_dict})
+                step_views.append({"tool": step.tool, "status": "EXECUTED", "reason": step.reason})
+                continue
+
+            # ── Tool execution: compare via handler ──
+            # Resolve effective_student_ids for compare tool
+            if effective_student_ids is None:
+                from core.models import Student
+                from sqlalchemy import select as _sel
+                conds = [Student.school_id == self.user.school_id]
+                if grade_id:
+                    conds.append(Student.grade_id == grade_id)
+                rows = (await self.db.execute(_sel(Student.id).where(*conds))).scalars().all()
+                compare_students: set[int] = set(rows)
+            else:
+                compare_students = effective_student_ids
+
+            args["effective_student_ids"] = compare_students
             args["db"] = self.db
 
-            # compare tool needs exam_ids from request context
             if step.tool == "compare_exam_performance":
                 args["exam_ids"] = compare_exam_ids or []
 

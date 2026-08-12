@@ -42,6 +42,10 @@ export interface CopilotRunResponse {
     student_pii_sent: boolean
     provenance_recorded: boolean
   }
+  outcome: string
+  outcome_reason: string | null
+  student_count: number
+  examined_count: number
 }
 
 export function runCopilot(data: CopilotRunRequest): Promise<CopilotRunResponse> {
