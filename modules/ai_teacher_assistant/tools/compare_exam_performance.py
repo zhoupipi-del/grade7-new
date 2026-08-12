@@ -8,7 +8,7 @@ modules/ai_teacher_assistant/tools/compare_exam_performance.py — V2
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date as date_type
+from datetime import date as date_type  # noqa: F401
 from statistics import mean
 from typing import Any
 
@@ -24,7 +24,7 @@ class ExamMeta(BaseModel):
 
     id: int
     name: str
-    exam_date: date_type | None = None
+    exam_date: str | None = None
     exam_type: str | None = None
     student_count: int = 0
     subject_count: int = 0
@@ -161,10 +161,13 @@ async def compare_exam_performance_handler(
 def _build_exam_meta(exam: GradeExam | None) -> ExamMeta | None:
     if exam is None:
         return None
+    dt = None
+    if hasattr(exam, "exam_date") and exam.exam_date:
+        dt = exam.exam_date if isinstance(exam.exam_date, str) else str(exam.exam_date)
     return ExamMeta(
         id=exam.id,
         name=exam.name or "",
-        exam_date=exam.exam_date.date() if hasattr(exam, "exam_date") and exam.exam_date else None,
+        exam_date=dt,  # type: ignore
         exam_type=exam.exam_type,
     )
 
