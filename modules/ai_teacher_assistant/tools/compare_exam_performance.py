@@ -1,22 +1,33 @@
 """
-modules/ai_teacher_assistant/tools/compare_exam_performance.py — V1 第二个 Tool
+modules/ai_teacher_assistant/tools/compare_exam_performance.py — V2
 
-考试比较 Tool：接收 EffectiveScope 已批准的 student_ids，只做聚合。
+考试比较 Tool：自动发现最近两场考试 → matched cohort → 比较。
 不返回 student_id / student_name / 单生成绩。
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections import defaultdict
+from datetime import date as date_type
 from statistics import mean
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import select, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.grades.models import GradeExam, GradeRecord, GradeSubject
+
+
+class ExamMeta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    name: str
+    exam_date: date_type | None = None
+    exam_type: str | None = None
+    student_count: int = 0
+    subject_count: int = 0
 
 
 class ExamSubjectComparison(BaseModel):
@@ -24,6 +35,8 @@ class ExamSubjectComparison(BaseModel):
 
     subject_id: int
     subject_name: str
+    full_score: float | None = None
+    matched_students: int = 0
     previous_average: float | None
     current_average: float | None
     delta: float | None
@@ -33,9 +46,12 @@ class ExamSubjectComparison(BaseModel):
 class CompareExamPerformanceOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    exam_ids: list[int]
-    student_count: int
-    subjects: list[ExamSubjectComparison]
+    previous_exam: ExamMeta | None = None
+    current_exam: ExamMeta | None = None
+    scope_students: int = 0
+    matched_students: int = 0
+    common_subjects: int = 0
+    subjects: list[ExamSubjectComparison] = []
 
 
 async def compare_exam_performance_handler(
@@ -45,16 +61,12 @@ async def compare_exam_performance_handler(
     exam_ids: list[int],
     **_: Any,
 ) -> CompareExamPerformanceOutput:
-    """聚合-only。不返回 student_id / student_name / 单生成绩。"""
+    """Matched-cohort comparison with exam metadata."""
 
     if not effective_student_ids:
-        return CompareExamPerformanceOutput(
-            exam_ids=exam_ids,
-            student_count=0,
-            subjects=[],
-        )
+        return CompareExamPerformanceOutput(scope_students=0)
 
-    # Auto-discover latest exams if not provided or insufficient
+    # ── Auto-discover ──
     if not exam_ids or len(exam_ids) < 2:
         discovered = await _discover_latest_exam_ids(
             db=db,
@@ -64,105 +76,141 @@ async def compare_exam_performance_handler(
         exam_ids = discovered if discovered else exam_ids
 
     if len(exam_ids) < 2:
+        return CompareExamPerformanceOutput(scope_students=len(effective_student_ids))
+
+    # Get exam metadata
+    prev_id, curr_id = exam_ids[-2], exam_ids[-1]
+    exam_rows = (await db.execute(
+        select(GradeExam).where(GradeExam.id.in_([prev_id, curr_id]))
+    )).scalars().all()
+    exam_map = {e.id: e for e in exam_rows}
+
+    prev_exam = _build_exam_meta(exam_map.get(prev_id))
+    curr_exam = _build_exam_meta(exam_map.get(curr_id))
+
+    # ── Matched cohort: students who took BOTH exams ──
+    prev_students = set(await _exam_student_ids(db, prev_id, effective_student_ids))
+    curr_students = set(await _exam_student_ids(db, curr_id, effective_student_ids))
+    matched = prev_students & curr_students
+
+    if not matched:
         return CompareExamPerformanceOutput(
-            exam_ids=exam_ids,
-            student_count=len(effective_student_ids),
-            subjects=[],
+            previous_exam=prev_exam, current_exam=curr_exam,
+            scope_students=len(effective_student_ids), matched_students=0,
         )
 
-    selected_exam_ids = exam_ids[-2:]
+    # ── Common subjects ──
+    prev_subjects = set(await _exam_subject_ids(db, prev_id))
+    curr_subjects = set(await _exam_subject_ids(db, curr_id))
+    common_subject_ids = prev_subjects & curr_subjects
 
-    stmt = (
-        select(
-            GradeRecord.exam_id,
-            GradeRecord.subject_id,
-            GradeRecord.score,
-            GradeSubject.name,
-        )
-        .join(
-            GradeSubject,
-            GradeSubject.id == GradeRecord.subject_id,
-        )
+    # ── Subject metadata ──
+    subject_rows = (await db.execute(
+        select(GradeSubject).where(GradeSubject.id.in_(common_subject_ids))
+    )).scalars().all()
+    subject_map = {s.id: s for s in subject_rows}
+
+    # ── Scores: matched cohort only ──
+    rows = (await db.execute(
+        select(GradeRecord.exam_id, GradeRecord.subject_id, GradeRecord.score)
         .where(
-            GradeRecord.exam_id.in_(selected_exam_ids),
-            GradeRecord.student_id.in_(effective_student_ids),
+            GradeRecord.exam_id.in_([prev_id, curr_id]),
+            GradeRecord.student_id.in_(matched),
+            GradeRecord.subject_id.in_(common_subject_ids),
             GradeRecord.score.is_not(None),
         )
-    )
-
-    rows = (await db.execute(stmt)).all()
+    )).all()
 
     scores: dict[tuple[int, int], list[float]] = defaultdict(list)
-    subject_names: dict[int, str] = {}
+    for eid, sid, sc in rows:
+        scores[(int(eid), int(sid))].append(float(sc))
 
-    for exam_id, subject_id, score, subject_name in rows:
-        scores[(int(exam_id), int(subject_id))].append(float(score))
-        subject_names[int(subject_id)] = subject_name
-
-    previous_exam, current_exam = selected_exam_ids
     result: list[ExamSubjectComparison] = []
-
-    for subject_id in sorted(subject_names):
-        previous_values = scores.get((previous_exam, subject_id), [])
-        current_values = scores.get((current_exam, subject_id), [])
-
-        prev_avg = mean(previous_values) if previous_values else None
-        curr_avg = mean(current_values) if current_values else None
+    for sid in sorted(common_subject_ids):
+        prev_vals = scores.get((prev_id, sid), [])
+        curr_vals = scores.get((curr_id, sid), [])
+        prev_avg = mean(prev_vals) if prev_vals else None
+        curr_avg = mean(curr_vals) if curr_vals else None
 
         if prev_avg is None or curr_avg is None:
-            delta = None
-            direction = "insufficient_data"
+            delta, direction = None, "insufficient_data"
         else:
             delta = round(curr_avg - prev_avg, 2)
-            if delta > 1:
-                direction = "up"
-            elif delta < -1:
-                direction = "down"
-            else:
-                direction = "stable"
+            direction = "up" if delta > 1 else "down" if delta < -1 else "stable"
 
-        result.append(
-            ExamSubjectComparison(
-                subject_id=subject_id,
-                subject_name=subject_names[subject_id],
-                previous_average=round(prev_avg, 2) if prev_avg is not None else None,
-                current_average=round(curr_avg, 2) if curr_avg is not None else None,
-                delta=delta,
-                direction=direction,
-            )
-        )
+        subj = subject_map.get(sid)
+        result.append(ExamSubjectComparison(
+            subject_id=sid,
+            subject_name=subj.name if subj else str(sid),
+            full_score=float(subj.full_score) if subj and subj.full_score else None,
+            matched_students=len(curr_vals) if curr_vals else len(prev_vals),
+            previous_average=round(prev_avg, 2) if prev_avg else None,
+            current_average=round(curr_avg, 2) if curr_avg else None,
+            delta=delta, direction=direction,
+        ))
 
     return CompareExamPerformanceOutput(
-        exam_ids=selected_exam_ids,
-        student_count=len(effective_student_ids),
+        previous_exam=prev_exam, current_exam=curr_exam,
+        scope_students=len(effective_student_ids),
+        matched_students=len(matched),
+        common_subjects=len(common_subject_ids),
         subjects=result,
     )
 
 
+def _build_exam_meta(exam: GradeExam | None) -> ExamMeta | None:
+    if exam is None:
+        return None
+    return ExamMeta(
+        id=exam.id,
+        name=exam.name or "",
+        exam_date=exam.exam_date.date() if hasattr(exam, "exam_date") and exam.exam_date else None,
+        exam_type=exam.exam_type,
+    )
+
+
+async def _exam_student_ids(db: AsyncSession, exam_id: int, scope: set[int]) -> list[int]:
+    rows = (await db.execute(
+        select(distinct(GradeRecord.student_id)).where(
+            GradeRecord.exam_id == exam_id,
+            GradeRecord.student_id.in_(scope),
+            GradeRecord.score.is_not(None),
+        )
+    )).scalars().all()
+    return [int(x) for x in rows]
+
+
+async def _exam_subject_ids(db: AsyncSession, exam_id: int) -> list[int]:
+    rows = (await db.execute(
+        select(distinct(GradeRecord.subject_id)).where(
+            GradeRecord.exam_id == exam_id,
+            GradeRecord.score.is_not(None),
+        )
+    )).scalars().all()
+    return [int(x) for x in rows]
+
+
 async def _discover_latest_exam_ids(
-    *,
-    db: AsyncSession,
-    effective_student_ids: set[int],
-    limit: int = 2,
+    *, db: AsyncSession, effective_student_ids: set[int], limit: int = 2,
 ) -> list[int]:
-    """Auto-discover the most recent exams with actual grade records."""
+    """Auto-discover most recent exams by exam_date, not exam_id."""
     if not effective_student_ids:
         return []
 
-    from sqlalchemy import func as _func, distinct as _distinct
-
-    stmt = (
-        select(GradeRecord.exam_id)
+    rows = (await db.execute(
+        select(GradeExam.id, GradeExam.exam_date)
         .where(
-            GradeRecord.student_id.in_(effective_student_ids),
-            GradeRecord.exam_id.is_not(None),
-            GradeRecord.score.is_not(None),
+            GradeExam.id.in_(
+                select(distinct(GradeRecord.exam_id)).where(
+                    GradeRecord.student_id.in_(effective_student_ids),
+                    GradeRecord.exam_id.is_not(None),
+                    GradeRecord.score.is_not(None),
+                )
+            ),
+            GradeExam.exam_date.is_not(None),
         )
-        .group_by(GradeRecord.exam_id)
-        .having(_func.count(_distinct(GradeRecord.student_id)) > 0)
-        .order_by(GradeRecord.exam_id.desc())
+        .order_by(GradeExam.exam_date.desc())
         .limit(limit)
-    )
+    )).all()
 
-    rows = (await db.execute(stmt)).scalars().all()
-    return [int(x) for x in rows]
+    return [int(x[0]) for x in rows]
