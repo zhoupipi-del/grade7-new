@@ -75,3 +75,17 @@ class CopilotRunResponse(BaseModel):
     outcome_reason: str | None = None
     student_count: int = 0
     examined_count: int = 0
+    grade_record_count: int = 0
+    domain_counts: dict[str, int] | None = None
+    domains: dict[str, _Any] | None = None
+
+
+class AvailableScopeGrade(BaseModel):
+    id: int
+    name: str
+
+
+class AvailableScopesResponse(BaseModel):
+    school: dict[str, _Any]
+    grades: list[AvailableScopeGrade]
+    default_grade_id: int | None = None

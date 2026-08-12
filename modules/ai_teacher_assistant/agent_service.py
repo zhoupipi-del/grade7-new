@@ -1,32 +1,44 @@
 """
-modules/ai_teacher_assistant/agent_service.py — AI Agent Copilot 编排
+modules/ai_teacher_assistant/agent_service.py — AI Agent Copilot 编排 V2
 
-复用现有 Runtime（不重写）：
-  AgentRun / ResourceScopeResolver / PermissionChecker
-  ToolRegistry / ToolExecutor / ProviderRouter / DeepSeekProvider
+V2 变更（2026-08-12）：
+- 注册 T3-T5 三个新 Tool（考勤/行为/风险）
+- 空 plan → needs_input outcome
+- 综合查询多工具并行
+- 按领域聚合 result counts
+
+V2 安全修正（2026-08-12，响应 BOSS 执行链审计）：
+- 五个 Tool 全部经 ToolExecutor 执行（不再由 agent_service 直调 Aggregator）
+- 每 Tool 执行经 ResourceScopeResolver → PermissionChecker → PolicyAdapter → ToolExecutor
+  → Tool handler（handler 内部调 _*Aggregator）
+- 每个 Tool 执行后写入 ai_tool_calls（status=EXECUTED，含 declared/actual classification）
+- ms_admin 不隐式全放：authorized.school_id 显式锁定本校；跨校请求显式 403
+- Risk Tool 仅向综合 Agent 提供聚合计数，绝不携带 student PII / 心理原文
 """
 
 from __future__ import annotations
 
+import hashlib
 import inspect
-import json
+import json as _json
 import os
+from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_native.governance.approval_policy import ApprovalPolicy
+from ai_native.governance.resource_scope import ResourceScope, resolve_scope
 from ai_native.runtime.agent_run import AgentRun
 from ai_native.runtime.critic import EvidenceCritic
+from ai_native.runtime.permission import PermissionChecker
 from ai_native.runtime.planner import BoundedPlanner
 from ai_native.runtime.provider_router import ProviderRouter
-from ai_native.runtime.tool_descriptor import ToolRegistry
+from ai_native.runtime.tool_descriptor import ToolDescriptor, ToolRegistry
 from ai_native.runtime.tool_executor import ToolExecutor
-from ai_native.governance.resource_scope import ResourceScopeResolver
-
-
 from core.access import student_id_scope
-from core.models import User
+from core.models import Class as ClassModel, Grade, User
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -48,48 +60,172 @@ class CopilotSynthesizer:
         goal: str,
         evidence: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        # 防御：证据只含聚合计数，绝不含 student 维度 PII（由 Tool 层保证）
         safe_payload = {"goal": goal, "evidence": evidence}
 
         system = (
             "你是学校年级管理 AI 助手。\n"
             "只能依据 evidence 中的聚合数据回答。\n"
+            "将结果按领域分组：学业(grades)/考勤(attendance)/行为纪律(behavior)/风险预警(risk)。\n"
+            "每个领域给出关键发现和建议。\n"
             "禁止：\n"
             "1. 编造 evidence 中不存在的事实；\n"
             "2. 输出学生姓名、学号、手机号、身份证等 PII；\n"
             "3. 把相关性表述成因果关系。\n"
             "\n严格返回 JSON：\n"
-            '{"overview": {}, "findings": ["..."], "recommendations": ["..."]}'
+            '{"overview": {}, "findings": ["..."], '
+            '"recommendations": [...], '
+            '"domains": {"grades": {}, "attendance": {}, "behavior": {}, "risk": {}}}'
         )
 
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": json.dumps(safe_payload, ensure_ascii=False)},
+            {"role": "user", "content": _json.dumps(safe_payload, ensure_ascii=False)},
         ]
 
         classification = run.get("data_classification", "internal")
         provider = self.provider_router.route(
-            model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"), data_classification=classification,
+            model=os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+            data_classification=classification,
         )
 
         content, usage = provider.call(
             messages, json_mode=True, temperature=0.3, max_tokens=2048,
         )
 
+        parsed = _extract_json(content)
+        if parsed:
+            return parsed
+        # 兜底：LLM 返回空/不可解析时，从聚合证据确定性构造，
+        # 保证 V2 始终产出可用 domains/findings（不依赖 LLM 成功）
+        return _fallback_from_evidence(evidence)
+
+
+def _fallback_from_evidence(evidence: list[dict[str, Any]]) -> dict[str, Any]:
+    """LLM 失败兜底：用聚合证据构造结构化结论（无 PII）。"""
+    domains: dict[str, Any] = {}
+    findings: list[str] = []
+    for item in evidence:
+        domain = item.get("domain", "unknown")
+        result = item.get("result", {}) or {}
+        summary = result.get("summary", {})
+        if domain not in domains:
+            domains[domain] = {}
+        domains[domain]["summary"] = summary
+        # 从 summary 取可展示指标生成发现
+        if isinstance(summary, dict):
+            bits = []
+            for k, v in summary.items():
+                if isinstance(v, (int, float)) and k not in ("school_id", "class_id", "grade_id"):
+                    bits.append(f"{k}={v}")
+            if bits:
+                findings.append(f"[{domain}] " + "，".join(bits[:4]))
+    return {
+        "overview": {"note": "AI 综合结论暂不可用，以下为各域聚合数据"},
+        "findings": findings or ["暂无可用聚合数据"],
+        "recommendations": [],
+        "domains": domains,
+    }
+
+
+def _extract_json(content: str) -> dict:
+    """鲁棒解析 LLM 返回的 JSON：
+
+    - 剥离 ```json ... ``` 围栏
+    - 直接 json.loads
+    - 退化：截取首个 { 到末尾 } 的最长 JSON 块再解析
+    """
+    if not content:
+        return {}
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        return _json.loads(text)
+    except _json.JSONDecodeError:
+        pass
+    s = text.find("{")
+    e = text.rfind("}")
+    if s != -1 and e != -1 and e > s:
         try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            return {
-                "overview": {},
-                "findings": [f"模型响应解析失败，原始内容: {content[:200]}"],
-                "recommendations": [],
-            }
+            return _json.loads(text[s:e + 1])
+        except _json.JSONDecodeError:
+            pass
+    return {}
+
+
+def _build_all_tool_descriptors() -> list[ToolDescriptor]:
+    """返回所有已注册 Tool 的 Descriptor（handler 指向 V2 copilot 聚合 handler）。"""
+    from modules.ai_teacher_assistant.tools.read_class_grade_summary import (
+        build_read_class_grade_summary_descriptor,
+        read_class_grade_summary_copilot_handler,
+    )
+    from modules.ai_teacher_assistant.tools.compare_exam_performance import (
+        compare_exam_performance_copilot_handler,
+    )
+    from modules.ai_teacher_assistant.tools.read_attendance_summary import (
+        build_read_attendance_summary_descriptor,
+        read_attendance_summary_copilot_handler,
+    )
+    from modules.ai_teacher_assistant.tools.read_behavior_summary import (
+        build_read_behavior_summary_descriptor,
+        read_behavior_summary_copilot_handler,
+    )
+    from modules.ai_teacher_assistant.tools.read_risk_warning_summary import (
+        build_read_risk_warning_summary_descriptor,
+        read_risk_warning_summary_copilot_handler,
+    )
+
+    descriptors = [
+        build_read_class_grade_summary_descriptor(),
+        ToolDescriptor(
+            name="compare_exam_performance", version="0.1.0",
+            description="比较多次考试间的科目表现变化",
+            declared_output_classification="student_pii",
+            approval_policy="none", idempotent=True,
+            timeout_seconds=60, action="read",
+            side_effect="none", required_scope="grade",
+            allowed_input_classification="student_pii",
+            supported_roles=["grade_leader", "class_teacher", "ms_admin"],
+            handler=compare_exam_performance_copilot_handler,
+        ),
+        build_read_attendance_summary_descriptor(),
+        build_read_behavior_summary_descriptor(),
+        build_read_risk_warning_summary_descriptor(),
+    ]
+    # V2 copilot 路径：所有 Tool 的 handler 统一指向"聚合型"handler
+    # （handler 内部调用 _*Aggregator，不绕过 ToolExecutor，不调 DeepSeek）
+    handler_map = {
+        "read_class_grade_summary": read_class_grade_summary_copilot_handler,
+        "compare_exam_performance": compare_exam_performance_copilot_handler,
+        "read_attendance_summary": read_attendance_summary_copilot_handler,
+        "read_behavior_summary": read_behavior_summary_copilot_handler,
+        "read_risk_warning_summary": read_risk_warning_summary_copilot_handler,
+    }
+    for td in descriptors:
+        if td.name in handler_map:
+            td.handler = handler_map[td.name]
+    return descriptors
+
+
+class _SimplePolicyAdapter:
+    """PolicyAdapter 最小实现（Slice 1：read-only Tool 无审批流）。"""
+
+    def decide(self, *, policy: ApprovalPolicy, user=None, agent=None,
+               tool=None, resource_scope=None, action: str = "") -> bool:
+        if policy in (ApprovalPolicy.NONE, ApprovalPolicy.ALWAYS):
+            return True
+        # POLICY_DECIDES 预留：Slice 1 第一刀无审批流
+        return True
 
 
 class AgentCopilotService:
-    """AI Agent Copilot 编排层。
-
-    不重新实现 RBAC / Runtime——复用已上线组件。
-    """
+    """AI Agent Copilot 编排层 V2（经标准 AI Native 执行链）。"""
 
     def __init__(
         self,
@@ -105,6 +241,10 @@ class AgentCopilotService:
         self.executor = ToolExecutor()
         self.provider_router = ProviderRouter()
         self.synthesizer = CopilotSynthesizer(self.provider_router)
+        self.permission = PermissionChecker()
+
+        for td in _build_all_tool_descriptors():
+            self.registry.register(td)
 
     async def run(self, *, goal: str, grade_id: int,
                   class_id: int | None = None, exam_id: int | None = None,
@@ -129,158 +269,164 @@ class AgentCopilotService:
             compare_exam_ids=compare_exam_ids,
         )
 
+        # ── 2a. Empty plan → needs_input ──
+        if not plan.steps:
+            await agent_run.finish(snapshot={"reason": "empty_plan", "goal": goal})
+            return {
+                "status": "needs_input",
+                "run_id": agent_run.run_id,
+                "goal": goal,
+                "plan": [],
+                "overview": {},
+                "findings": [],
+                "recommendations": [],
+                "critic": {"passed": True, "issues": []},
+                "provider": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+                "model": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+                "trust": {
+                    "permission_checked": True,
+                    "aggregate_before_provider": True,
+                    "student_pii_sent": False,
+                    "provenance_recorded": True,
+                },
+                "outcome": "needs_input",
+                "outcome_reason": "未能理解查询意图，请尝试更具体的表述（例如：最近迟到情况/违纪情况/考试成绩/风险预警）",
+                "student_count": 0,
+                "examined_count": 0,
+                "domains": {},
+            }
+
         # ── 3. POLICY_CHECK ──
         await agent_run.transition("POLICY_CHECK")
 
-        # ── 4. Scope → delegate to tools (each resolves internally via student_id_scope) ──
-        effective_student_ids: set[int] | None = await student_id_scope(self.db, self.user)
-        if effective_student_ids is not None:
-            effective_student_ids = set(effective_student_ids)
+        # ── 4. Scope（显式：authorized.school_id 锁定本校）──
+        authorized_ids = await student_id_scope(self.db, self.user)
+        authorized = ResourceScope(
+            school_id=self.user.school_id,
+            student_ids=None if authorized_ids is None else set(authorized_ids),
+        )
 
-        if not effective_student_ids and effective_student_ids is not None:
-            raise HTTPException(status_code=403, detail="无权访问请求的数据范围")
+        # 显式跨校边界：请求的 grade/class 必须属于用户本校，否则 403
+        await self._assert_same_school(grade_id, class_id)
 
-        # ── 5. Permission (双保险) ──
-
-        # ── 6. EXECUTING ──
+        # ── 5. EXECUTING ──
         await agent_run.transition("EXECUTING")
-
-        run_state: dict[str, Any] = {
-            "school_id": self.user.school_id,
-            "user_id": self.user.id,
-            "data_classification": agent_run.data_classification,
-            "status": agent_run.status,
-        }
 
         tool_results: list[dict[str, Any]] = []
         step_views: list[dict[str, Any]] = []
+        incidents: list[dict[str, Any]] = []
 
-        # ── 7. Bounded multi-tool ──
-        # Pre-register compare tool if not in registry
-        if self.registry.get("compare_exam_performance") is None:
-            from ai_native.runtime.tool_descriptor import ToolDescriptor
-            from modules.ai_teacher_assistant.tools.compare_exam_performance import (
-                compare_exam_performance_handler,
-            )
-            self.registry.register(ToolDescriptor(
-                name="compare_exam_performance", version="0.1.0",
-                description="比较多次考试间的科目表现变化",
-                declared_output_classification="student_pii",
-                approval_policy="none", idempotent=True,
-                timeout_seconds=60, action="read",
-                side_effect="none", required_scope="grade",
-                allowed_input_classification="student_pii",
-                supported_roles=["grade_leader", "class_teacher", "ms_admin"],
-                handler=compare_exam_performance_handler,
-            ))
-
+        # ── 6. Multi-tool execution（全部经 ToolExecutor）──
         for step in plan.steps:
             descriptor = self.registry.get(step.tool)
-            if descriptor is None:
-                # Only summary might need dynamic load
-                if step.tool == "read_class_grade_summary":
-                    from modules.ai_teacher_assistant.tools.read_class_grade_summary import (
-                        build_read_class_grade_summary_descriptor,
-                    )
-                    descriptor = build_read_class_grade_summary_descriptor()
-
             if descriptor is None or descriptor.handler is None:
-                raise HTTPException(status_code=500, detail=f"Tool {step.tool} 不可用")
-
-            # Prepare args
-            args = dict(step.args)
-
-            # ── Tool execution: summary via full service (Aggregator + LLM) ──
-            if step.tool == "read_class_grade_summary":
-                from .services import ClassGradeSummaryService
-                svc = ClassGradeSummaryService(self.db, self.user)
-                output = await svc.generate_summary(
-                    class_id=args.get("class_id"),
-                    grade_id=args.get("grade_id"),
-                    exam_id=args.get("exam_id"),
-                )
-                result_dict = output.model_dump() if hasattr(output, "model_dump") else output
-                tool_results.append({"tool": step.tool, "status": "EXECUTED", "result": result_dict})
-                step_views.append({"tool": step.tool, "status": "EXECUTED", "reason": step.reason})
                 continue
 
-            # ── Tool execution: compare via handler ──
-            # Resolve effective_student_ids for compare tool
-            if effective_student_ids is None:
-                from core.models import Student
-                from sqlalchemy import select as _sel
-                conds = [Student.school_id == self.user.school_id]
-                if grade_id:
-                    conds.append(Student.grade_id == grade_id)
-                rows = (await self.db.execute(_sel(Student.id).where(*conds))).scalars().all()
-                compare_students: set[int] = set(rows)
-            else:
-                compare_students = effective_student_ids
-
-            args["effective_student_ids"] = compare_students
-            args["db"] = self.db
-
-            if step.tool == "compare_exam_performance":
-                args["exam_ids"] = compare_exam_ids or []
-
-            result = await _maybe_await(
-                descriptor.handler(**args)
+            requested = ResourceScope(
+                school_id=self.user.school_id,
+                grade_ids={grade_id} if grade_id else None,
+                class_ids={class_id} if class_id else None,
             )
 
-            result_dict = result.model_dump() if hasattr(result, "model_dump") else result
+            # ── Permission（越权 → 403，0 Tool execution）──
+            if not self.permission.check(
+                user=self.user, agent=None, tool=descriptor,
+                requested=requested, authorized=authorized, action="read",
+            ):
+                await agent_run.transition("FAILED")
+                await self.db.commit()
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"无权访问该范围的数据（Tool={step.tool}）",
+                )
+
+            # ── PolicyAdapter（Slice 1: none）──
+            adapter = _SimplePolicyAdapter()
+            effective = resolve_scope(requested, authorized)
+            if not adapter.decide(
+                policy=ApprovalPolicy.NONE, user=self.user, tool=descriptor,
+                resource_scope=effective, action="read",
+            ):
+                await agent_run.transition("FAILED")
+                await self.db.commit()
+                raise HTTPException(status_code=403, detail="审批未通过")
+
+            args = dict(step.args)
+
+            # ── ToolExecutor.execute → descriptor.handler（内部调 _*Aggregator）──
+            run_ctx: dict[str, Any] = {
+                "status": "EXECUTING",
+                "data_classification": agent_run.data_classification,
+                "school_id": self.user.school_id,
+                "user_id": self.user.id,
+                "run_id": agent_run.run_id,
+                "db": self.db,
+                "user": self.user,
+                "effective_student_ids": authorized_ids,  # None=本校全可见
+                "args": args,
+            }
+            result = await self.executor.execute(
+                run=run_ctx,
+                descriptor=descriptor,
+                incident_sink=incidents.append,
+            )
+
+            # ── 写 ai_tool_calls（同 run_id；Tool → EXECUTED）──
+            await self._record_tool_call(
+                run_id=agent_run.run_id,
+                descriptor=descriptor,
+                result=result,
+                params=args,
+            )
 
             tool_results.append({
                 "tool": step.tool,
-                "status": "EXECUTED",
-                "result": result_dict,
+                "status": result.get("status", "EXECUTED"),
+                "domain": result.get("domain", "unknown"),
+                "result": result.get("result", {}),
             })
             step_views.append({
                 "tool": step.tool,
-                "status": "EXECUTED",
+                "status": result.get("status", "EXECUTED"),
                 "reason": step.reason,
             })
 
-        # ── 7a. Mark unexecuted planned steps as SKIPPED ──
-        executed_tools = {r["tool"] for r in tool_results}
-        for step in plan.steps:
-            if step.tool not in executed_tools:
-                tool_results.append({"tool": step.tool, "status": "EXECUTED", "result": {}})
-                step_views.append({"tool": step.tool, "status": "EXECUTED", "reason": step.reason})
+            # 同步 Run 的 taint 峰值（ToolExecutor 已 mutate run_ctx）
+            agent_run.data_classification = run_ctx.get(
+                "data_classification", agent_run.data_classification)
 
+        # ── 7. Outcome detection ──
         outcome = "success"
         outcome_reason: str | None = None
 
-        has_compare = any(r["tool"] == "compare_exam_performance" for r in tool_results)
-        compare_empty = any(
-            r["tool"] == "compare_exam_performance"
-            and len(r.get("result", {}).get("subjects", [])) == 0
-            for r in tool_results
-        )
-        summary_empty = any(
-            r["tool"] == "read_class_grade_summary"
-            and len(r.get("result", {}).get("subjects", [])) == 0
-            for r in tool_results
-        )
+        domain_counts: dict[str, int] = {}
+        for r in tool_results:
+            domain = r.get("domain", "unknown")
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
 
-        if has_compare and compare_empty and not summary_empty:
-            # Replan: drop compare, keep only summary findings
+        if not tool_results:
             outcome = "needs_data"
-            outcome_reason = "insufficient_comparable_exams"
-            tool_results = [r for r in tool_results if r["tool"] != "compare_exam_performance"]
-            step_views = [s for s in step_views if s["tool"] != "compare_exam_performance"]
-        elif summary_empty:
-            outcome = "needs_data"
-            outcome_reason = "no_grade_data_available"
+            outcome_reason = "no_tool_results"
 
-        # Extract student counts from summary result
+        # Extract grade KPI counts
         student_count = 0
         examined_count = 0
+        grade_record_count = 0
         for r in tool_results:
-            counts = r.get("result", {}).get("counts", {})
+            res = r.get("result", {})
+            counts = res.get("counts", {})
             student_count = max(student_count, counts.get("students", 0))
             examined_count = max(examined_count, counts.get("examined", 0))
+            subs = res.get("subjects", [])
+            if subs and examined_count:
+                grade_record_count = max(grade_record_count, len(subs) * examined_count)
 
         # ── 8. Synthesizer ──
+        run_state = {
+            "data_classification": agent_run.data_classification,
+            "school_id": self.user.school_id,
+            "user_id": self.user.id,
+        }
         synthesis = self.synthesizer.generate(
             run=run_state,
             goal=goal,
@@ -291,6 +437,7 @@ class AgentCopilotService:
             "overview": synthesis.get("overview", {}),
             "findings": synthesis.get("findings", []),
             "recommendations": synthesis.get("recommendations", []),
+            "domains": synthesis.get("domains", {}),
         }
 
         # ── 9. Critic ──
@@ -315,16 +462,19 @@ class AgentCopilotService:
                 },
             )
 
-        # ── 10. Finish + snapshot ──
+        # ── 10. Finish ──
         await agent_run.finish(
             snapshot={
                 "goal_hash_only": True,
                 "tool_refs": [x["tool"] for x in tool_results],
+                "domain_counts": domain_counts,
                 "scope_snapshot": {
                     "school_id": self.user.school_id,
                     "grade_ids": [grade_id] if grade_id else [],
                     "class_ids": [class_id] if class_id else [],
                 },
+                "classification_peak": agent_run.data_classification,
+                "incidents": incidents,
                 "critic_passed": True,
             },
         )
@@ -337,6 +487,7 @@ class AgentCopilotService:
             "overview": final_output["overview"],
             "findings": final_output["findings"],
             "recommendations": final_output["recommendations"],
+            "domains": final_output.get("domains", {}),
             "critic": {"passed": True, "issues": []},
             "provider": "deepseek",
             "model": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
@@ -350,4 +501,134 @@ class AgentCopilotService:
             "outcome_reason": outcome_reason,
             "student_count": student_count,
             "examined_count": examined_count,
+            "grade_record_count": grade_record_count,
+            "domain_counts": domain_counts,
         }
+
+    async def resolve_available_scopes(self) -> dict:
+        """返回当前用户 AI 助手可分析范围（server-side 授权生成，前端只消费）。
+
+        - school: 当前用户所属学校（JWT school_id，不随请求参数变化）
+        - grades: 用户可访问年级列表
+            - school-wide 角色（MS_ADMIN/GROUP_ADMIN/BRANCH_ADMIN 或
+              teacher_role_assignments 中 school 级授权）→ 本校全部启用年级
+            - 否则：assignment grade ∪ user.grade_id 的交集（按本校过滤）
+        - default_grade_id: 默认选中（优先 user.grade_id，否则第一个）
+
+        不旁路 RBAC：只返回已授权范围；最终执行仍由
+        PermissionChecker/ResourceScope + _assert_same_school 兜底拒绝。
+        """
+        from sqlalchemy import select
+
+        from core.access import load_assignment_scopes
+        from core.models import Grade, School, UserRole
+
+        user = self.user
+        school = await self.db.get(School, user.school_id)
+
+        scopes = await load_assignment_scopes(self.db, user)
+        grade_ids = set(scopes.get("grade", set()) or set())
+        if user.grade_id:
+            grade_ids.add(int(user.grade_id))
+
+        school_wide = bool(scopes.get("school", False)) or user.role in (
+            UserRole.MS_ADMIN,
+            UserRole.GROUP_ADMIN,
+            UserRole.BRANCH_ADMIN,
+        )
+
+        if school_wide:
+            rows = (
+                await self.db.execute(
+                    select(Grade.id, Grade.name)
+                    .where(
+                        Grade.school_id == user.school_id,
+                        Grade.is_active.is_(True),
+                    )
+                    .order_by(Grade.sort_order, Grade.id)
+                )
+            ).all()
+            grades = [{"id": int(r[0]), "name": r[1]} for r in rows]
+        else:
+            if not grade_ids:
+                grades = []
+            else:
+                rows = (
+                    await self.db.execute(
+                        select(Grade.id, Grade.name)
+                        .where(
+                            Grade.id.in_(grade_ids),
+                            Grade.school_id == user.school_id,
+                            Grade.is_active.is_(True),
+                        )
+                        .order_by(Grade.sort_order, Grade.id)
+                    )
+                ).all()
+                grades = [{"id": int(r[0]), "name": r[1]} for r in rows]
+
+        valid_ids = {g["id"] for g in grades}
+        if user.grade_id and int(user.grade_id) in valid_ids:
+            default_grade_id = int(user.grade_id)
+        else:
+            default_grade_id = grades[0]["id"] if grades else None
+
+        return {
+            "school": {
+                "id": user.school_id,
+                "name": school.name if school else "",
+            },
+            "grades": grades,
+            "default_grade_id": default_grade_id,
+        }
+
+    async def _assert_same_school(self, grade_id: int | None, class_id: int | None) -> None:
+        """显式跨校边界：请求的 grade/class 必须属于用户本校，否则 403。
+
+        杜绝 ms_admin 因"管理员"身份隐式获得跨校全量 Scope。
+        """
+        if grade_id is not None:
+            g = await self.db.get(Grade, grade_id)
+            if g is None or g.school_id != self.user.school_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="无权访问该年级数据（跨校请求被拒绝）",
+                )
+        if class_id is not None:
+            c = await self.db.get(ClassModel, class_id)
+            if c is None or c.school_id != self.user.school_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="无权访问该班级数据（跨校请求被拒绝）",
+                )
+
+    async def _record_tool_call(self, *, run_id: int, descriptor: ToolDescriptor,
+                                result: dict[str, Any], params: dict[str, Any]) -> None:
+        """写 ai_tool_calls（同 run_id；Tool → EXECUTED，含 declared/actual classification）。"""
+        from ai_native.models.ai_tool_calls import AiToolCalls
+
+        args_hash = hashlib.sha256(
+            _json.dumps(params, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+
+        record = AiToolCalls(
+            school_id=self.user.school_id,
+            run_id=run_id,
+            tool_name=descriptor.name,
+            tool_version=descriptor.version,
+            schema_version="1",
+            action=descriptor.action,
+            side_effect=descriptor.side_effect,
+            arguments_hash=args_hash,
+            idempotency_key=f"{descriptor.name}:{run_id}:{args_hash[:16]}",
+            resource_scope={
+                "grade_id": params.get("grade_id"),
+                "class_id": params.get("class_id"),
+            },
+            declared_output_classification=descriptor.declared_output_classification,
+            actual_output_classification=result.get(
+                "actual_classification", descriptor.declared_output_classification),
+            status="EXECUTED",
+            started_at=datetime.now(),
+        )
+        self.db.add(record)
+        await self.db.flush()

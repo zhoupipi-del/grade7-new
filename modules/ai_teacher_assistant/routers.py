@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .schemas import (
     ClassGradeSummaryRequest, ClassGradeSummaryResponse,
     CopilotRunRequest, CopilotRunResponse,
+    AvailableScopesResponse,
 )
 from .services import ClassGradeSummaryService
 from .agent_service import AgentCopilotService
@@ -87,3 +88,25 @@ async def run_copilot(
         compare_exam_ids=payload.compare_exam_ids,
     )
     return CopilotRunResponse(**result)
+
+
+@router.get(
+    "/available-scopes",
+    response_model=AvailableScopesResponse,
+    summary="AI 助手可分析范围（学校/年级）",
+)
+async def available_scopes(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AvailableScopesResponse:
+    """返回当前用户 AI 助手可分析的学校与年级范围（server-side 授权）。
+
+    不暴露全校 grades 表；只返回已授权范围。最终执行仍由
+    PermissionChecker + _assert_same_school 兜底。
+    """
+    if current_user.school_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="未绑定学校")
+
+    service = AgentCopilotService(db=db, user=current_user)
+    data = await service.resolve_available_scopes()
+    return AvailableScopesResponse(**data)

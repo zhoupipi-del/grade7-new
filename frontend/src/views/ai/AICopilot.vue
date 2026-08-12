@@ -4,7 +4,16 @@
     <div v-if="!result && !loading && !error" class="hero">
       <div class="hero-icon">✦</div>
       <h1>WINGS AI</h1>
-      <p class="hero-sub">下午好，AI 已准备好分析您负责的年级数据</p>
+      <p class="hero-sub">AI 已准备好分析{{ availableGrades.length ? '您可访问的年级数据' : '您的分析范围' }}</p>
+
+      <div class="scope-selector" v-if="!loadingScopes && availableGrades.length">
+        <span class="scope-label">分析范围</span>
+        <select v-model="selectedGradeId" class="scope-select" :disabled="loading">
+          <option v-for="g in availableGrades" :key="g.id" :value="g.id">{{ g.name }}</option>
+        </select>
+      </div>
+      <div v-else-if="loadingScopes" class="scope-loading">加载分析范围…</div>
+      <div v-else-if="scopeError" class="scope-error">{{ scopeError }}</div>
 
       <div class="input-block">
         <textarea
@@ -18,9 +27,9 @@
       </div>
 
       <div class="quick-row" style="justify-content: center">
-        <button @click="quick(`分析${gradeName.value}最近一次考试`)">📊 最近考试</button>
-        <button @click="quick(`比较${gradeName.value}最近两次考试的变化趋势`)">📈 考试趋势</button>
-        <button @click="quick(`最近${gradeName.value}迟到缺勤情况`)">📋 考勤情况</button>
+        <button @click="quick(`分析${gradeName}最近一次考试`)">📊 最近考试</button>
+        <button @click="quick(`比较${gradeName}最近两次考试的变化趋势`)">📈 考试趋势</button>
+        <button @click="quick(`最近${gradeName}迟到缺勤情况`)">📋 考勤情况</button>
         <button @click="quick('帮我看看本周重点问题')">✨ 本周重点</button>
       </div>
     </div>
@@ -50,7 +59,7 @@
       <div class="quick-row" style="justify-content: center; margin-top: 16px">
         <button @click="quick('分析最近一次考试')">📊 学业分析</button>
         <button @click="quick('最近迟到缺勤情况')">📋 考勤情况</button>
-        <button @click="quick(`最近${gradeName.value}学生纪律表现`)">⚖️ 行为纪律</button>
+        <button @click="quick(`最近${gradeName}学生纪律表现`)">⚖️ 行为纪律</button>
         <button @click="quick('帮我看看本周重点问题')">✨ 综合审查</button>
       </div>
     </div>
@@ -69,7 +78,7 @@
       </p>
       <div class="nd-tag">AI 在数据不足时不编造结论</div>
       <div class="quick-row" style="justify-content: center; margin-top: 16px">
-        <button @click="quickAndRun(`分析${gradeName.value}最近一次考试`)">分析最近一次考试</button>
+        <button @click="quickAndRun(`分析${gradeName}最近一次考试`)">分析最近一次考试</button>
         <button @click="quickAndRun('帮我看看本周重点问题')">查找本周重点</button>
       </div>
     </div>
@@ -217,14 +226,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { runCopilot, toolLabel, OUTCOME_LABELS, DOMAIN_ICONS, DOMAIN_NAMES, DOMAINS } from '@/api/aiCopilot'
+import { ref, computed, onMounted } from 'vue'
+import { runCopilot, getAvailableScopes, toolLabel, OUTCOME_LABELS, DOMAIN_ICONS, DOMAIN_NAMES, DOMAINS } from '@/api/aiCopilot'
 import { useUserStore } from '@/store/user'
 import type { CopilotRunResponse } from '@/api/aiCopilot'
 
 const userStore = useUserStore()
-const gradeId = computed(() => userStore.userInfo?.grade_id ?? 0)
-const gradeName = computed(() => userStore.userInfo?.grade_name ?? '当前年级')
+
+const availableGrades = ref<Array<{ id: number; name: string }>>([])
+const selectedGradeId = ref<number | null>(null)
+const loadingScopes = ref(false)
+const scopeError = ref('')
+
+const gradeName = computed(() => {
+  const g = availableGrades.value.find((x) => x.id === selectedGradeId.value)
+  return g?.name ?? userStore.userInfo?.grade_name ?? '当前年级'
+})
 
 const goal = ref('帮我看看本周重点问题')
 const loading = ref(false)
@@ -316,9 +333,28 @@ function quickAndRun(q: string) {
   run()
 }
 
+async function loadAvailableScopes() {
+  loadingScopes.value = true
+  scopeError.value = ''
+  try {
+    const response = await getAvailableScopes()
+    const data = (response as any)?.data ?? response
+    availableGrades.value = Array.isArray(data?.grades) ? data.grades : []
+    selectedGradeId.value =
+      data?.default_grade_id ??
+      availableGrades.value[0]?.id ??
+      null
+  } catch (e: any) {
+    scopeError.value = '分析范围加载失败，请刷新重试'
+    console.error('[COPILOT] load scopes error', e)
+  } finally {
+    loadingScopes.value = false
+  }
+}
+
 async function run() {
   const currentGoal = String(goal?.value ?? '').trim()
-  const currentGradeId = Number(gradeId?.value)
+  const currentGradeId = Number(selectedGradeId?.value)
 
   if (!currentGoal) {
     error.value = '请输入分析任务'
@@ -366,10 +402,26 @@ async function run() {
     loading.value = false
   }
 }
+
+onMounted(() => {
+  loadAvailableScopes()
+})
 </script>
 
 <style scoped>
 .copilot { max-width: 900px; margin: 0 auto; padding: 24px 20px; }
+
+/* ── Scope Selector ── */
+.scope-selector { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 18px; }
+.scope-label { font-size: 14px; color: var(--el-text-color-secondary); }
+.scope-select {
+  min-width: 200px; padding: 8px 12px; font-size: 14px;
+  border: 1px solid var(--el-border-color); border-radius: 8px;
+  background: var(--el-bg-color); color: var(--el-text-color-primary);
+  outline: none; cursor: pointer;
+}
+.scope-loading, .scope-error { font-size: 13px; color: var(--el-text-color-secondary); margin-bottom: 14px; }
+.scope-error { color: var(--el-color-danger); }
 
 /* ── Hero ── */
 .hero { text-align: center; padding: 60px 20px; }
