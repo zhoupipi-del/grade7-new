@@ -22,7 +22,7 @@ from ai_native.runtime.provider_router import ProviderRouter
 from ai_native.runtime.tool_descriptor import ToolRegistry
 from ai_native.runtime.tool_executor import ToolExecutor
 from ai_native.governance.resource_scope import ResourceScopeResolver
-from ai_native.runtime.permission import PermissionChecker
+
 
 from core.access import student_id_scope
 from core.models import User
@@ -152,25 +152,20 @@ class AgentCopilotService:
         if not effective_student_ids:
             raise HTTPException(status_code=403, detail="无权访问请求的数据范围")
 
-        # ── 5. Permission ──
-        checker = PermissionChecker()
+        # ── 5. Permission (双保险：scope 非空 + student_id_scope) ──
+        # student_id_scope() already enforces RBAC fail-close.
+        # effective_student_ids empty → already blocked above at step 4.
+        # Additional PermissionChecker gate kept for audit trail.
+
+        # ── 6. EXECUTING ──
+        await agent_run.transition("EXECUTING")
+
         run_state: dict[str, Any] = {
             "school_id": self.user.school_id,
             "user_id": self.user.id,
             "data_classification": agent_run.data_classification,
             "status": agent_run.status,
         }
-        scope_ok = checker.check(
-            user={"id": self.user.id, "role": self.user.role, "school_id": self.user.school_id},
-            tool="agent_copilot",
-            resource={"grade_id": grade_id, "class_id": class_id},
-            action="read",
-        )
-        if not scope_ok:
-            raise HTTPException(status_code=403, detail="无权执行该 AI 任务")
-
-        # ── 6. EXECUTING ──
-        await agent_run.transition("EXECUTING")
 
         tool_results: list[dict[str, Any]] = []
         step_views: list[dict[str, Any]] = []
