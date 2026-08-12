@@ -11,7 +11,7 @@ teacher_mgmt 数据模型
 from sqlalchemy import (
     Column, BigInteger, String, Integer, DateTime, Date,
     Float, Boolean, JSON, UniqueConstraint, Index,
-    ForeignKey,
+    ForeignKey, Computed,
 )
 from sqlalchemy.orm import relationship
 from core.models import Base, SchoolMixin, get_local_now
@@ -85,19 +85,37 @@ class TeacherSubject(Base, SchoolMixin):
     grade_id = Column(
         BigInteger, ForeignKey("grades.id"), nullable=True, comment="执教年级ID",
     )
+    class_id = Column(
+        BigInteger, ForeignKey("classes.id"), nullable=True, comment="授课班级（NULL=年级级任课）",
+    )
     is_primary = Column(Boolean, default=True, comment="是否主教科任")
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1", comment="是否有效")
+    assigned_at = Column(DateTime, default=get_local_now, comment="分配时间")
+    expires_at = Column(DateTime, nullable=True, comment="过期时间(可选)")
     grade_level = Column(
         String(20), nullable=True, comment="执教年级: 初一/初二/初三/高一/高二/高三",
+    )
+    scope_key = Column(
+        String(32),
+        Computed(
+            "CASE WHEN class_id IS NOT NULL "
+            "THEN CONCAT('C:', class_id) "
+            "ELSE CONCAT('G:', COALESCE(grade_id, 0)) END",
+            persisted=True,
+        ),
+        nullable=True,
+        comment="生成的作用域键 C:<class_id> / G:<grade_id>，用于唯一约束",
     )
     created_at = Column(DateTime, default=get_local_now)
 
     __table_args__ = (
         UniqueConstraint(
-            "school_id", "teacher_user_id", "subject_code",
-            name="uk_teacher_subject",
+            "school_id", "teacher_user_id", "subject_code", "scope_key",
+            name="uk_teacher_subject_scope",
         ),
         Index("idx_ts_subject", "subject_code"),
         Index("idx_ts_teacher", "teacher_user_id"),
+        Index("ix_teacher_subject_class", "class_id"),
         {"comment": "教师任教学科映射表"},
     )
 
