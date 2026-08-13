@@ -27,12 +27,10 @@
 
 from core.models import Student, User
 from core.routers import get_current_user, get_db
-from core.privacy_audit import (
-    guard_and_audit, log_access, ACCESS_ALLOWED, ACCESS_DENIED,
-    PURPOSE_STUDENT_SUPPORT, PURPOSE_SECURITY_AUDIT,
-)
+from core.privacy_audit import PURPOSE_STUDENT_SUPPORT
 from core.psych_capability import (
-    require_psych_access, attention_payload, PSY_ATTENTION, PSY_DETAIL,
+    require_psych_access, require_psych_list_access,
+    attention_payload, PSY_ATTENTION, PSY_DETAIL, _has_counselor_assignment,
 )
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from modules.psych_counseling.models import (
@@ -157,13 +155,13 @@ async def _assert_student_access(
 
 async def require_counselor(
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
-    """硬门禁: 仅心理老师(counselor)和MS_ADMIN可通行"""
-    role = (current_user.role or "").lower()
-    if role not in {"ms_admin", "counselor"}:
+    """CF-01.1 硬门禁: 仅 active counselor assignment 可操作（无 ms_admin/user.role 兜底）"""
+    if not await _has_counselor_assignment(db, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="仅心理老师和系统管理员可操作",
+            detail="仅心理老师可操作",
         )
     return current_user
 
@@ -348,24 +346,22 @@ async def api_list_appointments(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """查询预约列表 — 心理老师/管理员看全部, 其他看自己的"""
-    # P0-1: 学生/家长强制只看绑定学生本人，防止越权读取他人预约 (IDOR 防御)
+    """查询预约列表 — CF-01.1: counselor 完整 / 班主任年级组长关注标记 / 学生本人 / 其余 403"""
     role = (current_user.role or "").lower()
     if role in {"student", "parent"}:
+        # 学生/家长: 本人预约
         student_id = current_user.bound_student_id
         if not student_id:
             return AppointmentListResponse(status="success", appointments=[], total=0)
-
-    # P0-2: 班主任/年级组长限定本班/本年级学生范围 (读侧 IDOR 防御)
-    allowed_student_ids = await _allowed_student_ids(db, current_user)
-    if student_id is not None:
-        # CF-02: 行级越权(404/403) 与放行均写入敏感访问审计
-        await guard_and_audit(
-            db, current_user, student_id,
-            lambda: _assert_student_access(db, current_user, student_id),
+    else:
+        # CF-01.1: 教职工统一授权
+        level = await require_psych_list_access(
+            db, current_user,
             resource_type="psych_appointment", action="read_list",
             purpose=PURPOSE_STUDENT_SUPPORT,
         )
+        if level == PSY_ATTENTION:
+            return attention_payload(professional_followup_required=True)
 
     appointments, total = await list_appointments(
         db=db,
@@ -376,7 +372,7 @@ async def api_list_appointments(
         slot_id=slot_id,
         limit=limit,
         offset=offset,
-        student_ids=allowed_student_ids if student_id is None else None,
+        student_ids=None,
     )
 
     items = []
@@ -615,24 +611,22 @@ async def api_list_consult_records(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """咨询记录列表 — 元数据可见, 正文需单个查询解密"""
-    # P0-1: 学生/家长强制只看绑定学生本人，防止越权读取他人咨询记录 (IDOR 防御)
+    """咨询记录列表 — CF-01.1: counselor 完整 / 班主任年级组长关注标记 / 学生本人 / 其余 403"""
     role = (current_user.role or "").lower()
     if role in {"student", "parent"}:
+        # 学生/家长: 本人咨询记录
         student_id = current_user.bound_student_id
         if not student_id:
             return ConsultRecordListResponse(status="success", records=[], total=0)
-
-    # P0-2: 班主任/年级组长限定本班/本年级学生范围 (读侧 IDOR 防御)
-    allowed_student_ids = await _allowed_student_ids(db, current_user)
-    if student_id is not None:
-        # CF-02: 行级越权(404/403) 与放行均写入敏感访问审计
-        await guard_and_audit(
-            db, current_user, student_id,
-            lambda: _assert_student_access(db, current_user, student_id),
+    else:
+        # CF-01.1: 教职工统一授权
+        level = await require_psych_list_access(
+            db, current_user,
             resource_type="psych_consult_record", action="read_list",
             purpose=PURPOSE_STUDENT_SUPPORT,
         )
+        if level == PSY_ATTENTION:
+            return attention_payload(professional_followup_required=True)
 
     records, total = await list_consult_records(
         db=db,
@@ -643,7 +637,7 @@ async def api_list_consult_records(
         is_crisis=is_crisis,
         limit=limit,
         offset=offset,
-        student_ids=allowed_student_ids if student_id is None else None,
+        student_ids=None,
     )
     items = []
     for r in records:

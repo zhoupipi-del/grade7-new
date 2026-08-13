@@ -232,3 +232,156 @@ async def require_psych_access(
         detail=f"level={level}",
     )
     return level
+
+
+# ─────────────────────────────────────────────────────────────
+# 对外 API：列表/聚合 授权入口（CF-01.1，无 student_id）
+# ─────────────────────────────────────────────────────────────
+
+
+async def _has_counselor_assignment(db: AsyncSession, user: User) -> bool:
+    """是否存在任意 active counselor assignment（不校验单个学生 scope）。"""
+    try:
+        from modules.teacher_mgmt.models import TeacherRoleAssignment as TRA
+    except ImportError:
+        return False
+
+    now = datetime.now()
+    stmt = select(TRA.id).where(
+        TRA.teacher_user_id == user.id,
+        TRA.school_id == user.school_id,
+        TRA.role_type == "counselor",
+        TRA.is_active == True,  # noqa: E712
+        or_(TRA.expires_at.is_(None), TRA.expires_at > now),
+    ).limit(1)
+    res = await db.execute(stmt)
+    return res.scalar_one_or_none() is not None
+
+
+async def resolve_psych_list_access(db: AsyncSession, user: User) -> str:
+    """列表/聚合端点访问级别（无 student_id）。
+
+    detail     → counselor assignment（任意 scope）
+    attention  → class_teacher(本班) / grade_leader(本年级)
+    deny       → ms_admin / teacher / parent / student
+    """
+    if await _has_counselor_assignment(db, user):
+        return PSY_DETAIL
+    role = role_str(user)
+    if role == "class_teacher" and user.class_id:
+        return PSY_ATTENTION
+    if role == "grade_leader" and user.grade_id:
+        return PSY_ATTENTION
+    return PSY_DENY
+
+
+async def require_psych_list_access(
+    db: AsyncSession,
+    user: User,
+    *,
+    resource_type: str,
+    action: str,
+    purpose: str,
+) -> str:
+    """列表/聚合端点统一授权入口（判定 + 审计 + 403）。
+
+    返回 "detail" | "attention"。deny（ms_admin/teacher 等）→ 403。
+    调用方：detail → 完整列表；attention → 仅 attention_payload(最小关注信号)。
+    """
+    from fastapi import HTTPException
+    from core.privacy_audit import (
+        log_access, ACCESS_ALLOWED, ACCESS_DENIED, _derive_scope,
+    )
+
+    level = await resolve_psych_list_access(db, user)
+    scope_type, scope_id = _derive_scope(user)
+
+    if level == PSY_DENY:
+        await log_access(
+            db,
+            user_id=user.id,
+            school_id=user.school_id,
+            student_id=None,
+            resource_type=resource_type,
+            resource_id="scope",
+            action=action,
+            purpose=purpose,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            result=ACCESS_DENIED,
+            detail="无心理专业授权(counselor assignment)",
+        )
+        raise HTTPException(status_code=403, detail="无权访问心理数据")
+
+    await log_access(
+        db,
+        user_id=user.id,
+        school_id=user.school_id,
+        student_id=None,
+        resource_type=resource_type,
+        resource_id="scope",
+        action=action,
+        purpose=purpose,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        result=ACCESS_ALLOWED,
+        detail=f"level={level}",
+    )
+    return level
+
+
+# ─────────────────────────────────────────────────────────────
+# 对外 API：写端点 授权入口（CF-01.1，counselor assignment + scope）
+# ─────────────────────────────────────────────────────────────
+
+
+async def require_psych_write_access(
+    db: AsyncSession,
+    user: User,
+    student_id: int,
+    *,
+    resource_type: str,
+    action: str,
+    purpose: str,
+) -> None:
+    """写端点统一授权入口：仅 active counselor assignment 覆盖目标学生可写。
+
+    ms_admin / class_teacher / grade_leader / teacher 一律 403（无 fallback）。
+    """
+    from fastapi import HTTPException
+    from core.privacy_audit import (
+        log_access, ACCESS_ALLOWED, ACCESS_DENIED, _derive_scope,
+    )
+
+    stmt = select(Student).where(
+        Student.id == student_id,
+        Student.school_id == user.school_id,
+    )
+    student = (await db.execute(stmt)).scalar_one_or_none()
+    scope_type, scope_id = _derive_scope(user)
+    rid = str(student_id)
+
+    if student is None:
+        await log_access(
+            db, user_id=user.id, school_id=user.school_id, student_id=student_id,
+            resource_type=resource_type, resource_id=rid, action=action,
+            purpose=purpose, scope_type=scope_type, scope_id=scope_id,
+            result=ACCESS_DENIED, detail="学生不存在或跨校",
+        )
+        raise HTTPException(status_code=404, detail="学生不存在")
+
+    if not await _counselor_scope_covers(db, user, student):
+        await log_access(
+            db, user_id=user.id, school_id=user.school_id, student_id=student_id,
+            resource_type=resource_type, resource_id=rid, action=action,
+            purpose=purpose, scope_type=scope_type, scope_id=scope_id,
+            result=ACCESS_DENIED, detail="无心理专业授权(counselor assignment)",
+        )
+        raise HTTPException(status_code=403, detail="无权操作心理数据")
+
+    await log_access(
+        db, user_id=user.id, school_id=user.school_id, student_id=student_id,
+        resource_type=resource_type, resource_id=rid, action=action,
+        purpose=purpose, scope_type=scope_type, scope_id=scope_id,
+        result=ACCESS_ALLOWED, detail="level=write",
+    )

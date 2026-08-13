@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import User, Student, UserRole
-from core.routers import get_db, get_current_user, require_role
+from core.routers import get_db, get_current_user
 
 from modules.psych_screening.models import (
     PsychSurvey,
@@ -73,86 +73,15 @@ from modules.psych_screening.schemas import (
     EFFECT_RATING_CHOICES,
 )
 
-from core.privacy_audit import (
-    guard_and_audit, log_access, ACCESS_ALLOWED, ACCESS_DENIED,
-    PURPOSE_SCREENING_REVIEW, PURPOSE_SECURITY_AUDIT,
-)
+from core.privacy_audit import PURPOSE_SCREENING_REVIEW
 from core.psych_capability import (
-    require_psych_access, attention_payload, PSY_ATTENTION, PSY_DETAIL,
+    require_psych_access, require_psych_list_access, require_psych_write_access,
+    attention_payload, PSY_ATTENTION, PSY_DETAIL,
 )
 
 router = APIRouter(tags=["psych-screening"])
 
 
-# ═══════════════════════════════════════════════════════════════
-# 辅助 Dependency — 角色权限
-# ═══════════════════════════════════════════════════════════════
-
-# 允许访问学生心理健康数据的教职工角色白名单。
-# ⚠️ fail-close 铁律: 未列举的角色(PARENT/STUDENT 等)一律 403。
-#    禁止再出现「未匹配任何分支 → 落到函数底部 → 静默放行全校」的白名单式过滤。
-_PSYCH_STAFF_ROLES = frozenset(
-    {
-        UserRole.MS_ADMIN,
-        UserRole.GRADE_LEADER,
-        UserRole.CLASS_TEACHER,
-        UserRole.TEACHER,
-        UserRole.COUNSELOR,
-    }
-)
-
-_PSYCH_DENY_MSG = "无权访问学生心理健康数据"
-
-
-def _assert_psych_staff(user: User) -> UserRole:
-    """心理数据访问守卫（fail-close）。
-
-    返回归一化后的 UserRole —— 生产库 users.role 存在 str 与 Enum 混合，
-    直接比较会漏判，必须先 UserRole(...) 归一化。
-    """
-    try:
-        role = UserRole(user.role)
-    except ValueError:
-        raise HTTPException(http_status.HTTP_403_FORBIDDEN, _PSYCH_DENY_MSG)
-    if role not in _PSYCH_STAFF_ROLES:
-        raise HTTPException(http_status.HTTP_403_FORBIDDEN, _PSYCH_DENY_MSG)
-    return role
-
-
-def _verify_student_scope(
-    user: User,
-    target_class_id: Optional[int] = None,
-    target_grade_id: Optional[int] = None,
-):
-    """验证用户权限 scope：班主任只能看自己班，年级组长只能看自己年级"""
-    role = _assert_psych_staff(user)
-    if role in (UserRole.MS_ADMIN, UserRole.COUNSELOR):
-        return  # 德育处管理员 / 心理教师全校放行
-    if role == UserRole.GRADE_LEADER:
-        if not user.grade_id:
-            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "年级组长未绑定年级，无法访问")
-        if target_grade_id and user.grade_id != target_grade_id:
-            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "年级组长只能查看本年级数据")
-    if role in (UserRole.CLASS_TEACHER, UserRole.TEACHER):
-        if not user.class_id:
-            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "教师未绑定班级，无法访问")
-        if target_class_id and user.class_id != target_class_id:
-            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "班主任只能查看本班数据")
-
-
-def _get_scope_params(user: User):
-    """根据角色返回 grade_id / class_id 过滤参数（fail-close）"""
-    role = _assert_psych_staff(user)
-    params = {}
-    if role == UserRole.GRADE_LEADER:
-        if not user.grade_id:
-            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "年级组长未绑定年级，无法访问")
-        params["grade_id"] = user.grade_id
-    elif role in (UserRole.CLASS_TEACHER, UserRole.TEACHER):
-        if not user.class_id:
-            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "教师未绑定班级，无法访问")
-        params["class_id"] = user.class_id
-    return params
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -200,16 +129,13 @@ async def list_surveys(
     """心理筛查问卷列表 (含统计)"""
     # 权限 scope 覆盖
     # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
-    scope = await guard_and_audit(
-        db, current_user, None,
-        lambda: _get_scope_params(current_user),
+    level = await require_psych_list_access(
+        db, current_user,
         resource_type="psych_screening", action="read_list",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
-    if scope.get("grade_id"):
-        grade_id = scope["grade_id"]
-    if scope.get("class_id"):
-        class_id = scope["class_id"]
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
 
     conditions = [
         PsychSurvey.school_id == current_user.school_id,
@@ -322,16 +248,13 @@ async def get_dimension_data(
     支持按班级/年级筛选，兼容角色 scope。
     """
     # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
-    scope = await guard_and_audit(
-        db, current_user, None,
-        lambda: _get_scope_params(current_user),
+    level = await require_psych_list_access(
+        db, current_user,
         resource_type="psych_screening", action="read_list",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
-    if scope.get("grade_id"):
-        grade_id = scope["grade_id"]
-    if scope.get("class_id"):
-        class_id = scope["class_id"]
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
 
     data = await get_dimension_aggregation(
         db=db,
@@ -346,21 +269,19 @@ async def get_dimension_data(
 async def ai_analysis(
     req: AIAnalysisRequest = AIAnalysisRequest(),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """
     DeepSeek AI 宏观分析 → 心理健康白皮书 (仅管理员/年级组长)。
     """
-    # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
-    scope = await guard_and_audit(
-        db, current_user, None,
-        lambda: _get_scope_params(current_user),
+    level = await require_psych_list_access(
+        db, current_user,
         resource_type="psych_screening", action="read_list",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
-    grade_id = req.grade_id or scope.get("grade_id")
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
+    grade_id = req.grade_id
     class_id = req.class_id
 
     result = await run_ai_analysis(
@@ -376,22 +297,18 @@ async def ai_analysis(
 async def sync_surveys(
     grade_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """
     一键同步: 扫描中高风险问卷 → 批量创建/更新评估记录 (幂等)。
     """
-    # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
-    scope = await guard_and_audit(
-        db, current_user, None,
-        lambda: _get_scope_params(current_user),
-        resource_type="psych_screening", action="read_list",
+    level = await require_psych_list_access(
+        db, current_user,
+        resource_type="psych_screening", action="write_sync",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
-    if scope.get("grade_id"):
-        grade_id = scope["grade_id"]
+    if level != PSY_DETAIL:
+        raise HTTPException(http_status.HTTP_403_FORBIDDEN, "仅心理老师可同步评估")
 
     result = await sync_surveys_to_assessments(
         db=db,
@@ -418,16 +335,13 @@ async def list_psych_assessments(
 ):
     """心理健康评估列表"""
     # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
-    scope = await guard_and_audit(
-        db, current_user, None,
-        lambda: _get_scope_params(current_user),
+    level = await require_psych_list_access(
+        db, current_user,
         resource_type="psych_screening", action="read_list",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
-    if scope.get("grade_id"):
-        grade_id = scope["grade_id"]
-    if scope.get("class_id"):
-        class_id = scope["class_id"]
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
 
     result = await list_assessments(
         db=db,
@@ -486,11 +400,14 @@ async def list_psych_assessments(
 async def create_psych_assessment(
     req: AssessmentCreateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """手动创建心理健康评估"""
+    await require_psych_write_access(
+        db, current_user, req.student_id,
+        resource_type="psych_assessment", action="write_create",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     student = await db.execute(
         select(Student).where(
             Student.id == req.student_id,
@@ -500,10 +417,6 @@ async def create_psych_assessment(
     student = student.scalar_one_or_none()
     if not student:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "学生不存在")
-
-    # 班主任只能评估自己班
-    if current_user.role == UserRole.CLASS_TEACHER and student.class_id != current_user.class_id:
-        raise HTTPException(http_status.HTTP_403_FORBIDDEN, "只能评估本班学生")
 
     assessment = await create_assessment(
         db=db,
@@ -627,9 +540,7 @@ async def update_psych_assessment(
     assessment_id: int,
     req: AssessmentUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """编辑评估记录"""
     assessment = await db.execute(
@@ -642,7 +553,11 @@ async def update_psych_assessment(
     if not assessment:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "评估记录不存在")
 
-    _verify_student_scope(current_user, assessment.class_id, assessment.grade_id)
+    await require_psych_write_access(
+        db, current_user, assessment.student_id,
+        resource_type="psych_assessment", action="write_update",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
 
     assessment = await update_assessment(
         db=db,
@@ -675,9 +590,7 @@ async def update_psych_assessment(
 async def delete_psych_assessment(
     assessment_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """删除评估记录 (仅管理员/年级组长)"""
     assessment = await db.execute(
@@ -690,7 +603,11 @@ async def delete_psych_assessment(
     if not assessment:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "评估记录不存在")
 
-    _verify_student_scope(current_user, assessment.class_id, assessment.grade_id)
+    await require_psych_write_access(
+        db, current_user, assessment.student_id,
+        resource_type="psych_assessment", action="write_delete",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
 
     await delete_assessment(db, assessment_id)
     return {"status": "ok", "message": "评估记录已删除"}
@@ -709,22 +626,17 @@ async def list_psych_interventions(
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """干预追踪列表"""
     # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
-    scope = await guard_and_audit(
-        db, current_user, None,
-        lambda: _get_scope_params(current_user),
+    level = await require_psych_list_access(
+        db, current_user,
         resource_type="psych_screening", action="read_list",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
-    if scope.get("grade_id"):
-        grade_id = scope["grade_id"]
-    if scope.get("class_id"):
-        class_id = scope["class_id"]
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
 
     result = await list_interventions(
         db=db,
@@ -784,11 +696,14 @@ async def list_psych_interventions(
 async def create_psych_intervention(
     req: InterventionCreateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """创建心理健康干预记录"""
+    await require_psych_write_access(
+        db, current_user, req.student_id,
+        resource_type="psych_intervention", action="write_create",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     student = await db.execute(
         select(Student).where(
             Student.id == req.student_id,
@@ -798,10 +713,6 @@ async def create_psych_intervention(
     student = student.scalar_one_or_none()
     if not student:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "学生不存在")
-
-    # 班主任只能干预自己班
-    if current_user.role == UserRole.CLASS_TEACHER and student.class_id != current_user.class_id:
-        raise HTTPException(http_status.HTTP_403_FORBIDDEN, "只能干预本班学生")
 
     rec = await create_intervention(
         db=db,
@@ -835,9 +746,7 @@ async def followup_psych_intervention(
     intervention_id: int,
     req: InterventionFollowupRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """随访更新干预记录"""
     rec = await db.execute(
@@ -850,10 +759,11 @@ async def followup_psych_intervention(
     if not rec:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "干预记录不存在")
 
-    # 权限: 创建者或管理员
-    if current_user.role not in (UserRole.MS_ADMIN, UserRole.GRADE_LEADER):
-        if rec.teacher_id != current_user.id:
-            raise HTTPException(http_status.HTTP_403_FORBIDDEN, "只能更新自己创建的干预记录")
+    await require_psych_write_access(
+        db, current_user, rec.student_id,
+        resource_type="psych_intervention", action="write_followup",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
 
     rec = await followup_intervention(
         db=db,
@@ -979,21 +889,20 @@ async def search_psych_students(
     q: Optional[str] = Query(None, alias="q", description="姓名关键词"),
     limit: int = Query(50, le=200),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """
     搜索学生 (按姓名+权限 scope)，用于干预创建 Modal。
     返回结果含最新 MH 风险等级。
     """
     # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
-    scope = await guard_and_audit(
-        db, current_user, None,
-        lambda: _get_scope_params(current_user),
+    level = await require_psych_list_access(
+        db, current_user,
         resource_type="psych_screening", action="read_list",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
     results = await search_students(
         db=db,
         school_id=current_user.school_id,
@@ -1065,9 +974,7 @@ async def list_questions(
 @router.post("/questions/seed")
 async def seed_questions(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """
     幂等初始化 MSSMHS-55 题目库 (仅管理员)。
@@ -1090,22 +997,17 @@ async def get_dashboard(
     grade_id: Optional[int] = Query(None),
     class_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """心理筛查仪表盘聚合统计"""
     # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
-    scope = await guard_and_audit(
-        db, current_user, None,
-        lambda: _get_scope_params(current_user),
+    level = await require_psych_list_access(
+        db, current_user,
         resource_type="psych_screening", action="read_list",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
-    if scope.get("grade_id"):
-        grade_id = scope["grade_id"]
-    if scope.get("class_id"):
-        class_id = scope["class_id"]
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
 
     stats = await get_dashboard_stats(
         db=db,
@@ -1203,35 +1105,23 @@ class CrossAnalysisOut(PydanticBase):
 async def list_class_portraits(
     grade_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """班级心理画像列表（十维度雷达图数据）
 
     范围 fail-close：班主任仅本班、年级组长仅本年级，未绑定一律 403，
     不信任前端 grade_id 传参（仅管理员可用其做筛选）。
     """
-    conditions = [PsychClassPortrait.school_id == current_user.school_id]
-    user_role = (
-        current_user.role if isinstance(current_user.role, UserRole) else UserRole(current_user.role)
+    level = await require_psych_list_access(
+        db, current_user,
+        resource_type="psych_class_portrait", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
     )
-
-    if user_role == UserRole.CLASS_TEACHER:
-        bound_cid = getattr(current_user, "class_id", None)
-        if not bound_cid:
-            raise HTTPException(status_code=403, detail="班主任未绑定班级，无权查看班级画像")
-        conditions.append(PsychClassPortrait.class_id == bound_cid)
-    elif user_role == UserRole.GRADE_LEADER:
-        bound_gid = getattr(current_user, "grade_id", None)
-        if not bound_gid:
-            raise HTTPException(status_code=403, detail="年级组长未绑定年级，无权查看班级画像")
-        conditions.append(PsychClassPortrait.grade_id == bound_gid)
-    elif user_role == UserRole.MS_ADMIN:
-        if grade_id:
-            conditions.append(PsychClassPortrait.grade_id == grade_id)
-    else:
-        raise HTTPException(status_code=403, detail="权限不足")
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
+    conditions = [PsychClassPortrait.school_id == current_user.school_id]
+    if grade_id:
+        conditions.append(PsychClassPortrait.grade_id == grade_id)
 
     stmt = (
         select(PsychClassPortrait)
@@ -1268,11 +1158,16 @@ async def list_class_portraits(
 async def list_cross_analyses(
     analysis_type: Optional[str] = Query(None, description="over_anxious_parent / score_inconsistency / pce_vs_mssmhs"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
     """亲子交叉分析列表（PCE家长评分 vs MSSMHS学生自评）"""
+    level = await require_psych_list_access(
+        db, current_user,
+        resource_type="psych_cross_analysis", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
     query_sql = """
         SELECT pca.id, pca.student_id, s.name AS student_name,
                c.name AS class_name, pca.analysis_type, pca.details_json, pca.created_at

@@ -32,11 +32,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.models import User, Student, Class, Grade, get_local_now
 from core.routers import get_db, get_current_user
 from core.privacy_audit import (
-    log_access, ACCESS_ALLOWED, ACCESS_DENIED,
-    PURPOSE_STUDENT_SUPPORT, PURPOSE_SCREENING_REVIEW, PURPOSE_SECURITY_AUDIT,
+    PURPOSE_STUDENT_SUPPORT, PURPOSE_SCREENING_REVIEW,
 )
 from core.psych_capability import (
-    require_psych_access, attention_payload, PSY_ATTENTION, PSY_DETAIL,
+    require_psych_access, require_psych_list_access, require_psych_write_access,
+    attention_payload, PSY_ATTENTION, PSY_DETAIL,
 )
 from modules.psych_profiles.models import PsyProfile, PsyScreeningRecord
 from modules.psych_profiles import services as svc
@@ -49,55 +49,6 @@ from modules.psych_profiles.schemas import (
 )
 
 router = APIRouter(tags=["心理档案与双轨预警"])
-
-
-# ============================================================
-# 角色门禁
-# ============================================================
-async def require_psych_write(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    """写操作门禁: MS_ADMIN / counselor / GRADE_LEADER
-
-    CF-02: 角色越权(403) 写入敏感访问审计（denied）。
-    """
-    role = (current_user.role or "").lower()
-    if role not in {"ms_admin", "counselor", "grade_leader"}:
-        await log_access(
-            db, user_id=current_user.id, school_id=current_user.school_id,
-            student_id=None, resource_type="psych_profile", resource_id="role_check",
-            action="write_role_check", purpose=PURPOSE_SECURITY_AUDIT,
-            result=ACCESS_DENIED, detail="role not in psych write allowlist",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="仅系统管理员、心理老师和年级组长可操作心理档案",
-        )
-    return current_user
-
-
-async def require_psych_read(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    """读操作门禁: MS_ADMIN / counselor / GRADE_LEADER / CLASS_TEACHER
-
-    CF-02: 角色越权(403) 写入敏感访问审计（denied）。
-    """
-    role = (current_user.role or "").lower()
-    if role not in {"ms_admin", "counselor", "grade_leader", "class_teacher"}:
-        await log_access(
-            db, user_id=current_user.id, school_id=current_user.school_id,
-            student_id=None, resource_type="psych_profile", resource_id="role_check",
-            action="read_role_check", purpose=PURPOSE_SECURITY_AUDIT,
-            result=ACCESS_DENIED, detail="role not in psych read allowlist",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权访问心理档案数据",
-        )
-    return current_user
 
 
 # ============================================================
@@ -157,12 +108,19 @@ async def api_list_profiles(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
 ):
     """心理档案列表 — 支持风险等级/标签筛选
 
     S0-3 P0 修复：通过 core.access.student_id_scope 注入本班/本年级学生白名单。
     """
+    level = await require_psych_list_access(
+        db, current_user,
+        resource_type="psych_profile", action="read_list",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
     from core.access import student_id_scope
     scope = await student_id_scope(db, current_user)
     profiles, total = await svc.list_profiles(
@@ -186,12 +144,6 @@ async def api_list_profiles(
         item["student_name"] = name_map.get(p.student_id)
         items.append(item)
 
-    # CF-02: 合法聚合读取写入审计（allowed）
-    await log_access(
-        db, user_id=current_user.id, school_id=current_user.school_id,
-        student_id=None, resource_type="psych_profile", resource_id="scope",
-        action="read_list", purpose=PURPOSE_STUDENT_SUPPORT, result=ACCESS_ALLOWED,
-    )
     return {"total": total, "page": page, "page_size": page_size, "items": items}
 
 
@@ -296,9 +248,14 @@ async def api_create_profile(
     student_id: int,
     payload: PsyProfileCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
 ):
     """初始化学生心理档案"""
+    await require_psych_write_access(
+        db, current_user, student_id,
+        resource_type="psych_profile", action="write_create",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
     existing = await svc.get_profile(db, current_user.school_id, student_id)
     if existing is not None:
         raise HTTPException(status_code=409, detail="该学生已有心理档案, 请使用 PUT 更新")
@@ -324,9 +281,14 @@ async def api_update_profile(
     student_id: int,
     payload: PsyProfileUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
 ):
     """更新心理档案"""
+    await require_psych_write_access(
+        db, current_user, student_id,
+        resource_type="psych_profile", action="write_update",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
     update_data = payload.model_dump(exclude_none=True)
     if "risk_level" in update_data:
         update_data["risk_level_updated_by"] = current_user.id
@@ -344,9 +306,14 @@ async def api_update_tags(
     student_id: int,
     payload: TagsUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
 ):
     """更新标签云 (完整替换)"""
+    await require_psych_write_access(
+        db, current_user, student_id,
+        resource_type="psych_profile", action="write_tags",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
     profile = await svc.update_tags(db, current_user.school_id, student_id, payload.tags)
     if profile is None:
         raise HTTPException(status_code=404, detail="心理档案不存在")
@@ -359,9 +326,14 @@ async def api_update_tags(
 async def api_delete_profile(
     student_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
 ):
     """删除心理档案"""
+    await require_psych_write_access(
+        db, current_user, student_id,
+        resource_type="psych_profile", action="write_delete",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
     ok = await svc.delete_profile(db, current_user.school_id, student_id)
     if not ok:
         raise HTTPException(status_code=404, detail="心理档案不存在")
@@ -374,9 +346,14 @@ async def api_delete_profile(
 async def api_recompute_profile(
     student_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
 ):
     """重新聚合统计 — 从子表重新计算咨询/筛查/干预次数和最近活动时间"""
+    await require_psych_write_access(
+        db, current_user, student_id,
+        resource_type="psych_profile", action="write_recompute",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
     profile = await svc.recompute_profile_stats(db, current_user.school_id, student_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="操作失败")
@@ -392,9 +369,14 @@ async def api_recompute_profile(
 async def api_create_screening(
     payload: PsyScreeningCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_write),
+    current_user: User = Depends(get_current_user),
 ):
     """录入筛查快照 — 自动更新心理档案风险等级"""
+    await require_psych_write_access(
+        db, current_user, payload.student_id,
+        resource_type="psych_screening_record", action="write_create",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     record = await svc.create_screening(
         db, school_id=current_user.school_id,
         operator_id=current_user.id,
@@ -418,9 +400,16 @@ async def api_list_screenings(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
 ):
     """筛查快照列表 — S0-3 P0 修复：行级 scope 透传"""
+    level = await require_psych_list_access(
+        db, current_user,
+        resource_type="psych_screening_record", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
     from core.access import student_id_scope
     scope = await student_id_scope(db, current_user)
     records, total = await svc.list_screenings(
@@ -428,12 +417,6 @@ async def api_list_screenings(
         student_id=student_id, scale_name=scale_name,
         page=page, page_size=page_size,
         student_ids=scope,
-    )
-    # CF-02: 合法聚合读取写入审计（allowed）
-    await log_access(
-        db, user_id=current_user.id, school_id=current_user.school_id,
-        student_id=None, resource_type="psych_screening_record", resource_id="scope",
-        action="read_list", purpose=PURPOSE_SCREENING_REVIEW, result=ACCESS_ALLOWED,
     )
     return {
         "total": total, "page": page, "page_size": page_size,
@@ -497,7 +480,7 @@ async def api_comprehensive_risks(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
 ):
     """
     学业x心理双轨预警合成视图
@@ -510,14 +493,15 @@ async def api_comprehensive_risks(
 
     S0-3 P0 修复：通过 student_id_scope 注入本班/本年级学生白名单。
     """
+    level = await require_psych_list_access(
+        db, current_user,
+        resource_type="psych_nexus", action="read_list",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
     from core.access import student_id_scope
     scope = await student_id_scope(db, current_user)
-    # CF-02: 合法聚合读取写入审计（allowed）
-    await log_access(
-        db, user_id=current_user.id, school_id=current_user.school_id,
-        student_id=None, resource_type="psych_nexus", resource_id="scope",
-        action="read_list", purpose=PURPOSE_STUDENT_SUPPORT, result=ACCESS_ALLOWED,
-    )
     data = await svc.get_comprehensive_risks(
         db, school_id=current_user.school_id,
         co_trigger_only=co_trigger_only,
@@ -554,7 +538,7 @@ async def api_student_nexus(
 @router.get("/dashboard")
 async def api_dashboard(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
 ):
     """心理档案仪表盘聚合统计
 
@@ -564,14 +548,15 @@ async def api_dashboard(
       修法：通过 core.access.student_id_scope 注入本班/本年级学生白名单。
       MS_ADMIN/COUNSELOR scope=None → 不加限制；未绑定 → [] → 零可见（fail-close）。
     """
+    level = await require_psych_list_access(
+        db, current_user,
+        resource_type="psych_dashboard", action="read_list",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
     from core.access import student_id_scope
     scope = await student_id_scope(db, current_user)
-    # CF-02: 合法聚合读取写入审计（allowed）
-    await log_access(
-        db, user_id=current_user.id, school_id=current_user.school_id,
-        student_id=None, resource_type="psych_dashboard", resource_id="scope",
-        action="read_list", purpose=PURPOSE_STUDENT_SUPPORT, result=ACCESS_ALLOWED,
-    )
     data = await svc.get_dashboard_stats(
         db, current_user.school_id, student_ids=scope,
     )
@@ -582,14 +567,15 @@ async def api_dashboard(
 async def api_tag_suggestions(
     limit: int = Query(30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
 ):
     """标签建议 — 从现有档案中提取高频标签"""
-    tags = await svc.get_tag_suggestions(db, current_user.school_id, limit)
-    # CF-02: 合法读取写入审计（allowed）
-    await log_access(
-        db, user_id=current_user.id, school_id=current_user.school_id,
-        student_id=None, resource_type="psych_profile", resource_id="scope",
-        action="read_list", purpose=PURPOSE_STUDENT_SUPPORT, result=ACCESS_ALLOWED,
+    level = await require_psych_list_access(
+        db, current_user,
+        resource_type="psych_profile", action="read_list",
+        purpose=PURPOSE_STUDENT_SUPPORT,
     )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
+    tags = await svc.get_tag_suggestions(db, current_user.school_id, limit)
     return {"tags": tags}

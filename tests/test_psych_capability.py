@@ -176,6 +176,32 @@ def test_counselor_scope_fail_closed_when_module_missing():
     asyncio.run(run())
 
 
+async def _resolve_list(user, has_counselor):
+    db = mock.MagicMock()
+    with mock.patch.object(pa, "_has_counselor_assignment", new=mock.AsyncMock(return_value=has_counselor)):
+        return await pa.resolve_psych_list_access(db, user)
+
+
+def test_list_access_counselor_yields_detail():
+    assert asyncio.run(_resolve_list(_user(9, "teacher"), has_counselor=True)) == pa.PSY_DETAIL
+
+
+def test_list_access_class_teacher_yields_attention():
+    assert asyncio.run(_resolve_list(_user(3, "class_teacher", class_id=1), has_counselor=False)) == pa.PSY_ATTENTION
+
+
+def test_list_access_grade_leader_yields_attention():
+    assert asyncio.run(_resolve_list(_user(2, "grade_leader", grade_id=1), has_counselor=False)) == pa.PSY_ATTENTION
+
+
+def test_list_access_ms_admin_yields_deny():
+    assert asyncio.run(_resolve_list(_user(1, "ms_admin"), has_counselor=False)) == pa.PSY_DENY
+
+
+def test_list_access_teacher_yields_deny():
+    assert asyncio.run(_resolve_list(_user(8, "teacher", class_id=1), has_counselor=False)) == pa.PSY_DENY
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
