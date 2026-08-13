@@ -34,6 +34,11 @@ class DisciplineRecord(Base, SchoolMixin):
     created_at = Column(DateTime, default=get_local_now)
     resolved_at = Column(DateTime, nullable=True)
     incident_date = Column(Date, nullable=True, comment="事发日期")
+    source = Column(
+        String(20), nullable=False, default="legacy_unknown", server_default="legacy_unknown",
+        index=True,
+        comment="数据来源: teacher_manual/system_generated/import/device/test_demo/legacy_unknown",
+    )
 
     # 关系
     student = relationship("core.models.Student", lazy="selectin")
