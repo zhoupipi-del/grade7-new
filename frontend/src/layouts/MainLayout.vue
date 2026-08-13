@@ -14,7 +14,7 @@
       </div>
 
       <el-menu
-        v-if="visibleGroups.length > 0"
+        v-if="visibleGroups.length > 0 || workspaceMenuItems.length > 0"
         :default-active="activeMenu"
         :collapse="isCollapsed"
         :collapse-transition="false"
@@ -25,32 +25,55 @@
         text-color="#bfcbd9"
         active-text-color="#ffffff"
       >
-        <el-sub-menu
-          v-for="group in visibleGroups"
-          :key="group.title"
-          :index="group.title"
+        <!-- 工作台一级入口（≤5）：当前工作身份的常用功能 -->
+        <el-menu-item
+          v-for="ws in workspaceMenuItems"
+          :key="'ws-' + ws.index"
+          :index="ws.index"
+          class="workspace-item"
         >
+          <el-icon><component :is="ws.icon" /></el-icon>
           <template #title>
-            <el-icon><component :is="group.icon" /></el-icon>
-            <span>{{ group.title }}</span>
+            <span class="menu-title-text">{{ ws.title }}</span>
           </template>
+        </el-menu-item>
 
-          <el-menu-item
-            v-for="item in group.items"
-            :key="item.index"
-            :index="item.index"
+        <!-- 分隔：工作台入口 与 更多 之间 -->
+        <div v-if="workspaceMenuItems.length > 0 && visibleGroups.length > 0" class="menu-divider" />
+
+        <!-- 更多：全部旧功能菜单收进这里 -->
+        <el-sub-menu v-if="visibleGroups.length > 0" index="__more__">
+          <template #title>
+            <el-icon><MoreFilled /></el-icon>
+            <span>更多</span>
+          </template>
+          <el-sub-menu
+            v-for="group in visibleGroups"
+            :key="group.title"
+            :index="group.title"
           >
-            <el-icon><component :is="item.icon" /></el-icon>
             <template #title>
-              <span class="menu-title-text">{{ item.title }}</span>
-              <el-badge
-                v-if="item.index === '/approval-center' && pendingCount > 0"
-                :value="pendingCount"
-                :max="99"
-                class="approval-badge"
-              />
+              <el-icon><component :is="group.icon" /></el-icon>
+              <span>{{ group.title }}</span>
             </template>
-          </el-menu-item>
+
+            <el-menu-item
+              v-for="item in group.items"
+              :key="item.index"
+              :index="item.index"
+            >
+              <el-icon><component :is="item.icon" /></el-icon>
+              <template #title>
+                <span class="menu-title-text">{{ item.title }}</span>
+                <el-badge
+                  v-if="item.index === '/approval-center' && pendingCount > 0"
+                  :value="pendingCount"
+                  :max="99"
+                  class="approval-badge"
+                />
+              </template>
+            </el-menu-item>
+          </el-sub-menu>
         </el-sub-menu>
       </el-menu>
 
@@ -92,6 +115,36 @@
         <div class="header-right">
           <!-- 通知铃铛 — 未读 Badge + Popover 下拉 -->
           <NotificationBell @view-all="handleViewAllNotifications" />
+
+          <!-- 🎯 工作台身份切换（2026-08-13：一个老师可同时是班主任/年级组长/任课教师） -->
+          <el-dropdown
+            v-if="userStore.workstations.length > 1"
+            trigger="click"
+            class="workstation-switcher"
+            @command="switchIdentity"
+          >
+            <div class="workstation-current">
+              <el-icon><Switch /></el-icon>
+              <span class="workstation-title">{{ userStore.currentWorkstationTitle }}</span>
+              <el-icon class="dropdown-arrow"><ArrowDown /></el-icon>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  v-for="ws in userStore.workstations"
+                  :key="ws.identity"
+                  :command="ws.identity"
+                  :disabled="ws.identity === userStore.currentIdentity"
+                >
+                  {{ ws.title }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <div v-else-if="userStore.workstations.length === 1" class="workstation-current">
+            <el-icon><Switch /></el-icon>
+            <span class="workstation-title">{{ userStore.currentWorkstationTitle }}</span>
+          </div>
 
           <el-dropdown trigger="click" @command="handleCommand">
             <div class="user-info">
@@ -207,6 +260,88 @@ const phaseTagTypes: Record<string, string> = {
   junior: 'warning',
   senior: 'danger',
   integrated: 'primary',
+}
+
+// ─────────────────────────────────────────────────────────────
+// 工作台（Workstation，2026-08-13 周主任拍板：不同的人看到不同的 WINGS）
+// 每个工作身份 ≤5 个一级入口；几十个旧菜单收进"更多"
+// index 必须与 router/index.ts 的路由 path 一致（history base /app/ 自动拼）
+// ─────────────────────────────────────────────────────────────
+const WORKSPACE_MENUS: Record<string, Array<{ title: string; index: string; icon: string }>> = {
+  homeroom_teacher: [
+    { title: '今日待办', index: '/dashboard', icon: 'DataLine' },
+    { title: '本班动态', index: '/growth', icon: 'TrendCharts' },
+    { title: '学生关注', index: '/rdi-dashboard', icon: 'Warning' },
+    { title: '快速登记', index: '/behavior', icon: 'EditPen' },
+    { title: 'AI助手', index: '/ai-copilot', icon: 'MagicStick' },
+  ],
+  subject_teacher: [
+    { title: '我的课程', index: '/timetable', icon: 'Calendar' },
+    { title: '学科异常', index: '/error-funnel', icon: 'Warning' },
+    { title: '课堂登记', index: '/behavior', icon: 'EditPen' },
+    { title: '我的待办', index: '/approval-center', icon: 'List' },
+    { title: 'AI助手', index: '/ai-copilot', icon: 'MagicStick' },
+  ],
+  grade_leader: [
+    { title: '今日重点', index: '/dashboard', icon: 'DataLine' },
+    { title: '年级概览', index: '/grades/dashboard', icon: 'TrendCharts' },
+    { title: '班级对比', index: '/rdi-dashboard', icon: 'Histogram' },
+    { title: '待处理事项', index: '/approval-center', icon: 'List' },
+    { title: 'AI助手', index: '/ai-copilot', icon: 'MagicStick' },
+  ],
+  moral_admin: [
+    { title: '德育概览', index: '/dashboard', icon: 'DataLine' },
+    { title: '异常事件', index: '/rdi-dashboard', icon: 'Warning' },
+    { title: '年级比较', index: '/grades/dashboard', icon: 'Histogram' },
+    { title: '任务督办', index: '/approval-center', icon: 'List' },
+    { title: 'AI助手', index: '/ai-copilot', icon: 'MagicStick' },
+  ],
+  principal: [
+    { title: '今日学校', index: '/dashboard', icon: 'DataLine' },
+    { title: '治理趋势', index: '/reports', icon: 'TrendCharts' },
+    { title: '风险汇总', index: '/rdi-dashboard', icon: 'Warning' },
+    { title: '重点事项', index: '/approval-center', icon: 'List' },
+    { title: 'AI助手', index: '/ai-copilot', icon: 'MagicStick' },
+  ],
+  counselor: [
+    { title: '风险工作台', index: '/rdi-dashboard', icon: 'Warning' },
+    { title: '咨询记录', index: '/counselor-console', icon: 'ChatDotRound' },
+    { title: '干预任务', index: '/psych-screening/intervention', icon: 'List' },
+    { title: '复评提醒', index: '/psych-screening/portrait', icon: 'User' },
+    { title: '心理AI', index: '/ai-copilot', icon: 'MagicStick' },
+  ],
+  parent: [
+    { title: '孩子今日', index: '/parent', icon: 'HomeFilled' },
+    { title: '成长记录', index: '/growth', icon: 'TrendCharts' },
+    { title: '学校通知', index: '/notifications', icon: 'Bell' },
+    { title: '家校沟通', index: '/parent/feedback', icon: 'ChatDotRound' },
+  ],
+  student: [
+    { title: '我的成长', index: '/growth', icon: 'TrendCharts' },
+    { title: '我的任务', index: '/homework', icon: 'List' },
+    { title: '荣誉与进步', index: '/evaluation/positive-ranking', icon: 'Trophy' },
+    { title: '通知', index: '/notifications', icon: 'Bell' },
+  ],
+}
+
+const workspaceMenuItems = computed(() => {
+  const identity = userStore.currentIdentity
+  if (!identity) return []
+  return WORKSPACE_MENUS[identity] ?? []
+})
+
+async function loadWorkstations() {
+  try {
+    const { getWorkstations } = await import('@/api/workstation')
+    const res = await getWorkstations()
+    userStore.setWorkstations(res?.workstations ?? [], res?.default_identity ?? null)
+  } catch {
+    // 身份解析失败不阻断登录——退化为传统菜单
+  }
+}
+
+function switchIdentity(identity: string) {
+  userStore.switchIdentity(identity)
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -672,6 +807,7 @@ async function validateSession() {
 
 onMounted(() => {
   validateSession()
+  loadWorkstations()
   // Poll pending approval count every 60s
   fetchPendingCount()
   setInterval(fetchPendingCount, 60000)
@@ -749,6 +885,45 @@ onMounted(() => {
 /* 激活态：主色填充 + 白字 + 左侧白条 */
 .sidebar-menu :deep(.el-menu-item) {
   position: relative;
+}
+
+/* 🎯 工作台一级入口（比"更多"里的普通项更醒目） */
+.sidebar-menu :deep(.workspace-item) {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid transparent;
+}
+.sidebar-menu :deep(.workspace-item.is-active) {
+  border-left: 3px solid #fff;
+}
+
+/* 工作台入口 与 更多 之间的分隔线 */
+.menu-divider {
+  height: 1px;
+  margin: 6px 16px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 顶部工作台切换器 */
+.workstation-switcher {
+  margin-right: 12px;
+}
+.workstation-current {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: rgba(64, 158, 255, 0.1);
+  color: #409eff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.workstation-title {
+  font-weight: 500;
+}
+.workstation-switcher:hover .workstation-current {
+  background: rgba(64, 158, 255, 0.18);
 }
 .sidebar-menu :deep(.el-menu-item.is-active) {
   background: #1e6091 !important;

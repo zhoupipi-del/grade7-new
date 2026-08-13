@@ -23,9 +23,11 @@ from .schemas import (
     SchoolCreate,
     SchoolOut,
     UserOut,
+    WorkstationsOut,
 )
 from .services import AuthService, OrgService
 from .tenant_context import TenantContext, build_tenant_context
+from .workstation import resolve_workstations
 
 router = APIRouter(prefix="/api/v1", tags=["core"])
 security = HTTPBearer(auto_error=False)  # 非强制 → 允许 Cookie 降级
@@ -329,6 +331,24 @@ async def get_me(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     return await AuthService.get_user_out(db, current_user)
+
+
+@router.get("/me/workstations", response_model=WorkstationsOut)
+async def my_workstations(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    """
+    当前用户工作身份列表（周主任 2026-08-13 拍板：不同的人看到不同的 WINGS）。
+
+    身份来源：teacher_role_assignments 优先（岗位分配），users.role fallback。
+    一个老师可同时是班主任+年级组长+任课教师 → 前端据此渲染身份切换器
+    与 ≤5 个一级入口工作台，其余旧菜单收进"更多"。
+
+    ⚠️ 本端点只做"身份/菜单"识别，不改变任何后端权限——
+       心理/隐私/跨班/跨年级/跨校仍由现有 Scope/Policy 拦截。
+    """
+    result = await resolve_workstations(db, current_user)
+    return WorkstationsOut(**result)
 
 
 # ═══════════════════════════════════════════════════════════════

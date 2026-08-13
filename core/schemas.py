@@ -174,3 +174,21 @@ class PaginatedResponse(BaseModel):
 class MessageResponse(BaseModel):
     message: str
     detail: str | None = None
+
+
+# ── 工作台（Workstation，2026-08-13）──
+
+
+class WorkstationOut(BaseModel):
+    identity: str
+    label: str
+    scope_type: str
+    scope_id: Optional[int] = None
+    scope_name: str = ""
+    title: str = ""
+    is_default: bool = False
+
+
+class WorkstationsOut(BaseModel):
+    workstations: list[WorkstationOut]
+    default_identity: Optional[str] = None

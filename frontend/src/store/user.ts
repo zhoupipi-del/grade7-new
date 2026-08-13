@@ -1,22 +1,31 @@
 import { defineStore } from 'pinia'
 import type { UserInfo, UserRole } from '@/types'
+import type { Workstation } from '@/api/workstation'
 
 /**
- * User Store — JWT Token + RBAC Role Management
+ * User Store — JWT Token + RBAC Role Management + Workstation（工作台身份）
  *
  * Token is stored in LocalStorage via pinia-plugin-persistedstate.
  * school_id is NEVER manually passed in request params — it is encoded in the JWT.
+ *
+ * Workstation（2026-08-13 周主任拍板）：
+ *   一个老师可同时是班主任+年级组长+任课教师 → 登录后拉取 /me/workstations，
+ *   默认进入最主要工作台，可切换；菜单随身份收敛到 ≤5 个一级入口。
  */
 
 interface UserState {
   token: string
   userInfo: UserInfo | null
+  workstations: Workstation[]
+  currentIdentity: string | null
 }
 
 export const useUserStore = defineStore('user', {
   state: (): UserState => ({
     token: '',
     userInfo: null,
+    workstations: [],
+    currentIdentity: null,
   }),
 
   getters: {
@@ -30,6 +39,8 @@ export const useUserStore = defineStore('user', {
         MS_ADMIN: '德育处管理员',
         GRADE_LEADER: '年级组长',
         CLASS_TEACHER: '班主任',
+        TEACHER: '教师',
+        COUNSELOR: '心理教师',
         PARENT: '家长',
         STUDENT: '学生',
       }
@@ -46,6 +57,14 @@ export const useUserStore = defineStore('user', {
     /** 🎯 千人千面: 插件配置 */
     pluginConfig(): Record<string, any> | null {
       return this.userInfo?.plugin_config ?? null
+    },
+    /** 当前工作台身份对象（按 currentIdentity 查找） */
+    currentWorkstation(): Workstation | null {
+      return this.workstations.find((w) => w.identity === this.currentIdentity) ?? null
+    },
+    /** 当前工作台标题（如：2501班班主任） */
+    currentWorkstationTitle(): string {
+      return this.currentWorkstation?.title ?? this.currentRoleLabel
     },
   },
 
@@ -85,15 +104,34 @@ export const useUserStore = defineStore('user', {
       }
     },
 
+    /** 🎯 工作台：保存身份列表并选中默认身份 */
+    setWorkstations(workstations: Workstation[], defaultIdentity: string | null) {
+      this.workstations = workstations || []
+      if (defaultIdentity && this.workstations.some((w) => w.identity === defaultIdentity)) {
+        this.currentIdentity = defaultIdentity
+      } else {
+        this.currentIdentity = this.workstations[0]?.identity ?? null
+      }
+    },
+
+    /** 🎯 工作台：切换当前身份 */
+    switchIdentity(identity: string) {
+      if (this.workstations.some((w) => w.identity === identity)) {
+        this.currentIdentity = identity
+      }
+    },
+
     clearAuth() {
       this.token = ''
       this.userInfo = null
+      this.workstations = []
+      this.currentIdentity = null
     },
   },
 
   persist: {
     key: 'wings3_user',
     storage: localStorage,
-    paths: ['token', 'userInfo'],
+    paths: ['token', 'userInfo', 'workstations', 'currentIdentity'],
   },
 })
