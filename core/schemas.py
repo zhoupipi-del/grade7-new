@@ -4,6 +4,7 @@ core/schemas.py — Wings 3.0 核心 Pydantic 数据模型
 
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
