@@ -25,7 +25,7 @@ from .schemas import (
 )
 from .services import TaskService
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
+router = APIRouter(tags=["tasks"])  # prefix 由 module_loader 按 manifest 挂载（/api/v1/tasks）
 
 STAFF_ROLES = ["ms_admin", "grade_leader", "class_teacher", "teacher"]
 
