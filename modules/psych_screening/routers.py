@@ -82,6 +82,15 @@ from core.psych_capability import (
 router = APIRouter(tags=["psych-screening"])
 
 
+async def _get_class_name(db: AsyncSession, class_id) -> str | None:
+    """显式取班级名，避免 async 下 Student.class_ 懒加载触发 MissingGreenlet。"""
+    if not class_id:
+        return None
+    from core.models import Class as ClassModel
+    return await db.scalar(select(ClassModel.name).where(ClassModel.id == class_id))
+
+
+
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -196,7 +205,7 @@ async def list_surveys(
             id=s.id,
             student_id=s.student_id,
             student_name=stu.name if stu else None,
-            class_name=stu.class_.name if stu and stu.class_ else None,
+            class_name=await _get_class_name(db, stu.class_id) if stu else None,
             grade_name=None,
             survey_type=s.survey_type,
             total_score=s.total_score,
@@ -370,7 +379,7 @@ async def list_psych_assessments(
             id=a.id,
             student_id=a.student_id,
             student_name=stu.name if stu else None,
-            class_name=stu.class_.name if stu and stu.class_ else None,
+            class_name=await _get_class_name(db, stu.class_id) if stu else None,
             assessment_type=a.assessment_type,
             assessment_date=a.assessment_date,
             scale_name=a.scale_name,
@@ -429,7 +438,7 @@ async def create_psych_assessment(
         id=assessment.id,
         student_id=assessment.student_id,
         student_name=student.name,
-        class_name=student.class_.name if student.class_ else None,
+        class_name=await _get_class_name(db, student.class_id),
         assessment_type=assessment.assessment_type,
         assessment_date=assessment.assessment_date,
         scale_name=assessment.scale_name,
@@ -473,7 +482,7 @@ async def get_assessment_detail(
 
     stu = assessment.student
     student_name = stu.name if stu else None
-    class_name = stu.class_.name if stu and stu.class_ else None
+    class_name = await _get_class_name(db, stu.class_id) if stu else None
 
     # 答题明细
     answers_result = await db.execute(
@@ -570,7 +579,7 @@ async def update_psych_assessment(
         id=assessment.id,
         student_id=assessment.student_id,
         student_name=stu.name if stu else None,
-        class_name=stu.class_.name if stu and stu.class_ else None,
+        class_name=await _get_class_name(db, stu.class_id) if stu else None,
         assessment_type=assessment.assessment_type,
         assessment_date=assessment.assessment_date,
         scale_name=assessment.scale_name,
@@ -665,7 +674,7 @@ async def list_psych_interventions(
             id=r.id,
             student_id=r.student_id,
             student_name=stu.name if stu else None,
-            class_name=stu.class_.name if stu and stu.class_ else None,
+            class_name=await _get_class_name(db, stu.class_id) if stu else None,
             teacher_id=r.teacher_id,
             teacher_name=r.teacher.display_name if r.teacher else None,
             assessment_id=r.assessment_id,
@@ -725,7 +734,7 @@ async def create_psych_intervention(
         id=rec.id,
         student_id=rec.student_id,
         student_name=student.name,
-        class_name=student.class_.name if student.class_ else None,
+        class_name=await _get_class_name(db, student.class_id),
         teacher_id=rec.teacher_id,
         assessment_id=rec.assessment_id,
         mh_risk_before=rec.mh_risk_before,
@@ -776,7 +785,7 @@ async def followup_psych_intervention(
         id=rec.id,
         student_id=rec.student_id,
         student_name=stu.name if stu else None,
-        class_name=stu.class_.name if stu and stu.class_ else None,
+        class_name=await _get_class_name(db, stu.class_id) if stu else None,
         teacher_id=rec.teacher_id,
         assessment_id=rec.assessment_id,
         mh_risk_before=rec.mh_risk_before,
