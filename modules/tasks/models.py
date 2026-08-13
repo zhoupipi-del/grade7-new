@@ -20,7 +20,7 @@ modules/tasks/models.py — Task Center Foundation V1 数据模型
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, Boolean, Column, DateTime, String, Text,
+    BigInteger, Boolean, Column, DateTime, ForeignKey, String, Text,
 )
 from sqlalchemy.orm import relationship
 
@@ -118,7 +118,7 @@ class TaskAssignment(Base):
     __tablename__ = "task_assignments"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    task_id = Column(BigInteger, nullable=False)
+    task_id = Column(BigInteger, ForeignKey("tasks.id"), nullable=False)
     assignment_id = Column(BigInteger, nullable=True)          # 责任快照引用的 assignment 行
     owner_user_id = Column(BigInteger, nullable=True)
     owner_name_snapshot = Column(String(100), nullable=True)
@@ -142,7 +142,7 @@ class TaskEvent(Base):
     __tablename__ = "task_events"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    task_id = Column(BigInteger, nullable=False)
+    task_id = Column(BigInteger, ForeignKey("tasks.id"), nullable=False)
     event_type = Column(String(32), nullable=False)
     actor_user_id = Column(BigInteger, nullable=True)
     actor_name = Column(String(100), nullable=True)
@@ -158,7 +158,7 @@ class TaskEvidence(Base):
     __tablename__ = "task_evidence"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    task_id = Column(BigInteger, nullable=False)
+    task_id = Column(BigInteger, ForeignKey("tasks.id"), nullable=False)
     kind = Column(String(32), nullable=False, default="note")
     content = Column(Text, nullable=True)
     file_path = Column(String(500), nullable=True)
@@ -175,7 +175,7 @@ class TaskComment(Base):
     __tablename__ = "task_comments"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    task_id = Column(BigInteger, nullable=False)
+    task_id = Column(BigInteger, ForeignKey("tasks.id"), nullable=False)
     content = Column(Text, nullable=False)
     created_by = Column(BigInteger, nullable=False)
     created_at = Column(DateTime, default=get_local_now)
