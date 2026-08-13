@@ -479,6 +479,17 @@ const routes: RouteRecordRaw[] = [
         },
       },
       // ── 教师管理 ──
+      // 🎯 组织与责任配置（2026-08-13 路线③）
+      {
+        path: 'org-responsibility',
+        name: 'OrgResponsibility',
+        component: () => import('@/views/org/OrgResponsibility.vue'),
+        meta: {
+          title: '组织与责任配置',
+          icon: 'UserFilled',
+          roles: ['MS_ADMIN'] as UserRole[],
+        },
+      },
       {
         path: 'teacher-mgmt',
         name: 'TeacherManagement',

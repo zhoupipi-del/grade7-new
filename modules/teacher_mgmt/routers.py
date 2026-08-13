@@ -22,6 +22,7 @@ teacher_mgmt 路由层
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -232,6 +233,85 @@ async def list_roles(
         user_id=user_id, is_active=is_active,
     )
     return TeacherRoleAssignmentList(assignments=roles, total=len(roles))
+
+
+@router.get("/teachers/roles/all", response_model=TeacherRoleAssignmentList)
+async def list_all_roles(
+    is_active: Optional[bool] = Query(None, description="筛选启用/停用"),
+    role_type: Optional[str] = Query(None, description="筛选岗位: homeroom_teacher/grade_leader/subject_teacher"),
+    current_user: User = Depends(require_role("ms_admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    组织责任配置页（2026-08-13）：全校岗位分配全局列表（ms_admin 专属）。
+
+    返回全部 assignment 并附带教师名/scope 名/冲突标记，供配置页
+    维护「年级组长/班主任/任课教师/学科班级 Assignment」及冲突/缺失提示。
+    注意：路由顺序在 /teachers/{user_id} 之后定义，FastAPI 按声明顺序匹配，
+    但 /teachers/roles/all 与 /teachers/{user_id}/roles 路径形状不同，无冲突。
+    """
+    from sqlalchemy import select
+
+    from core.models import Class, Grade, User
+    from .models import TeacherRoleAssignment
+
+    now = datetime.now()
+    stmt = select(TeacherRoleAssignment).where(
+        TeacherRoleAssignment.school_id == current_user.school_id
+    )
+    if is_active is not None:
+        stmt = stmt.where(TeacherRoleAssignment.is_active.is_(is_active))
+    if role_type:
+        stmt = stmt.where(TeacherRoleAssignment.role_type == role_type)
+    stmt = stmt.order_by(TeacherRoleAssignment.role_type, TeacherRoleAssignment.scope_type,
+                         TeacherRoleAssignment.scope_id)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    # 关联信息：教师名 / scope 名 / 冲突标记
+    user_ids = {r.teacher_user_id for r in rows}
+    users = {}
+    if user_ids:
+        urows = (await db.execute(select(User.id, User.username).where(User.id.in_(user_ids)))).all()
+        users = {int(r[0]): r[1] for r in urows}
+    class_ids = {r.scope_id for r in rows if r.scope_type == "class" and r.scope_id}
+    grade_ids = {r.scope_id for r in rows if r.scope_type == "grade" and r.scope_id}
+    class_names, grade_names = {}, {}
+    if class_ids:
+        crows = (await db.execute(select(Class.id, Class.name).where(Class.id.in_(class_ids)))).all()
+        class_names = {int(r[0]): r[1] for r in crows}
+    if grade_ids:
+        grows = (await db.execute(select(Grade.id, Grade.name).where(Grade.id.in_(grade_ids)))).all()
+        grade_names = {int(r[0]): r[1] for r in grows}
+
+    # 冲突标记：同 (role_type, scope_type, scope_id) 多条
+    dup: dict[tuple, int] = {}
+    for r in rows:
+        k = (r.role_type, r.scope_type, r.scope_id)
+        dup[k] = dup.get(k, 0) + 1
+
+    out = []
+    for r in rows:
+        if r.scope_type == "class":
+            scope_name = class_names.get(r.scope_id, f"班{r.scope_id}")
+        elif r.scope_type == "grade":
+            scope_name = grade_names.get(r.scope_id, f"年级{r.scope_id}")
+        else:
+            scope_name = "全校"
+        out.append({
+            "id": r.id,
+            "teacher_user_id": r.teacher_user_id,
+            "teacher_name": users.get(r.teacher_user_id, str(r.teacher_user_id)),
+            "role_type": r.role_type,
+            "scope_type": r.scope_type,
+            "scope_id": r.scope_id,
+            "scope_name": scope_name,
+            "is_active": bool(r.is_active),
+            "assigned_at": r.assigned_at.isoformat() if r.assigned_at else None,
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            "notes": r.notes,
+            "conflict": dup.get((r.role_type, r.scope_type, r.scope_id), 0) > 1,
+        })
+    return TeacherRoleAssignmentList(assignments=out, total=len(out))
 
 
 @router.patch("/teachers/roles/{assignment_id}", response_model=TeacherRoleAssignmentOut)

@@ -293,6 +293,10 @@ class TeacherRoleAssignmentOut(BaseModel):
     assigned_by: Optional[int] = None
     notes: Optional[str] = None
     created_at: datetime
+    # 组织责任配置页扩展（2026-08-13）：教师名/scope 名/冲突标记
+    teacher_name: Optional[str] = None
+    scope_name: Optional[str] = None
+    conflict: Optional[bool] = False
 
     model_config = {"from_attributes": True}
 

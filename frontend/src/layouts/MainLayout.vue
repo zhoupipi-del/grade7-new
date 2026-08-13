@@ -399,6 +399,12 @@ const allMenuGroups: MenuGroup[] = [
         icon: 'Avatar',
         roles: ['MS_ADMIN', 'GRADE_LEADER'],
       },
+      {
+        index: '/org-responsibility',
+        title: '组织与责任配置',
+        icon: 'UserFilled',
+        roles: ['MS_ADMIN'],
+      },
     ],
   },
   // ── 2. 德育管理中心：违纪→处分→评价→风险→处方闭环 ──
