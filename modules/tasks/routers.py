@@ -12,7 +12,7 @@ modules/tasks/routers.py — Task Center Foundation V1 API
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.models import User
+from core.models import User, UserRole
 from core.routers import get_current_user, get_db, require_role
 from .schemas import (
     CommentCreate,
@@ -27,7 +27,12 @@ from .services import TaskService
 
 router = APIRouter(tags=["tasks"])  # prefix 由 module_loader 按 manifest 挂载（/api/v1/tasks）
 
-STAFF_ROLES = ["ms_admin", "grade_leader", "class_teacher", "teacher"]
+STAFF_ROLES = (
+    UserRole.MS_ADMIN,
+    UserRole.GRADE_LEADER,
+    UserRole.CLASS_TEACHER,
+    UserRole.TEACHER,
+)
 
 
 def _task_out(t: object) -> TaskOut:
