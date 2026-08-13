@@ -206,6 +206,7 @@ class WorkspaceScopeOut(BaseModel):
 
 class WorkspaceCardsOut(BaseModel):
     student_count: Optional[int] = None
+    class_count: Optional[int] = None
     trusted_behavior_count: Optional[int] = None
     trusted_praise_count: Optional[int] = None
     open_tasks: Optional[list] = None
