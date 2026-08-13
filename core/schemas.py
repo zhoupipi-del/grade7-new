@@ -233,3 +233,25 @@ class WorkspaceSummaryOut(BaseModel):
     attention: list[WorkspaceAttentionItem] = []
     class_compare: list[dict] = []
     data_quality: WorkspaceDataQualityOut
+
+
+# ── 责任归属解析（ResponsibleOwnerResolver V1，2026-08-13）──
+
+
+class ResolveConflictItem(BaseModel):
+    user_id: int
+    username: Optional[str] = None
+
+
+class ResolveOut(BaseModel):
+    resolved: bool
+    owner: Optional[int] = None
+    owner_name: Optional[str] = None
+    owner_role: Optional[str] = None
+    role_type: Optional[str] = None
+    scope_type: Optional[str] = None
+    scope_id: Optional[int] = None
+    source: str = "unresolved"
+    confidence: Optional[str] = None
+    unresolved_reason: Optional[str] = None
+    conflict: list[ResolveConflictItem] = []

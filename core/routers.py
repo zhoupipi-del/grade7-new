@@ -20,6 +20,7 @@ from .schemas import (
     LoginResponse,
     MessageResponse,
     PaginatedResponse,
+    ResolveOut,
     SchoolCreate,
     SchoolOut,
     UserOut,
@@ -29,6 +30,7 @@ from .schemas import (
 from .services import AuthService, OrgService
 from .tenant_context import TenantContext, build_tenant_context
 from .workstation import build_workspace_summary, resolve_workstations, _verify_workspace_scope
+from .resolver import resolve_owner
 
 router = APIRouter(prefix="/api/v1", tags=["core"])
 security = HTTPBearer(auto_error=False)  # 非强制 → 允许 Cookie 降级
@@ -377,6 +379,33 @@ async def my_workspace_summary(
     # 2) 组装 ViewModel
     result = await build_workspace_summary(db, current_user, identity, scope_type, scope_id)
     return WorkspaceSummaryOut(**result)
+
+
+@router.get("/responsibility/resolve", response_model=ResolveOut)
+async def resolve_responsibility(
+    student_id: int | None = Query(None, description="学生 ID（解析班主任/任课教师）"),
+    grade_id: int | None = Query(None, description="年级 ID（解析年级组长）"),
+    subject: str | None = Query(None, description="学科代码（配合 student_id 解析任课教师）"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    ResponsibleOwnerResolver V1（周主任 2026-08-13）— "这件事该由谁负责"。
+
+    铁律：
+      1. Assignment 是唯一责任事实源——缺失返回 unresolved（不猜人）
+      2. Resolver 只解析责任，不制造任务（无任何待办副作用）
+      3. 越权不能借本接口枚举其他年级/班级责任人（解析前验 scope）
+
+    用法：
+      ?student_id=X              → 该生班主任
+      ?student_id=X&subject=math → 该生数学任课教师
+      ?grade_id=G                → 该年级组长
+    """
+    if student_id is None and grade_id is None:
+        raise HTTPException(status_code=400, detail="必须提供 student_id 或 grade_id")
+    result = await resolve_owner(db, current_user, student_id=student_id, grade_id=grade_id, subject=subject)
+    return ResolveOut(**result)
 
 
 # ═══════════════════════════════════════════════════════════════
