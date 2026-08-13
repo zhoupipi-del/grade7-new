@@ -40,6 +40,7 @@ from .models import (
     TASK_STATUS_IN_PROGRESS,
     TASK_STATUS_OPEN,
     TASK_STATUS_REJECTED,
+    TASK_STATUS_TERMINAL,
     Task,
     TaskAssignment,
     TaskComment,
