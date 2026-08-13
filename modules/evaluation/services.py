@@ -731,8 +731,16 @@ class EvaluationService:
         await EvaluationService.recalculate_snapshot(db, student.id, student.school_id, record.semester)
         await db.commit()
 
-        # 重载指标名（async 场景 selectinload 已配置在模型关系上）
-        await db.refresh(record, attribute_names=["indicator"])
+        # commit 后 expire → 重新加载关系（async 场景不能用 lazy load）
+        from core.models import Student as _Student
+        record = await db.scalar(
+            select(EvaluationScore)
+            .options(
+                selectinload(EvaluationScore.student).selectinload(_Student.class_),
+                selectinload(EvaluationScore.indicator),
+            )
+            .where(EvaluationScore.id == record.id)
+        )
         return record, default_score
 
     @staticmethod
