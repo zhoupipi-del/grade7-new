@@ -292,6 +292,7 @@ class TaskService:
             detail=_json_dumps({"note": note, "from_status": old_status, "to_status": target}),
         ))
         await db.commit()
+        db.expire(task)  # identity map 里 selectinload 关系已加载不重查 -> 强制过期重载
         return await TaskService.get_task(db, user, task_id)
 
     @staticmethod
@@ -384,6 +385,7 @@ class TaskService:
             }),
         ))
         await db.commit()
+        db.expire(task)
         return await TaskService.get_task(db, user, task_id)
 
     # ─────────────────────────────────────────────────────
@@ -410,6 +412,7 @@ class TaskService:
             detail=_json_dumps({"kind": body.kind}),
         ))
         await db.commit()
+        db.expire(task)
         return await TaskService.get_task(db, user, task_id)
 
     @staticmethod
@@ -428,4 +431,5 @@ class TaskService:
             detail=_json_dumps({"content_len": len(body.content)}),
         ))
         await db.commit()
+        db.expire(task)
         return await TaskService.get_task(db, user, task_id)
