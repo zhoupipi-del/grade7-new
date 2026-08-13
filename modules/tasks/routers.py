@@ -85,7 +85,7 @@ def _event_out(e) -> dict:
     return {
         "id": e.id, "event_type": e.event_type,
         "actor_user_id": e.actor_user_id, "actor_name": e.actor_name,
-        "detail": e.detail, "created_at": e.created_at,
+        "detail": TaskService._json_loads(e.detail), "created_at": e.created_at,
     }
 
 
