@@ -309,6 +309,7 @@ async def list_all_roles(
             "assigned_at": r.assigned_at.isoformat() if r.assigned_at else None,
             "expires_at": r.expires_at.isoformat() if r.expires_at else None,
             "notes": r.notes,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
             "conflict": dup.get((r.role_type, r.scope_type, r.scope_id), 0) > 1,
         })
     return TeacherRoleAssignmentList(assignments=out, total=len(out))
