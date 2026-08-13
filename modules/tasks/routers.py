@@ -23,7 +23,7 @@ from .schemas import (
     TaskOut,
     TaskReassign,
 )
-from .services import TaskService
+from .services import TaskService, _json_loads
 
 router = APIRouter(tags=["tasks"])  # prefix 由 module_loader 按 manifest 挂载（/api/v1/tasks）
 
@@ -85,7 +85,7 @@ def _event_out(e) -> dict:
     return {
         "id": e.id, "event_type": e.event_type,
         "actor_user_id": e.actor_user_id, "actor_name": e.actor_name,
-        "detail": TaskService._json_loads(e.detail), "created_at": e.created_at,
+        "detail": _json_loads(e.detail), "created_at": e.created_at,
     }
 
 
