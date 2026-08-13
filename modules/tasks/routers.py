@@ -154,13 +154,12 @@ async def start_task(task_id: int, current_user: User = Depends(get_current_user
     return TaskActionOut(id=t.id, status=t.status, message="已开始处理")
 
 
-@router.post("/{task_id}/complete", response_model=TaskActionOut)
+@router.post("/{task_id}/complete", response_model=TaskOut)
 async def complete_task(task_id: int, note: str | None = Query(None, max_length=500),
                         current_user: User = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)):
     t = await TaskService.complete(db, current_user, task_id, note=note)
-    return TaskActionOut(id=t.id, status=t.status,
-                         message="已完成（closure_status=pending，待复核）")
+    return _task_out(t)  # 返回完整任务（含 closure_status=pending）
 
 
 @router.post("/{task_id}/reject", response_model=TaskActionOut)
