@@ -270,6 +270,8 @@ export function createBehaviorRecord(data: {
   incident_date: string
   location?: string
   points: number
+  /** 数据来源（Data Capture Audit 2026-08-13）：人工登记显式传 'teacher_manual'；不传则服务端记 legacy_unknown */
+  source?: 'teacher_manual' | 'system_generated' | 'import' | 'device' | 'test_demo' | 'legacy_unknown'
 }) {
   return request.post('/behavior/records', data)
 }

@@ -17,6 +17,14 @@ class DisciplineCreate(BaseModel):
     action_taken: Optional[str] = Field(None, max_length=500)
     points: int = Field(0, ge=0)
     incident_date: Optional[date] = None
+    # 数据来源（2026-08-13 Data Capture Audit）：
+    #   人工登记场景(前端 UI) → 显式传 "teacher_manual"
+    #   批量导入 / 规则引擎 / 测试 / 未知 → "import"/"system_generated"/"test_demo"/"legacy_unknown"
+    #   不传 → 服务端默认 "legacy_unknown"（来源无法证明，绝不默认伪装成人工数据）
+    source: Optional[str] = Field(
+        None,
+        description="数据来源: teacher_manual/system_generated/import/device/test_demo/legacy_unknown；不传默认 legacy_unknown",
+    )
 
 
 # ── QuickRegister（极简可信登记 · Step ⑦）──

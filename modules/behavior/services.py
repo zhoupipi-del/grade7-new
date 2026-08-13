@@ -91,6 +91,15 @@ class BehaviorService:
         if points <= 0 and data.get("type") in DEFAULT_POINTS:
             points = DEFAULT_POINTS[data["type"]]
 
+        # ── 数据来源（Data Capture Audit 2026-08-13）──
+        # 通用 create 入口不再无条件固定 teacher_manual，避免机器/批量/规则调用伪装人工。
+        #   显式传 source  → 白名单校验后使用
+        #   未传           → legacy_unknown（来源无法证明，安全默认）
+        #   人工登记(前端 UI) → 显式传 "teacher_manual"（QuickRegister 独立路径仍服务端锁死）
+        source = data.get("source") or "legacy_unknown"
+        if source not in ("teacher_manual", "system_generated", "import", "device", "test_demo", "legacy_unknown"):
+            raise ValueError(f"非法数据来源: {source}")
+
         record = DisciplineRecord(
             school_id=school_id,
             student_id=student.id,
@@ -105,7 +114,7 @@ class BehaviorService:
             verify_status="DRAFT",
             incident_date=data.get("incident_date") or date.today(),
             created_by=created_by,
-            source="teacher_manual",  # ★ 人工登记入口统一标记可信来源（系统自动升级记录不经此路径）
+            source=source,
         )
         db.add(record)
         await db.flush()
@@ -517,6 +526,9 @@ class BehaviorService:
                     verify_status="DRAFT",
                     incident_date=date.today(),
                     created_by=triggered_by,
+                    # Data Capture Audit 2026-08-13: 自动升级是确定的系统派生数据，
+                    # 必须标记 system_generated，不得落到 legacy_unknown（曾致语义混淆）
+                    source="system_generated",
                 )
                 db.add(escalate)
                 logger.warning(
