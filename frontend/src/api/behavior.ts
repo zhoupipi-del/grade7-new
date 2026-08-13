@@ -170,6 +170,70 @@ export interface EscalationCheck {
 }
 
 // ═════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
+// QuickRegister Types (/api/v1/behavior/quick-register) — Step ⑦
+// ═══════════════════════════════════════════════════
+
+export type QuickEventType =
+  | 'class_discipline' // 课堂纪律
+  | 'phone'            // 手机违规
+  | 'conflict'         // 同学冲突
+  | 'appearance'       // 仪容规范
+  | 'other'            // 其他
+
+export type QuickSeverity = 'light' | 'normal' | 'serious' // 一般 / 较重 / 严重
+
+/** 学生选择器条目（服务端按角色可见范围返回，绝不全校裸列） */
+export interface QuickRegisterStudent {
+  id: number
+  name: string
+  student_no: string | null
+  class_id: number
+  class_name: string | null
+  grade_id: number
+}
+
+/** 登记成功响应（携带本月可信次数） */
+export interface QuickRegisterResult {
+  id: number
+  student_id: number
+  student_name: string | null
+  class_name: string | null
+  event_type: string
+  category: string | null
+  type: BehaviorType
+  severity: QuickSeverity
+  description: string
+  points: number
+  incident_date: string | null
+  source: string
+  created_by: number
+  monthly_trusted_count: number
+}
+
+/** 程度 → 中文标签（用于成功页「课堂纪律 · 一般」） */
+export function quickSeverityLabel(sev: QuickSeverity): string {
+  const map: Record<QuickSeverity, string> = {
+    light: '一般',
+    normal: '较重',
+    serious: '严重',
+  }
+  return map[sev] || sev
+}
+
+/** 事件类型 → 中文标签 */
+export function quickEventLabel(ev: QuickEventType): string {
+  const map: Record<QuickEventType, string> = {
+    class_discipline: '课堂纪律',
+    phone: '手机违规',
+    conflict: '同学冲突',
+    appearance: '仪容规范',
+    other: '其他',
+  }
+  return map[ev] || ev
+}
+
+// ═══════════════════════════════════════════════════
 // Behavior API Functions (/api/v1/behavior/*)
 // ═════════════════════════════════════════════════════════════════
 
@@ -208,6 +272,27 @@ export function createBehaviorRecord(data: {
   points: number
 }) {
   return request.post('/behavior/records', data)
+}
+
+// ─── QuickRegister（Step ⑦ 极简可信登记）──
+
+/** GET /behavior/quick-register/students — 按角色可见范围返回可选学生 */
+export function getQuickRegisterStudents(params?: {
+  grade_id?: number
+  class_id?: number
+  keyword?: string
+}) {
+  return request.get<any, QuickRegisterStudent[]>('/behavior/quick-register/students', { params })
+}
+
+/** POST /behavior/quick-register — 极简可信登记（服务端锁死 source/created_by/points） */
+export function quickRegister(data: {
+  student_id: number
+  event_type: QuickEventType
+  severity: QuickSeverity
+  description?: string
+}) {
+  return request.post<any, QuickRegisterResult>('/behavior/quick-register', data)
 }
 
 /** POST /behavior/records/{id}/resolve — mark violation as resolved */

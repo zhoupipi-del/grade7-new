@@ -19,6 +19,56 @@ class DisciplineCreate(BaseModel):
     incident_date: Optional[date] = None
 
 
+# ── QuickRegister（极简可信登记 · Step ⑦）──
+# 前端只传「学生 + 事件类型 + 程度 + 备注」，其余一律服务端锁死：
+#   school_id / created_by / class_id / grade_id 由服务端从 student 反查
+#   source = teacher_manual（前端不可传）
+#   type / category / points 由服务端规则计算（前端不可伪造）
+# 注：迟到不放进事件类型，已有 attendance 模块，避免重复登记同一事实。
+
+class QuickRegisterCreate(BaseModel):
+    student_id: int = Field(..., description="学生 ID（必须从可见范围内选择）")
+    event_type: str = Field(
+        ...,
+        description="事件类型: class_discipline/phone/conflict/appearance/other",
+    )
+    severity: str = Field(
+        ...,
+        description="程度: light(一般)/normal(较重)/serious(严重)",
+    )
+    description: Optional[str] = Field(None, max_length=500, description="备注（可选）")
+
+
+class QuickRegisterStudentOut(BaseModel):
+    id: int
+    name: str
+    student_no: Optional[str] = None
+    class_id: int
+    class_name: Optional[str] = None
+    grade_id: int
+
+    model_config = {"from_attributes": True}
+
+
+class QuickRegisterOut(BaseModel):
+    id: int
+    student_id: int
+    student_name: Optional[str] = None
+    class_name: Optional[str] = None
+    event_type: str
+    category: Optional[str] = None
+    type: str
+    severity: str
+    description: str
+    points: int
+    incident_date: Optional[date] = None
+    source: str
+    created_by: int
+    monthly_trusted_count: int
+
+    model_config = {"from_attributes": True}
+
+
 class DisciplineUpdate(BaseModel):
     type: Optional[str] = None
     category: Optional[str] = None

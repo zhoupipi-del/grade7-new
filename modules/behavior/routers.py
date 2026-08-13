@@ -18,7 +18,7 @@ modules/behavior/routers.py — 违纪行为管理 API
 from datetime import date
 
 from core.access import get_student_or_403, student_id_scope
-from core.models import User, UserRole
+from core.models import Student, User, UserRole
 from core.routers import (
     get_current_user,
     get_db,
@@ -35,6 +35,9 @@ from .schemas import (
     DisciplineCreate,
     DisciplineOut,
     DisciplineUpdate,
+    QuickRegisterCreate,
+    QuickRegisterOut,
+    QuickRegisterStudentOut,
 )
 from .services import BehaviorService
 
@@ -73,6 +76,9 @@ async def create_discipline(
     ),
 ):
     """创建违纪记录 — 自动触发累计扣分升级检查"""
+    # P0 行级归属（2026-08-13 Step ⑦）：班主任/年级组长只能登记
+    # 自己可见范围内的学生；跨校→404，本校越权→403。杜绝全校裸列登记。
+    await get_student_or_403(db, current_user, body.student_id)
     try:
         record = await BehaviorService.create_record(
             db,
@@ -84,6 +90,88 @@ async def create_discipline(
         return _format_record(record)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════
+# QuickRegister（Step ⑦ 极简可信登记）
+# ═══════════════════════════════════════════════════
+
+
+@router.get("/quick-register/students", response_model=list[QuickRegisterStudentOut])
+async def quick_register_students(
+    grade_id: int | None = None,
+    class_id: int | None = None,
+    keyword: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    QuickRegister 学生选择器 —— 严格按角色可见范围返回，绝不全校裸列。
+      ms_admin / counselor 等全校角色 → 本校全部（可再按 grade/class 过滤）
+      grade_leader                → 授权年级学生
+      class_teacher              → 负责班级学生
+    零可见（未绑定/无授权）      → 返回空列表（fail-closed）
+    """
+    scope = await student_id_scope(db, current_user)
+    conditions = [Student.school_id == current_user.school_id]
+    if scope is not None:
+        if not scope:
+            return []  # 零可见，直接返回空（不退化成全校）
+        conditions.append(Student.id.in_(scope))
+    if grade_id:
+        conditions.append(Student.grade_id == grade_id)
+    if class_id:
+        conditions.append(Student.class_id == class_id)
+    if keyword:
+        conditions.append(Student.name.like(f"%{keyword}%"))
+
+    stmt = (
+        select(Student)
+        .options(selectinload(Student.class_))
+        .where(*conditions)
+        .order_by(Student.class_id, Student.student_no)
+        .limit(2000)
+    )
+    students = (await db.execute(stmt)).scalars().all()
+    return [_fmt_quick_student(s) for s in students]
+
+
+@router.post("/quick-register", response_model=QuickRegisterOut, status_code=201)
+async def quick_register(
+    body: QuickRegisterCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _guard: User = Depends(
+        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
+    ),
+):
+    """
+    极简可信登记（Step ⑦）。
+
+    服务端锁死：
+      school_id      = 当前用户（外层 get_student_or_403 已确认 student 同校）
+      created_by     = 当前用户
+      class/grade    = 从 student 反查
+      source         = teacher_manual（前端不可传）
+      incident_date  = 当前时间
+      type/points    = 由 severity 服务端规则计算
+    权限：班主任只能登记自己班级学生；年级组长只能登记授权年级；管理员可切 Scope。
+    """
+    # 1) 学生归属校验（跨校→404；本校越权→403）
+    student = await get_student_or_403(db, current_user, body.student_id)
+    try:
+        record, monthly = await BehaviorService.quick_register(
+            db,
+            current_user.school_id,
+            student,
+            current_user.id,
+            body.event_type,
+            body.severity,
+            body.description,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _format_quick(record, monthly)
 
 
 @router.get("/records")
@@ -355,6 +443,53 @@ def _format_record(r) -> dict:
         "creator_name": creator_name,
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+    }
+
+
+def _fmt_quick_student(s) -> dict:
+    """QuickRegister 学生选择器输出，容错 class 关系未加载"""
+    try:
+        class_name = s.class_.name if s.class_ else None
+    except Exception:
+        class_name = None
+    return {
+        "id": s.id,
+        "name": s.name,
+        "student_no": s.student_no,
+        "class_id": s.class_id,
+        "class_name": class_name,
+        "grade_id": s.grade_id,
+    }
+
+
+def _format_quick(r, monthly: int) -> dict:
+    """QuickRegister 成功响应 —— 携带本月可信次数与展示字段"""
+    try:
+        student_name = r.student.name if r.student else None
+        class_name = (
+            r.student.class_.name if r.student and getattr(r.student, "class_", None) else None
+        )
+    except Exception:
+        student_name = class_name = None
+    # 程度标签由 type 反推，供前端直接展示「课堂纪律 · 一般」
+    severity_label = {"warning": "light", "minor": "normal", "major": "serious", "serious": "serious"}.get(
+        r.type, "normal"
+    )
+    return {
+        "id": r.id,
+        "student_id": r.student_id,
+        "student_name": student_name,
+        "class_name": class_name,
+        "event_type": r.category or "",
+        "category": r.category,
+        "type": r.type,
+        "severity": severity_label,
+        "description": r.description,
+        "points": r.points,
+        "incident_date": r.incident_date.isoformat() if r.incident_date else None,
+        "source": r.source,
+        "created_by": r.created_by,
+        "monthly_trusted_count": monthly,
     }
 
 

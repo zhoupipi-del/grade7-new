@@ -31,7 +31,9 @@
                 <el-icon><Warning /></el-icon>
                 违纪记录名册
               </span>
-              <el-button type="primary" size="small" :icon="Plus" plain>登记</el-button>
+              <el-button type="primary" size="small" :icon="Plus" plain @click="openQuickRegister">
+                快速登记
+              </el-button>
             </div>
           </template>
 
@@ -375,6 +377,106 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- QuickRegister 极简可信登记对话框          -->
+    <!-- ═══════════════════════════════════════ -->
+    <el-dialog
+      v-model="qrVisible"
+      title="快速登记"
+      width="440px"
+      :close-on-click-modal="false"
+      @closed="onQrClosed"
+    >
+      <!-- 表单步骤 -->
+      <div v-if="qrStep === 'form'" v-loading="qrStudentsLoading">
+        <!-- 学生（按角色可见范围，绝不全校裸列） -->
+        <div class="qr-field">
+          <label class="qr-label">选择学生</label>
+          <el-select
+            v-model="qrStudentId"
+            filterable
+            placeholder="搜索并选择学生"
+            style="width: 100%"
+            :disabled="qrSubmitting"
+          >
+            <el-option
+              v-for="s in qrStudents"
+              :key="s.id"
+              :value="s.id"
+              :label="`${s.name}（${s.class_name || '—'}）`"
+            >
+              <span>{{ s.name }}</span>
+              <span style="float: right; color: #909399; font-size: 12px">{{ s.class_name }}</span>
+            </el-option>
+          </el-select>
+          <div v-if="!qrStudentsLoading && qrStudents.length === 0" class="qr-hint">
+            当前账号无可登记的学生范围（请联系德育处配置班级/年级授权）
+          </div>
+        </div>
+
+        <!-- 事件类型 -->
+        <div class="qr-field">
+          <label class="qr-label">事件类型</label>
+          <el-radio-group v-model="qrEventType" :disabled="qrSubmitting">
+            <el-radio-button value="class_discipline">课堂纪律</el-radio-button>
+            <el-radio-button value="phone">手机违规</el-radio-button>
+            <el-radio-button value="conflict">同学冲突</el-radio-button>
+            <el-radio-button value="appearance">仪容规范</el-radio-button>
+            <el-radio-button value="other">其他</el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <!-- 程度 -->
+        <div class="qr-field">
+          <label class="qr-label">程度</label>
+          <el-radio-group v-model="qrSeverity" :disabled="qrSubmitting">
+            <el-radio-button value="light">一般</el-radio-button>
+            <el-radio-button value="normal">较重</el-radio-button>
+            <el-radio-button value="serious">严重</el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <!-- 备注 -->
+        <div class="qr-field">
+          <label class="qr-label">备注（可选）</label>
+          <el-input
+            v-model="qrDescription"
+            type="textarea"
+            :rows="2"
+            maxlength="500"
+            show-word-limit
+            placeholder="补充情况说明（选填）"
+            :disabled="qrSubmitting"
+          />
+        </div>
+      </div>
+
+      <!-- 成功步骤 -->
+      <div v-else-if="qrStep === 'success' && qrResult" class="qr-success">
+        <el-icon class="qr-check"><CircleCheckFilled /></el-icon>
+        <div class="qr-success-title">登记成功</div>
+        <div class="qr-success-student">{{ qrResult.student_name }}</div>
+        <div class="qr-success-detail">
+          {{ qrResult.category }} · {{ quickSeverityLabel(qrResult.severity) }}
+        </div>
+        <div class="qr-success-count">
+          本月可信行为记录：<b>{{ qrResult.monthly_trusted_count }}</b>
+        </div>
+      </div>
+
+      <template #footer>
+        <div v-if="qrStep === 'form'">
+          <el-button @click="qrVisible = false" :disabled="qrSubmitting">取消</el-button>
+          <el-button type="primary" @click="submitQuickRegister" :loading="qrSubmitting">
+            提交登记
+          </el-button>
+        </div>
+        <div v-else-if="qrStep === 'success'">
+          <el-button type="primary" @click="continueQuickRegister">继续登记</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -389,6 +491,7 @@ import {
   Aim,
   DataAnalysis,
   CircleCheck,
+  CircleCheckFilled,
   DocumentRemove,
   FolderOpened,
   ChatLineRound,
@@ -398,6 +501,9 @@ import {
   fetchSanctionsWithFallback,
   fetchDraftsWithFallback,
   fetchAppealsWithFallback,
+  getQuickRegisterStudents,
+  quickRegister,
+  quickSeverityLabel,
   behaviorTypeLabel,
   behaviorTypeTag,
   behaviorStatusLabel,
@@ -415,6 +521,10 @@ import {
   type DisciplineAppeal,
   type BehaviorType,
   type DisciplineStatus,
+  type QuickRegisterStudent,
+  type QuickRegisterResult,
+  type QuickEventType,
+  type QuickSeverity,
 } from '@/api/behavior'
 
 // ── State ──
@@ -428,6 +538,18 @@ const behaviorAppeals = ref<BehaviorAppeal[]>([])
 const disciplineAppeals = ref<DisciplineAppeal[]>([])
 
 const selectedRecord = ref<BehaviorRecord | null>(null)
+
+// ── QuickRegister（Step ⑦ 极简可信登记）──
+const qrVisible = ref(false)
+const qrStep = ref<'form' | 'success'>('form')
+const qrStudentsLoading = ref(false)
+const qrSubmitting = ref(false)
+const qrStudents = ref<QuickRegisterStudent[]>([])
+const qrStudentId = ref<number | null>(null)
+const qrEventType = ref<QuickEventType>('class_discipline')
+const qrSeverity = ref<QuickSeverity>('light')
+const qrDescription = ref('')
+const qrResult = ref<QuickRegisterResult | null>(null)
 
 // ── State Machine Steps ──
 const stateSteps = [
@@ -521,6 +643,67 @@ function handleResolve() {
 
 function handleSubmitDraft(draft: SanctionDraft) {
   ElMessage.success(`草稿 #${draft.id} (${draft.student_name}) 已推背提交为正式处分`)
+}
+
+// ── QuickRegister ──
+async function openQuickRegister() {
+  qrStep.value = 'form'
+  qrStudentId.value = null
+  qrEventType.value = 'class_discipline'
+  qrSeverity.value = 'light'
+  qrDescription.value = ''
+  qrResult.value = null
+  qrVisible.value = true
+  qrStudentsLoading.value = true
+  try {
+    const res = await getQuickRegisterStudents()
+    qrStudents.value = res || []
+  } catch {
+    qrStudents.value = []
+    ElMessage.error('加载可登记学生失败')
+  } finally {
+    qrStudentsLoading.value = false
+  }
+}
+
+async function submitQuickRegister() {
+  if (!qrStudentId.value) {
+    ElMessage.warning('请先选择学生')
+    return
+  }
+  qrSubmitting.value = true
+  try {
+    const res = await quickRegister({
+      student_id: qrStudentId.value,
+      event_type: qrEventType.value,
+      severity: qrSeverity.value,
+      description: qrDescription.value || undefined,
+    })
+    qrResult.value = res
+    qrStep.value = 'success'
+    // 刷新左侧名册，让新登记立即可见
+    loadAllData()
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail || '登记失败，请重试'
+    ElMessage.error(detail)
+  } finally {
+    qrSubmitting.value = false
+  }
+}
+
+function continueQuickRegister() {
+  qrStep.value = 'form'
+  qrStudentId.value = null
+  qrEventType.value = 'class_discipline'
+  qrSeverity.value = 'light'
+  qrDescription.value = ''
+  qrResult.value = null
+}
+
+function onQrClosed() {
+  // 关闭后复位，下次打开是干净表单
+  qrStep.value = 'form'
+  qrResult.value = null
 }
 
 // ── Lifecycle ──
@@ -1032,5 +1215,68 @@ onMounted(() => {
     max-height: 500px;
     margin-bottom: 12px;
   }
+}
+/* ── QuickRegister Dialog ── */
+.qr-field {
+  margin-bottom: 16px;
+}
+
+.qr-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 8px;
+}
+
+.qr-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #e6a23c;
+  line-height: 1.5;
+}
+
+.qr-success {
+  text-align: center;
+  padding: 16px 0 8px;
+}
+
+.qr-check {
+  font-size: 56px;
+  color: #67c23a;
+}
+
+.qr-success-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #303133;
+  margin-top: 8px;
+}
+
+.qr-success-student {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f2c3f;
+  margin-top: 10px;
+}
+
+.qr-success-detail {
+  font-size: 14px;
+  color: #606266;
+  margin-top: 6px;
+}
+
+.qr-success-count {
+  margin-top: 14px;
+  padding: 10px;
+  background: #f0f9eb;
+  border-radius: 6px;
+  color: #67c23a;
+  font-size: 14px;
+}
+
+.qr-success-count b {
+  font-size: 18px;
+  font-family: 'Courier New', Courier, monospace;
 }
 </style>

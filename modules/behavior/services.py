@@ -41,6 +41,22 @@ ESCALATION_THRESHOLDS = [
 # 违纪扣分值映射
 DEFAULT_POINTS = {"warning": 1, "minor": 3, "major": 10, "serious": 20}
 
+# ── QuickRegister（Step ⑦ 极简可信登记）映射 ──
+# 事件类型 → 违纪类别（迟到不放进来，已有 attendance 模块）
+QUICK_EVENT_CATEGORY = {
+    "class_discipline": "课堂纪律",
+    "phone": "手机违规",
+    "conflict": "同学冲突",
+    "appearance": "仪容规范",
+    "other": "其他",
+}
+# 程度 → (type, points)；severe 封顶 major(10)，不触发"严重"处分滑窗，保持轻量
+QUICK_SEVERITY_MAP = {
+    "light": ("warning", 1),
+    "normal": ("minor", 3),
+    "serious": ("major", 10),
+}
+
 
 def get_local_now() -> datetime:
     return datetime.now(timezone(timedelta(hours=8))).replace(tzinfo=None)
@@ -89,6 +105,7 @@ class BehaviorService:
             verify_status="DRAFT",
             incident_date=data.get("incident_date") or date.today(),
             created_by=created_by,
+            source="teacher_manual",  # ★ 人工登记入口统一标记可信来源（系统自动升级记录不经此路径）
         )
         db.add(record)
         await db.flush()
@@ -266,6 +283,95 @@ class BehaviorService:
             .where(DisciplineRecord.id == record.id)
         )
         return record
+
+    # ═══ QuickRegister（Step ⑦ 极简可信登记）═══
+
+    @staticmethod
+    async def quick_register(
+        db: AsyncSession,
+        school_id: int,
+        student: Student,
+        created_by: int,
+        event_type: str,
+        severity: str,
+        description: str | None,
+    ) -> tuple[DisciplineRecord, int]:
+        """
+        极简可信登记 —— 全部服务端锁死，前端只传 student_id/event_type/severity/description。
+
+        锁死项：
+          school_id      = 当前用户（从 student 反查其 school 一致性已在外层校验）
+          created_by     = 当前用户
+          class_id/grade = 从 student 反查（绝不信任前端）
+          source         = "teacher_manual"（前端无法伪造）
+          incident_date  = 当前日期
+          type/points    = 由 severity 服务端规则计算
+        不走 PolicyEngine 审批/扣分 Hook，保持 15 秒轻量登记路径。
+        """
+        if event_type not in QUICK_EVENT_CATEGORY:
+            raise ValueError(f"不支持的事件类型: {event_type}")
+        if severity not in QUICK_SEVERITY_MAP:
+            raise ValueError(f"不支持的程度: {severity}")
+
+        category = QUICK_EVENT_CATEGORY[event_type]
+        type_, points = QUICK_SEVERITY_MAP[severity]
+
+        record = DisciplineRecord(
+            school_id=school_id,
+            student_id=student.id,
+            class_id=student.class_id,
+            grade_id=student.grade_id,
+            type=type_,
+            category=category,
+            description=description or category,
+            action_taken=None,
+            points=points,
+            status="active",
+            verify_status="VERIFIED",  # 老师主动登记即已核实（区别于系统自动 DRAFT）
+            incident_date=date.today(),
+            created_by=created_by,
+            source="teacher_manual",  # ★ 服务端写死，前端不可传
+        )
+        db.add(record)
+        await db.flush()
+
+        # 核心行为特性：累计扣分自动升级检查（轻量，仅生成系统自动升级记录）
+        await BehaviorService._check_escalation(db, student, created_by)
+
+        await db.commit()
+
+        # 重新加载关系（async 不能用 refresh + lazy load）
+        record = await db.scalar(
+            select(DisciplineRecord)
+            .options(
+                selectinload(DisciplineRecord.student).selectinload(Student.class_),
+            )
+            .where(DisciplineRecord.id == record.id)
+        )
+        monthly = await BehaviorService.count_monthly_trusted(db, school_id, student.id)
+        return record, monthly
+
+    @staticmethod
+    async def count_monthly_trusted(
+        db: AsyncSession, school_id: int, student_id: int
+    ) -> int:
+        """
+        本月「可信」行为记录数 —— 只统计 source=teacher_manual。
+        绝不把 legacy_unknown / test_demo / system_generated 算进去。
+        """
+        today = date.today()
+        start_of_month = today.replace(day=1)
+        cnt = await db.scalar(
+            select(func.count())
+            .select_from(DisciplineRecord)
+            .where(
+                DisciplineRecord.school_id == school_id,
+                DisciplineRecord.student_id == student_id,
+                DisciplineRecord.source == "teacher_manual",
+                DisciplineRecord.incident_date >= start_of_month,
+            )
+        )
+        return int(cnt or 0)
 
     @staticmethod
     async def get_record(db: AsyncSession, record_id: int) -> DisciplineRecord | None:
