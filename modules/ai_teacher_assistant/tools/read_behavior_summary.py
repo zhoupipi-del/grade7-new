@@ -150,13 +150,18 @@ class _BehaviorAggregator:
         by_class = [{"class_id": int(r[0]), "class_name": r[1], "count": int(r[2])} for r in class_rows]
 
         # Active sanctions
+        # Active sanctions —— 独立 params：_build_where 用 elif 只放 cid/gid 之一，
+        # 而 sanctions 段是独立 if（grade+class 同时传时会引用缺失的 :gid → 500）
         sanc_conds = "s.school_id = :sid AND s.status = 'ACTIVE'"
+        sanc_params = {"sid": self.school_id}
         if grade_id is not None:
             sanc_conds += " AND s.grade_id = :gid"
+            sanc_params["gid"] = grade_id
         if class_id is not None:
             sanc_conds += " AND s.class_id = :cid"
+            sanc_params["cid"] = class_id
         sanc_sql = f"SELECT COUNT(1) FROM discipline_sanctions s WHERE {sanc_conds}"
-        sanctions_active = (await self.db.execute(text(sanc_sql), params)).scalar_one_or_none() or 0
+        sanctions_active = (await self.db.execute(text(sanc_sql), sanc_params)).scalar_one_or_none() or 0
 
         total_records = sum(r["count"] for r in by_type)
 
