@@ -26,7 +26,9 @@ from core.routers import (
     verify_entity_ownership,
 )
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from .schemas import (
     AppealCreate,
