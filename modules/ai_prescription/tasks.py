@@ -75,6 +75,14 @@ LLM_API_URL = os.environ.get(
 )
 LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
 
+# ─────────────────────────────────────────────
+# ⑤.5 P0-0 合规止血：外部心理 AI 调用总开关
+# 默认 False → 旧 ai_prescription 链路不调用任何外部 Provider，
+# 仅运行确定性 RDI 降级，杜绝姓名/心理量表/危机元数据/电话/身份证/地址外发。
+# 完整 AI Privacy Gateway (CF-03) 上线后，由 Gateway 接管此开关的语义。
+# ─────────────────────────────────────────────
+EXTERNAL_PSYCH_AI_ENABLED = os.environ.get("EXTERNAL_PSYCH_AI_ENABLED", "false").lower() == "true"
+
 # 熔断器：连续失败 3 次 → 冷却 60s
 _circuit_failures = 0
 _circuit_cooldown_until = 0.0
@@ -88,6 +96,15 @@ def _call_deepseek(prompt: str, system_prompt: str, timeout: int = 60) -> dict:
     返回解析后的 JSON dict
     """
     global _circuit_failures, _circuit_cooldown_until
+
+    # ⑤.5 P0-0：外部心理 AI 总开关（默认禁用）
+    # 命中即返回 None，绝不向任何外部 Provider 发送数据（含姓名/心理/电话/身份证/地址）
+    if not EXTERNAL_PSYCH_AI_ENABLED:
+        logger.warning(
+            "[AI-Tasks] 外部心理 AI 已按 ⑤.5 合规要求停用，"
+            "_call_deepseek 返回 None，调用方将走确定性降级"
+        )
+        return None
 
     # 熔断器检查
     if _circuit_failures >= _CIRCUIT_THRESHOLD:
@@ -224,6 +241,9 @@ def generate_class_diagnosis(
         # 调用 DeepSeek
         logger.info("[AI-Tasks] 开始生成班级诊断：class_id=%s", context["class"]["id"])
         result = _call_deepseek(prompt, SYSTEM_PROMPT_CLASS)
+        if result is None:
+            # ⑤.5 P0-0：外部 AI 停用 → 确定性降级（无 PII / 无心理明细 / 不调外部）
+            result = _deterministic_class_result(context)
 
         # 解析结果
         risk_level_str = result.get("risk_level", "LOW")
@@ -313,6 +333,9 @@ def generate_student_intervention(
         # 调用 DeepSeek
         logger.info("[AI-Tasks] 开始生成学生干预处方 (V3)：student_id=%s", context["student"]["id"])
         result = _call_deepseek(prompt, SYSTEM_PROMPT_STUDENT)
+        if result is None:
+            # ⑤.5 P0-0：外部 AI 停用 → 确定性降级（仅 RDI 聚合 / 不含姓名/心理/电话/身份证/地址）
+            result = _deterministic_student_result(context)
 
         # 解析结果 — V2 三段式
         risk_level_str = result.get("risk_level", "LOW")
@@ -394,6 +417,95 @@ def generate_student_intervention(
         finally:
             db.close()
         return {"status": "FAILURE", "error": str(exc)}
+
+
+# ─────────────────────────────────────────────
+# ⑤.5 P0-0 确定性降级（外部 AI 停用时）
+# 仅基于系统聚合数据 / RDI 四维推导，绝不引用姓名、心理量表明细、
+# 咨询/危机元数据、电话、身份证、地址等敏感字段，且不调用任何外部 Provider。
+# ─────────────────────────────────────────────
+
+def _deterministic_class_result(context: dict) -> dict:
+    """班级诊断确定性降级：无 PII、无心理明细、不调外部模型。"""
+    attendance = context.get("attendance", {})
+    behavior = context.get("behavior", {})
+    incidents = behavior.get("total_incidents", 0)
+    attendance_rate = attendance.get("attendance_rate", "未知")
+
+    risk = "LOW"
+    if isinstance(attendance_rate, (int, float)):
+        if attendance_rate < 0.85 or incidents >= 10:
+            risk = "HIGH"
+        elif attendance_rate < 0.95 or incidents >= 4:
+            risk = "MEDIUM"
+
+    summary = (
+        f"班级整体出勤率 {attendance_rate}，周期内违纪事件 {incidents} 起"
+        f"（基于聚合数据自动评估，未调用外部模型）。"
+    )
+    full_text = (
+        "## 一、班级风气评估\n"
+        f"基于系统聚合数据：出勤率 {attendance_rate}，违纪事件 {incidents} 起。\n\n"
+        "## 二、关键问题识别\n"
+        "详见行为记录模块与考勤模块明细，本处方不做个体归因。\n\n"
+        "## 三、干预策略建议\n"
+        "建议班主任结合日常观察召开主题班会，重点关取出勤与行为规范。\n\n"
+        "## 四、预期效果与跟踪指标\n"
+        "以出勤率与违纪事件数为跟踪指标，周期复盘。\n\n"
+        "> 注：本处方由确定性规则生成（外部 AI 已按 ⑤.5 合规要求停用），"
+        "不含个体差异数据，亦不自动生成处分或诊断。"
+    )
+    return {"risk_level": risk, "summary": summary, "full_text": full_text}
+
+
+def _deterministic_student_result(context: dict) -> dict:
+    """学生干预确定性降级：仅基于 RDI 四维聚合偏离度推导，绝不含姓名/心理明细/电话/身份证/地址。"""
+    rdi = context.get("rdi_diagnosis") or {}
+    behavior = context.get("behavior", {})
+    attendance = context.get("attendance", {})
+    incidents = behavior.get("total_incidents", 0)
+    attendance_rate = attendance.get("attendance_rate", "未知")
+
+    # 基于 RDI 四维偏离度（behavior/academic/attendance/psych）推导风险
+    risk = "LOW"
+    deviations = []
+    for dim in ("behavior", "academic", "attendance", "psych"):
+        d = rdi.get(dim)
+        if isinstance(d, dict):
+            dev = d.get("deviation") or d.get("sigma") or d.get("score")
+            if isinstance(dev, (int, float)):
+                deviations.append(abs(dev))
+    if deviations:
+        max_dev = max(deviations)
+        if max_dev >= 2.5:
+            risk = "HIGH"
+        elif max_dev >= 1.5:
+            risk = "MEDIUM"
+
+    summary = (
+        f"基于 RDI 四维风险诊断（行为/学业/考勤/心理综合偏离），"
+        f"周期内违纪 {incidents} 起，出勤率 {attendance_rate}。"
+    )
+    fact = f"事实：周期内违纪事件 {incidents} 起，出勤率 {attendance_rate}。"
+    analysis = "归因：请班主任结合 RDI 四维偏离度与日常观察进行交叉分析，本处方不给出心理或学业诊断结论。"
+    growth = (
+        "干预：建议先以班主任谈话与行为规范引导为主；"
+        "若 RDI 显示心理维度高偏离，应转介心理教师（refer_to_psych_staff），"
+        "不在本处给出心理诊断、处分建议或具体定级。"
+    )
+    full_text = (
+        f"{fact}\n\n{analysis}\n\n{growth}\n\n"
+        "> 注：本处方由确定性规则生成（外部 AI 已按 ⑤.5 合规要求停用），"
+        "不引用任何个体身份或心理敏感信息，亦不自动生成处分、诊断或具体定级。"
+    )
+    return {
+        "risk_level": risk,
+        "summary": summary,
+        "fact": fact,
+        "analysis": analysis,
+        "growth": growth,
+        "full_text": full_text,
+    }
 
 
 # ─────────────────────────────────────────────
