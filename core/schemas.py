@@ -193,3 +193,40 @@ class WorkstationOut(BaseModel):
 class WorkstationsOut(BaseModel):
     workstations: list[WorkstationOut]
     default_identity: Optional[str] = None
+
+
+# ── 工作台摘要（Workspace Summary，2026-08-13 班主任工作台 V1）──
+
+
+class WorkspaceScopeOut(BaseModel):
+    type: str
+    id: Optional[int] = None
+    name: str = ""
+
+
+class WorkspaceCardsOut(BaseModel):
+    student_count: Optional[int] = None
+    trusted_behavior_count: Optional[int] = None
+    trusted_praise_count: Optional[int] = None
+    open_tasks: Optional[list] = None
+
+
+class WorkspaceAttentionItem(BaseModel):
+    type: str
+    level: str = "info"
+    title: str
+    hint: str = ""
+
+
+class WorkspaceDataQualityOut(BaseModel):
+    behavior: str = "source_unverified"
+    praise: str = "source_unverified"
+    attendance: str = "source_unverified"
+
+
+class WorkspaceSummaryOut(BaseModel):
+    workspace: str
+    scope: WorkspaceScopeOut
+    cards: WorkspaceCardsOut
+    attention: list[WorkspaceAttentionItem] = []
+    data_quality: WorkspaceDataQualityOut

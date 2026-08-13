@@ -269,7 +269,7 @@ const phaseTagTypes: Record<string, string> = {
 // ─────────────────────────────────────────────────────────────
 const WORKSPACE_MENUS: Record<string, Array<{ title: string; index: string; icon: string }>> = {
   homeroom_teacher: [
-    { title: '今日待办', index: '/dashboard', icon: 'DataLine' },
+    { title: '今日工作台', index: '/workspace', icon: 'HomeFilled' },
     { title: '本班动态', index: '/growth', icon: 'TrendCharts' },
     { title: '学生关注', index: '/rdi-dashboard', icon: 'Warning' },
     { title: '快速登记', index: '/behavior', icon: 'EditPen' },

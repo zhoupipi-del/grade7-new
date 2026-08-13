@@ -26,3 +26,32 @@ export interface WorkstationsResponse {
 export function getWorkstations() {
   return request.get<any, WorkstationsResponse>('/me/workstations')
 }
+
+// ── Workspace Summary（工作台摘要，2026-08-13 班主任工作台 V1）──
+
+export interface WorkspaceSummary {
+  workspace: string
+  scope: { type: string; id: number | null; name: string }
+  cards: {
+    student_count: number | null
+    trusted_behavior_count: number | null
+    trusted_praise_count: number | null
+    open_tasks: unknown[] | null
+  }
+  attention: Array<{ type: string; level: string; title: string; hint: string }>
+  data_quality: {
+    behavior: string
+    praise: string
+    attendance: string
+  }
+}
+
+/** GET /api/v1/me/workspace-summary — 当前工作台摘要（后端验权 + 组装 ViewModel） */
+export function getWorkspaceSummary(params: {
+  identity: string
+  scope_type: string
+  scope_id?: number | null
+}) {
+  return request.get<any, WorkspaceSummary>('/me/workspace-summary', { params })
+}
+

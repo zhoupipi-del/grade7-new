@@ -8,7 +8,7 @@ from typing import Any
 from pathlib import Path
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,10 +24,11 @@ from .schemas import (
     SchoolOut,
     UserOut,
     WorkstationsOut,
+    WorkspaceSummaryOut,
 )
 from .services import AuthService, OrgService
 from .tenant_context import TenantContext, build_tenant_context
-from .workstation import resolve_workstations
+from .workstation import build_workspace_summary, resolve_workstations, _verify_workspace_scope
 
 router = APIRouter(prefix="/api/v1", tags=["core"])
 security = HTTPBearer(auto_error=False)  # 非强制 → 允许 Cookie 降级
@@ -349,6 +350,33 @@ async def my_workstations(
     """
     result = await resolve_workstations(db, current_user)
     return WorkstationsOut(**result)
+
+
+@router.get("/me/workspace-summary", response_model=WorkspaceSummaryOut)
+async def my_workspace_summary(
+    identity: str = Query(..., description="工作身份: homeroom_teacher/grade_leader/..."),
+    scope_type: str = Query(..., description="作用域类型: class/grade/school"),
+    scope_id: int | None = Query(None, description="作用域 ID"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    当前工作台摘要（2026-08-13 班主任工作台 V1）。
+
+    前端负责"显示什么"，后端负责"这个角色到底有权看到什么"：
+      1. 先验证当前用户确实拥有该 (identity, scope_type, scope_id) —— 无权限 403
+      2. 再按身份组装 ViewModel（班主任/年级组长 V1，其余通用骨架）
+    绝不信任前端传的 scope 参数；无真实数据 → cards 诚实为 0/None + attention=[]，
+    前端显示"暂无可信数据"，不拿预警数量冒充待办（open_tasks=None 表示 Task 未建）。
+    """
+    # 1) 权限验证：用户是否拥有该 Assignment/Scope（403 兜底）
+    owned = await _verify_workspace_scope(db, current_user, identity, scope_type, scope_id)
+    if not owned:
+        raise HTTPException(status_code=403, detail="无权访问该工作台")
+
+    # 2) 组装 ViewModel
+    result = await build_workspace_summary(db, current_user, identity, scope_type, scope_id)
+    return WorkspaceSummaryOut(**result)
 
 
 # ═══════════════════════════════════════════════════════════════

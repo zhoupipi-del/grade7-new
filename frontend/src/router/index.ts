@@ -25,8 +25,19 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/layouts/MainLayout.vue'),
-    redirect: '/dashboard',
+    redirect: '/workspace',
     children: [
+      // 🎯 工作台（2026-08-13 班主任工作台 V1）：登录后第一屏 = 我的工作台
+      {
+        path: 'workspace',
+        name: 'HomeWorkstation',
+        component: () => import('@/views/workspace/HomeWorkstation.vue'),
+        meta: {
+          title: '今日工作台',
+          icon: 'HomeFilled',
+          roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER', 'COUNSELOR', 'PARENT', 'STUDENT'] as UserRole[],
+        },
+      },
       // 多校区大数据指挥舱 (默认首页)
       {
         path: 'dashboard',
