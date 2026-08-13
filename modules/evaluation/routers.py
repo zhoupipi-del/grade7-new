@@ -232,18 +232,22 @@ async def record_score(
     """
     录入手动评分 → 自动重算该学生总分快照。
 
-    评分人权限：
-      - 班主任 / 年级组长 / 德育处：可评本班/年级/全校
-      - 教师：可评任教班级
-      - 家长 / 学生：仅可自评/互评（需配合 scorer_type = self/peer/parent）
+    评分人权限（P0 越权修复 2026-08-13）：
+      - 先经 ResourceScope → get_student_or_403 行级校验：
+          跨校 → 404；本校越权（非本班/非授权年级/非管理员）→ 403
+      - class_id / grade_id / school_id 一律由服务端从 student 反查，
+        前端传值不作任何授权依据（旧客户端传了也被覆盖）
+      - 评分人 = 当前用户（scorer_id=current_user.id 服务端写死）
     """
+    # 1) 行级归属校验：跨校→404，本校越权→403
+    student = await get_student_or_403(db, current_user, body.student_id)
     try:
         record = await EvaluationService.record_score(
             db,
-            student_id=body.student_id,
-            class_id=body.class_id,
-            grade_id=body.grade_id,
-            school_id=current_user.school_id,
+            student_id=student.id,
+            class_id=student.class_id,
+            grade_id=student.grade_id,
+            school_id=student.school_id,
             indicator_id=body.indicator_id,
             score=body.score,
             scorer_type=body.scorer_type,
@@ -276,19 +280,22 @@ async def batch_record_scores(
     current_user: User = Depends(get_current_user),
 ):
     """
-    批量录入手动评分。
+    批量录入手动评分（P0 越权修复 2026-08-13：逐条 get_student_or_403，
+    class_id/grade_id/school_id 服务端反查，前端传值不生效）。
     逐条处理，遇到失败继续执行后续，返回成功/失败计数。
     """
     success = 0
     errors = []
     for i, sc in enumerate(body.scores):
         try:
+            # 行级归属校验：跨校→404，本校越权→403
+            student = await get_student_or_403(db, current_user, sc.student_id)
             await EvaluationService.record_score(
                 db,
-                student_id=sc.student_id,
-                class_id=sc.class_id,
-                grade_id=sc.grade_id,
-                school_id=current_user.school_id,
+                student_id=student.id,
+                class_id=student.class_id,
+                grade_id=student.grade_id,
+                school_id=student.school_id,
                 indicator_id=sc.indicator_id,
                 score=sc.score,
                 scorer_type=sc.scorer_type,

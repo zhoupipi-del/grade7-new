@@ -103,8 +103,10 @@ class RuleOut(BaseModel):
 
 class ScoreCreate(BaseModel):
     student_id: int = Field(..., gt=0)
-    class_id: int = Field(..., gt=0)
-    grade_id: int = Field(..., gt=0)
+    # P0 越权修复（2026-08-13）：class_id/grade_id 不再作为授权依据——
+    # 一律由服务端从 student 反查覆盖，前端传值仅兼容旧客户端，不生效
+    class_id: Optional[int] = Field(None, description="已废弃：服务端从 student 反查")
+    grade_id: Optional[int] = Field(None, description="已废弃：服务端从 student 反查")
     indicator_id: int = Field(..., gt=0)
     score: float = Field(..., ge=0.0, description="评分值")
     scorer_type: str = Field(..., description="评分人类型: teacher/self/peer/parent/system")
