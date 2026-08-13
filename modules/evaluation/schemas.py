@@ -112,6 +112,42 @@ class ScoreCreate(BaseModel):
     scorer_type: str = Field(..., description="评分人类型: teacher/self/peer/parent/system")
     semester: Optional[str] = Field(None, description="学期，默认当前学期")
     comment: str = Field("", max_length=500)
+    # 数据来源（2026-08-13）：不传默认 legacy_unknown；成绩导入显式传 import；
+    # 老师 UI 表扬走 /quick-praise（服务端锁 teacher_manual，不经过本字段）
+    source: Optional[str] = Field(
+        None,
+        description="数据来源: teacher_manual/system_generated/import/device/test_demo/legacy_unknown；不传默认 legacy_unknown",
+    )
+
+
+# ── QuickPraise（Step6 极简正向表扬）──
+# 前端只传「学生 + 表扬类型 + 备注」，其余服务端锁死：
+#   school/class/grade 由服务端从 student 反查
+#   source = teacher_manual（前端不可传）
+#   indicator + score 由 praise_type 服务端映射（杜绝标准不一）
+#   incident_date = 当天；scorer = 当前用户(teacher)
+
+class QuickPraiseCreate(BaseModel):
+    student_id: int = Field(..., gt=0, description="学生 ID（必须从可见范围内选择）")
+    praise_type: str = Field(
+        ...,
+        description="表扬类型: class_performance/help_others/labor/progress/collective/other",
+    )
+    description: Optional[str] = Field(None, max_length=500, description="备注（可选）")
+
+
+class QuickPraiseOut(BaseModel):
+    id: int
+    student_id: int
+    student_name: Optional[str] = None
+    class_name: Optional[str] = None
+    praise_type: str
+    praise_label: Optional[str] = None
+    indicator_name: Optional[str] = None
+    score: float
+    source: str
+    incident_date: Optional[date] = None
+    monthly_praise_count: int = 0
 
 
 class ScoreOut(BaseModel):

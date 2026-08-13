@@ -37,6 +37,8 @@ from .schemas import (
     IndicatorOut,
     IndicatorUpdate,
     MessageOut,
+    QuickPraiseCreate,
+    QuickPraiseOut,
     RuleOut,
     RuleUpdate,
     ScoreCreate,
@@ -254,6 +256,7 @@ async def record_score(
             scorer_id=current_user.id,
             semester=body.semester,
             comment=body.comment,
+            source=body.source or "legacy_unknown",
         )
         return {
             "id": record.id,
@@ -271,6 +274,56 @@ async def record_score(
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/quick-praise", response_model=QuickPraiseOut, status_code=201)
+async def quick_praise(
+    body: QuickPraiseCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    极简正向表扬（Step6 · QuickPraise）——15 秒完成一条可信正向记录。
+
+    服务端锁死：
+      school/class/grade   = 从 student 反查（get_student_or_403 已校验归属）
+      scorer               = 当前用户(teacher)
+      source               = teacher_manual（前端不可传）
+      indicator + score    = praise_type 服务端映射（杜绝标准不一）
+      incident_date        = 当天
+
+    权限：班主任/年级组长/管理员（行级范围仍受 get_student_or_403 约束）。
+    """
+    student = await get_student_or_403(db, current_user, body.student_id)
+    try:
+        record, default_score = await EvaluationService.quick_praise(
+            db,
+            student,
+            current_user.id,
+            body.praise_type,
+            body.description,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    from .services import PRAISE_TYPE_MAP
+    _, _, label = PRAISE_TYPE_MAP[body.praise_type]
+    monthly = await EvaluationService.count_monthly_praise(
+        db, student.school_id, student.id
+    )
+    return {
+        "id": record.id,
+        "student_id": record.student_id,
+        "student_name": record.student.name if record.student else None,
+        "class_name": record.student.class_.name if record.student and getattr(record.student, "class_", None) else None,
+        "praise_type": body.praise_type,
+        "praise_label": label,
+        "indicator_name": record.indicator.name if record.indicator else None,
+        "score": default_score,
+        "source": record.source,
+        "incident_date": record.incident_date,
+        "monthly_praise_count": monthly,
+    }
 
 
 @router.post("/scores/batch", response_model=BatchScoreResult, status_code=201)
@@ -302,6 +355,7 @@ async def batch_record_scores(
                 scorer_id=current_user.id,
                 semester=sc.semester,
                 comment=sc.comment,
+                source=sc.source or "legacy_unknown",
             )
             success += 1
         except Exception as e:

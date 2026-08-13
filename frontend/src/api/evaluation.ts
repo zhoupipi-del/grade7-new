@@ -132,13 +132,42 @@ export interface RuleUpdate {
 
 export interface ScoreCreate {
   student_id: number
-  class_id: number
-  grade_id: number
+  class_id?: number
+  grade_id?: number
   indicator_id: number
   score: number
   scorer_type: ScorerType
   semester?: string
   comment?: string
+  source?: 'teacher_manual' | 'system_generated' | 'import' | 'device' | 'test_demo' | 'legacy_unknown'
+}
+
+// ── QuickPraise（Step6 极简正向表扬）──
+export type PraiseType = 'class_performance' | 'help_others' | 'labor' | 'progress' | 'collective' | 'other'
+
+export interface QuickPraiseCreate {
+  student_id: number
+  praise_type: PraiseType
+  description?: string
+}
+
+export interface QuickPraiseOut {
+  id: number
+  student_id: number
+  student_name: string | null
+  class_name: string | null
+  praise_type: string
+  praise_label: string | null
+  indicator_name: string | null
+  score: number
+  source: string
+  incident_date: string | null
+  monthly_praise_count: number
+}
+
+/** POST /evaluation/quick-praise — 极简正向表扬（15秒） */
+export function quickPraise(data: QuickPraiseCreate) {
+  return request.post<any, QuickPraiseOut>('/evaluation/quick-praise', data)
 }
 
 export interface ScoreOut {

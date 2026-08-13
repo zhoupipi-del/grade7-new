@@ -7,131 +7,124 @@
       <div class="header-left">
         <h2 class="page-title">
           <el-icon :size="22"><Plus /></el-icon>
-          正向加分录入
+          正向加分 · 极简登记
         </h2>
-        <span class="page-subtitle">品德之星 · 助人为乐 · 志愿服务 · 劳动实践</span>
+        <span class="page-subtitle">课堂表现 · 帮助同学 · 劳动实践 · 明显进步 · 集体贡献</span>
       </div>
       <div class="header-right">
         <el-tag type="success" effect="plain" size="small">
-          奖惩并举 · 激励向上
+          15 秒 · 可信记录
         </el-tag>
       </div>
     </div>
 
     <!-- ════════════════════════════════════════ -->
-    <!-- 加分录入表单                           -->
+    <!-- 极简表扬表单（QuickPraise）             -->
     <!-- ════════════════════════════════════════ -->
     <el-card shadow="never" class="entry-card">
       <template #header>
         <span class="card-title-text">
-          <el-icon><EditPen /></el-icon> 录入正向加分
+          <el-icon><EditPen /></el-icon> 登记正向表扬
         </span>
       </template>
 
+      <!-- 提交成功视图 -->
+      <div v-if="praiseStep === 'success' && praiseResult" class="praise-success">
+        <el-icon class="praise-check"><CircleCheckFilled /></el-icon>
+        <div class="praise-success-title">表扬成功</div>
+        <div class="praise-success-student">{{ praiseResult.student_name }}</div>
+        <div class="praise-success-detail">
+          {{ praiseResult.praise_label }} <span class="score-tag">+{{ praiseResult.score }} 分</span>
+        </div>
+        <div class="praise-success-monthly">
+          本月可信表扬记录：<b>{{ praiseResult.monthly_praise_count }}</b>
+        </div>
+        <div class="praise-success-actions">
+          <el-button type="primary" @click="continuePraise">继续表扬</el-button>
+          <el-button @click="praiseStep = 'form'">完成</el-button>
+        </div>
+      </div>
+
+      <!-- 表单视图 -->
       <el-form
-        ref="scoreFormRef"
+        v-else
+        ref="praiseFormRef"
         :model="formData"
         :rules="formRules"
-        label-width="100px"
-        label-position="right"
-        size="default"
+        label-width="0"
+        size="large"
       >
         <!-- 选择学生 -->
-        <el-form-item label="选择学生" prop="student_id">
+        <el-form-item prop="student_id">
           <el-select
             v-model="formData.student_id"
-            placeholder="请选择学生"
+            placeholder="① 选择学生"
             filterable
             remote
             :remote-method="searchStudents"
             :loading="studentsLoading"
             style="width: 100%"
-            @change="onStudentChange"
+            size="large"
           >
             <el-option
               v-for="s in studentOptions"
               :key="s.id"
-              :label="`${s.name} (${s.student_no}) · ${s.class_name}`"
+              :label="`${s.name} (${s.student_no || s.id}) · ${s.class_name || ''}`"
               :value="s.id"
             />
           </el-select>
         </el-form-item>
 
-        <!-- 选择加分指标 -->
-        <el-form-item label="加分指标" prop="indicator_id">
-          <el-select
-            v-model="formData.indicator_id"
-            placeholder="请选择加分指标"
-            style="width: 100%"
-            @change="onIndicatorChange"
-          >
-            <el-option-group
-              v-for="group in positiveIndicatorsGrouped"
-              :key="group.dimension"
-              :label="dimensionLabel(group.dimension)"
+        <!-- 表扬类型 -->
+        <el-form-item prop="praise_type">
+          <el-radio-group v-model="formData.praise_type" class="praise-type-group">
+            <el-radio-button
+              v-for="t in PRAISE_TYPES"
+              :key="t.value"
+              :value="t.value"
             >
-              <el-option
-                v-for="ind in group.indicators"
-                :key="ind.id"
-                :label="`${ind.name} (权重: ${ind.weight})`"
-                :value="ind.id"
-              />
-            </el-option-group>
-          </el-select>
+              {{ t.label }}
+            </el-radio-button>
+          </el-radio-group>
+          <div class="praise-hint">② 选择表扬类型（分值为系统统一默认，无需手动填写）</div>
         </el-form-item>
 
-        <!-- 加分分数 -->
-        <el-form-item label="加分分数" prop="score">
-          <el-input-number
-            v-model="formData.score"
-            :min="1"
-            :max="selectedIndicator?.max_score || 100"
-            :step="1"
-            style="width: 200px"
-          />
-          <span class="score-hint" v-if="selectedIndicator">
-            满分: {{ selectedIndicator.max_score }} 分
-          </span>
-        </el-form-item>
-
-        <!-- 备注说明 -->
-        <el-form-item label="备注说明" prop="comment">
+        <!-- 备注（可选） -->
+        <el-form-item prop="description">
           <el-input
-            v-model="formData.comment"
+            v-model="formData.description"
             type="textarea"
-            :rows="3"
-            placeholder="请输入加分原因或说明..."
+            :rows="2"
+            placeholder="③ 备注（可选）：简单记一句值得肯定的事..."
             maxlength="200"
             show-word-limit
           />
         </el-form-item>
 
-        <!-- 提交按钮 -->
+        <!-- 提交 -->
         <el-form-item>
           <el-button
             type="primary"
             size="large"
+            class="submit-btn"
             :loading="submitLoading"
-            :disabled="!formData.student_id || !formData.indicator_id"
-            @click="submitScore"
+            :disabled="!formData.student_id || !formData.praise_type"
+            @click="submitPraise"
           >
             <el-icon><Check /></el-icon>
-            提交加分
-          </el-button>
-          <el-button size="large" @click="resetForm">
-            重置
+            提交表扬
           </el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
     <!-- ════════════════════════════════════════ -->
-    <!-- 最近加分记录                           -->
+    <!-- 本月表扬速览                           -->
     <!-- ════════════════════════════════════════ -->
     <el-card shadow="never" class="recent-records-card">
       <template #header>
         <span class="card-title-text">
-          <el-icon><List /></el-icon> 最近加分记录
+          <el-icon><List /></el-icon> 表扬记录（仅可信 teacher_manual）
         </span>
       </template>
 
@@ -143,19 +136,19 @@
         stripe
       >
         <el-table-column prop="student_name" label="学生姓名" width="120" />
-        <el-table-column prop="indicator_name" label="加分指标" width="150" />
-        <el-table-column prop="score" label="加分分数" width="100" align="center">
+        <el-table-column prop="indicator_name" label="表扬类型" width="150" />
+        <el-table-column prop="score" label="分值" width="90" align="center">
           <template #default="{ row }">
             <el-tag type="success" size="small">+{{ row.score }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="comment" label="备注说明" min-width="200" />
-        <el-table-column prop="created_at" label="录入时间" width="180" />
+        <el-table-column prop="comment" label="备注" min-width="200" />
+        <el-table-column prop="incident_date" label="日期" width="120" />
       </el-table>
 
       <el-empty
         v-if="recentRecords.length === 0 && !recordsLoading"
-        description="暂无加分记录"
+        description="暂无可信表扬记录"
         :image-size="60"
       />
     </el-card>
@@ -164,159 +157,98 @@
 
 <script setup lang="ts">
 /**
- * PositiveScoreEntry.vue — 正向加分录入界面
+ * PositiveScoreEntry.vue — 正向加分 · 极简登记（Step6 QuickPraise）
  *
- * 功能:
- *  1. 选择学生（远程搜索）
- *  2. 选择正向加分指标（按维度分组）
- *  3. 录入加分分数
- *  4. 提交并查看最近记录
+ * 15 秒完成一条可信正向记录：
+ *   选学生 → 选表扬类型 → 备注(可选) → 提交
+ * 服务端锁死（/evaluation/quick-praise）：
+ *   source=teacher_manual / indicator+score 由表扬类型映射 / class+grade 反查
  *
  * 对应后端 API:
- *  - GET  /api/v1/evaluation/indicators      — 获取正向加分指标
- *  - POST /api/v1/evaluation/scores         — 提交加分记录
- *  - GET  /api/v1/evaluation/students/{id}/logs — 获取最近记录
+ *  - GET  /behavior/quick-register/students   — 按角色可见范围选学生（复用）
+ *  - POST /evaluation/quick-praise           — 极简正向表扬
+ *  - GET  /evaluation/students/{id}/logs     — 最近记录
  */
 
-import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import {
-  Plus, EditPen, List, Check, Search,
-} from '@element-plus/icons-vue'
+import { ref, reactive, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Plus, EditPen, List, Check, CircleCheckFilled } from '@element-plus/icons-vue'
 import request from '@/api/request'
-import { getClasses, getGrades, getStudents } from '@/api/classes'
+import { getQuickRegisterStudents } from '@/api/behavior'
 import {
-  type EvalDimension,
-  type IndicatorItem,
-  type ScoreLogItem,
-  listIndicators,
-  recordScore,
+  type PraiseType,
+  type QuickPraiseOut,
+  quickPraise,
   getScoreLogs,
-  dimensionLabel as getDimensionLabel,
 } from '@/api/evaluation'
 
-// ════════════════════════════════════════
-// 响应式状态
-// ════════════════════════════════════════
+const PRAISE_TYPES: Array<{ value: PraiseType; label: string }> = [
+  { value: 'class_performance', label: '课堂表现' },
+  { value: 'help_others', label: '帮助同学' },
+  { value: 'labor', label: '劳动实践' },
+  { value: 'progress', label: '明显进步' },
+  { value: 'collective', label: '集体贡献' },
+  { value: 'other', label: '其他' },
+]
 
-const scoreFormRef = ref()
+const praiseFormRef = ref()
 const submitLoading = ref(false)
 const studentsLoading = ref(false)
 const recordsLoading = ref(false)
 
+const praiseStep = ref<'form' | 'success'>('form')
+const praiseResult = ref<QuickPraiseOut | null>(null)
+
 const formData = reactive({
   student_id: undefined as number | undefined,
-  indicator_id: undefined as number | undefined,
-  score: 5,
-  comment: '',
+  praise_type: undefined as PraiseType | undefined,
+  description: '',
 })
 
 const formRules = {
   student_id: [{ required: true, message: '请选择学生', trigger: 'change' }],
-  indicator_id: [{ required: true, message: '请选择加分指标', trigger: 'change' }],
-  score: [{ required: true, message: '请输入加分分数', trigger: 'blur' }],
+  praise_type: [{ required: true, message: '请选择表扬类型', trigger: 'change' }],
 }
 
-const studentOptions = ref<Array<{ id: number; name: string; student_no: string; class_name: string; class_id?: number; grade_id?: number }>>([])
-const selectedStudent = ref<{ id: number; name: string; student_no: string; class_name: string; class_id?: number; grade_id?: number } | null>(null)
-
-const positiveIndicators = ref<Array<{ dimension: EvalDimension; item: IndicatorItem }>>([])
-const selectedIndicator = ref<IndicatorItem | null>(null)
-
-const recentRecords = ref<ScoreLogItem[]>([])
-
-// ════════════════════════════════════════
-// 计算属性
-// ════════════════════════════════════════
-
-const positiveIndicatorsGrouped = computed(() => {
-  const groups: Array<{ dimension: EvalDimension; indicators: IndicatorItem[] }> = []
-  const dimMap: Record<string, IndicatorItem[]> = {}
-
-  for (const { dimension, item } of positiveIndicators.value) {
-    if (!dimMap[dimension]) {
-      dimMap[dimension] = []
-    }
-    dimMap[dimension].push(item)
-  }
-
-  for (const dim of Object.keys(dimMap) as EvalDimension[]) {
-    groups.push({
-      dimension: dim,
-      indicators: dimMap[dim],
-    })
-  }
-
-  return groups
-})
-
-// ════════════════════════════════════════
-// 生命周期
-// ════════════════════════════════════════
+const studentOptions = ref<Array<{ id: number; name: string; student_no: string; class_name: string }>>([])
+const recentRecords = ref<Array<Record<string, any>>>([])
 
 onMounted(() => {
-  loadPositiveIndicators()
+  loadStudents()
+  loadRecentRecords()
 })
 
-// ════════════════════════════════════════
-// 数据加载
-// ════════════════════════════════════════
-
-async function loadPositiveIndicators() {
+async function loadStudents() {
+  studentsLoading.value = true
   try {
-    const data = await listIndicators()
-    // 筛选出正向加分指标（保留 dimension 信息）
-    const positiveList: Array<{ dimension: EvalDimension; item: IndicatorItem }> = []
-    for (const group of data) {
-      for (const ind of group.items) {
-        if (
-          ind.name.includes('之星') ||
-          ind.name.includes('助人') ||
-          ind.name.includes('拾金') ||
-          ind.name.includes('诚信') ||
-          ind.name.includes('体育') ||
-          ind.name.includes('文体') ||
-          ind.name.includes('文艺') ||
-          ind.name.includes('艺术') ||
-          ind.name.includes('志愿') ||
-          ind.name.includes('社区') ||
-          ind.name.includes('公益') ||
-          ind.name.includes('劳动')
-        ) {
-          positiveList.push({ dimension: group.dimension, item: ind })
-        }
-      }
-    }
-    positiveIndicators.value = positiveList
+    // 复用 behavior QuickRegister 学生选择器：按角色 scope 返回（班主任=本班，组长=授权年级）
+    const list: any[] = await getQuickRegisterStudents({})
+    studentOptions.value = (list || []).map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      student_no: s.student_no || '',
+      class_name: s.class_name || '',
+    }))
   } catch (err: any) {
-    ElMessage.error(`加载加分指标失败: ${err.message || err}`)
+    ElMessage.error(`加载学生失败: ${err.message || err}`)
+  } finally {
+    studentsLoading.value = false
   }
 }
 
 async function searchStudents(query: string) {
   if (!query.trim()) {
-    studentOptions.value = []
+    loadStudents()
     return
   }
-
   studentsLoading.value = true
   try {
-    const res: any = await getStudents({ page: 1, page_size: 50 })
-    const list = res?.items ?? (Array.isArray(res) ? res : [])
-    // 搜索过滤（按姓名或学号）
-    const kw = query.toLowerCase()
-    const filtered = list.filter((s: any) =>
-      s.name?.toLowerCase().includes(kw) ||
-      s.student_no?.toLowerCase().includes(kw) ||
-      s.student_number?.toLowerCase().includes(kw),
-    )
-    studentOptions.value = filtered.map((s: any) => ({
+    const list: any[] = await getQuickRegisterStudents({ keyword: query.trim() })
+    studentOptions.value = (list || []).map((s: any) => ({
       id: s.id,
       name: s.name,
-      student_no: s.student_no || s.student_number || '',
+      student_no: s.student_no || '',
       class_name: s.class_name || '',
-      class_id: s.class_id,
-      grade_id: s.grade_id,
     }))
   } catch (err: any) {
     ElMessage.error(`搜索学生失败: ${err.message || err}`)
@@ -330,81 +262,34 @@ async function loadRecentRecords() {
     recentRecords.value = []
     return
   }
-
   recordsLoading.value = true
   try {
-    const data = await getScoreLogs(formData.student_id, 1, 20)
-    // 筛选出正向加分记录（change_amount > 0）
-    recentRecords.value = data.items.filter(log => log.change_amount > 0)
+    const data: any = await getScoreLogs(formData.student_id, 1, 20)
+    const items = data?.items ?? data ?? []
+    // 只展示老师表扬（source 后端已过滤；此处按 scorer_type=teacher 粗筛）
+    recentRecords.value = (items as any[]).filter((log: any) => log.scorer_type === 'teacher')
   } catch (err: any) {
-    ElMessage.error(`加载最近记录失败: ${err.message || err}`)
+    ElMessage.error(`加载记录失败: ${err.message || err}`)
   } finally {
     recordsLoading.value = false
   }
 }
 
-// ════════════════════════════════════════
-// 事件处理
-// ════════════════════════════════════════
-
-function onStudentChange(studentId: number) {
-  selectedStudent.value = studentOptions.value.find(s => s.id === studentId) || null
-  loadRecentRecords()
-}
-
-function onIndicatorChange(indicatorId: number) {
-  const found = positiveIndicators.value.find(ind => ind.item.id === indicatorId)
-  selectedIndicator.value = found?.item || null
-  if (selectedIndicator.value) {
-    formData.score = Math.min(5, selectedIndicator.value.max_score)
-  }
-}
-
-async function submitScore() {
-  // 表单验证
+async function submitPraise() {
   try {
-    await scoreFormRef.value?.validate()
+    await praiseFormRef.value?.validate()
   } catch {
     return
   }
-
-  await ElMessageBox.confirm(
-    `确认为学生「${selectedStudent.value?.name}」录入正向加分？\n\n` +
-    `加分指标: ${selectedIndicator.value?.name}\n` +
-    `加分分数: +${formData.score} 分\n` +
-    `备注说明: ${formData.comment || '无'}`,
-    '确认提交',
-    {
-      confirmButtonText: '确认提交',
-      cancelButtonText: '取消',
-      type: 'success',
-    }
-  )
-
   submitLoading.value = true
   try {
-    // 从选中学生获取 class_id 和 grade_id（不再硬编码为1）
-    const classId = selectedStudent.value?.['class_id']
-    const gradeId = selectedStudent.value?.['grade_id']
-
-    if (!classId || !gradeId) {
-      ElMessage.warning('缺少班级/年级信息，请重新选择学生')
-      submitLoading.value = false
-      return
-    }
-
-    await recordScore({
+    const res = await quickPraise({
       student_id: formData.student_id!,
-      class_id: classId,
-      grade_id: gradeId,
-      indicator_id: formData.indicator_id!,
-      score: formData.score,
-      scorer_type: 'teacher',
-      comment: formData.comment,
+      praise_type: formData.praise_type!,
+      description: formData.description?.trim() || undefined,
     })
-
-    ElMessage.success(`成功为学生「${selectedStudent.value?.name}」录入正向加分 +${formData.score} 分`)
-    resetForm()
+    praiseResult.value = res
+    praiseStep.value = 'success'
     loadRecentRecords()
   } catch (err: any) {
     ElMessage.error(`提交失败: ${err.message || err}`)
@@ -413,19 +298,17 @@ async function submitScore() {
   }
 }
 
-function resetForm() {
+function continuePraise() {
+  praiseStep.value = 'form'
   formData.student_id = undefined
-  formData.indicator_id = undefined
-  formData.score = 5
-  formData.comment = ''
-  selectedStudent.value = null
-  selectedIndicator.value = null
-  scoreFormRef.value?.resetFields()
+  formData.praise_type = undefined
+  formData.description = ''
+  praiseFormRef.value?.resetFields()
+  loadStudents()
 }
 
-function dimensionLabel(dim: string): string {
-  return getDimensionLabel(dim)
-}
+// 简单请求封装（未使用 request 直调，保持与既有组件一致）
+void request
 </script>
 
 <style scoped>
@@ -476,9 +359,74 @@ function dimensionLabel(dim: string): string {
   font-size: 15px;
 }
 
-.score-hint {
-  margin-left: 12px;
-  font-size: 13px;
+.praise-type-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.praise-hint {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 12px;
   color: #909399;
+}
+
+.submit-btn {
+  width: 100%;
+}
+
+/* 成功视图 */
+.praise-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 0 12px;
+  text-align: center;
+}
+
+.praise-check {
+  font-size: 56px;
+  color: #67c23a;
+  margin-bottom: 8px;
+}
+
+.praise-success-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.praise-success-student {
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.praise-success-detail {
+  margin-top: 4px;
+  font-size: 16px;
+  color: #606266;
+}
+
+.score-tag {
+  color: #67c23a;
+  font-weight: 600;
+}
+
+.praise-success-monthly {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #909399;
+}
+
+.praise-success-monthly b {
+  color: #67c23a;
+  font-size: 18px;
+}
+
+.praise-success-actions {
+  margin-top: 20px;
 }
 </style>

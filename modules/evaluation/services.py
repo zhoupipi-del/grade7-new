@@ -55,6 +55,23 @@ DEFAULT_DIMENSION_WEIGHTS = {
 }
 
 # ═══════════════════════════════════════════════════════════════
+# QuickPraise（Step6 极简正向表扬）— 表扬类型 → 指标 + 默认分
+# ═══════════════════════════════════════════════════════════════
+# 由指标配置决定默认分，杜绝"A 老师 +10 / B 老师 +1"标准不一。
+# indicator_id 复用现有正向德育指标（助人为乐/劳动实践/品德之星/校园志愿）。
+# 说明：分值仅影响素质评价快照与正向积分榜；表扬次数榜按 COUNT 不按分。
+
+PRAISE_TYPE_MAP = {
+    # praise_type: (indicator_id, default_score, label)
+    "class_performance": (7, 2, "课堂表现"),   # 学习态度
+    "help_others":       (26, 2, "帮助同学"),  # 助人为乐
+    "labor":             (36, 2, "劳动实践"),  # 劳动实践
+    "progress":          (25, 3, "明显进步"),  # 品德之星
+    "collective":        (33, 3, "集体贡献"),  # 校园志愿
+    "other":             (4, 1, "其他"),       # 责任担当（兜底）
+}
+
+# ═══════════════════════════════════════════════════════════════
 # 种子数据
 # ═══════════════════════════════════════════════════════════════
 
@@ -635,8 +652,17 @@ class EvaluationService:
         scorer_id: int,
         semester: Optional[str] = None,
         comment: str = "",
+        source: str = "legacy_unknown",
     ) -> EvaluationScore:
-        """录入手动评分 → 重算该学生总分快照"""
+        """录入手动评分 → 重算该学生总分快照
+
+        source（2026-08-13 Data Capture Audit）：
+          未传默认 legacy_unknown；白名单校验同 discipline_records。
+          老师 UI 正向表扬走 quick_praise（服务端锁 teacher_manual）；
+          成绩导入/脚本显式传 import。
+        """
+        if source not in ("teacher_manual", "system_generated", "import", "device", "test_demo", "legacy_unknown"):
+            raise ValueError(f"非法数据来源: {source}")
         if not semester:
             semester = EvaluationService._current_semester()
 
@@ -652,6 +678,7 @@ class EvaluationService:
             scorer_id=scorer_id,
             semester=semester,
             comment=comment,
+            source=source,
         )
         db.add(record)
         await db.flush()
@@ -660,6 +687,73 @@ class EvaluationService:
         await EvaluationService.recalculate_snapshot(db, student_id, school_id, semester)
 
         return record
+
+    @staticmethod
+    async def quick_praise(
+        db: AsyncSession,
+        student: "Student",
+        created_by: int,
+        praise_type: str,
+        description: str | None,
+    ) -> tuple[EvaluationScore, int]:
+        """
+        极简正向表扬（Step6 · QuickPraise）——全部服务端锁死，前端只传
+        student_id + praise_type + description。
+
+        锁死项：
+          school/class/grade  = 从 student 反查（外层 get_student_or_403 已校验归属）
+          scorer_type         = teacher（老师登记）
+          scorer_id           = 当前用户
+          source              = teacher_manual（前端无法伪造）
+          incident_date       = 今天（事件发生日期）
+          indicator + score   = 由 praise_type 服务端映射（杜绝 A 老师+10/B 老师+1）
+        """
+        if praise_type not in PRAISE_TYPE_MAP:
+            raise ValueError(f"不支持的表扬类型: {praise_type}")
+        indicator_id, default_score, label = PRAISE_TYPE_MAP[praise_type]
+
+        record = EvaluationScore(
+            school_id=student.school_id,
+            student_id=student.id,
+            class_id=student.class_id,
+            grade_id=student.grade_id,
+            indicator_id=indicator_id,
+            score=float(default_score),
+            scorer_type="teacher",
+            scorer_id=created_by,
+            semester=EvaluationService._current_semester(),
+            comment=description or label,
+            source="teacher_manual",      # ★ 服务端写死，前端不可传
+            incident_date=date.today(),
+        )
+        db.add(record)
+        await db.flush()
+        await EvaluationService.recalculate_snapshot(db, student.id, student.school_id, record.semester)
+        await db.commit()
+
+        # 重载指标名（async 场景 selectinload 已配置在模型关系上）
+        await db.refresh(record, attribute_names=["indicator"])
+        return record, default_score
+
+    @staticmethod
+    async def count_monthly_praise(
+        db: AsyncSession, school_id: int, student_id: int
+    ) -> int:
+        """本月「可信表扬」次数 —— 只统计 source=teacher_manual 且 incident_date 在本月。
+        绝不把 import 成绩 / test_demo / legacy_unknown 算进去。"""
+        today = date.today()
+        start_of_month = today.replace(day=1)
+        cnt = await db.scalar(
+            select(func.count())
+            .select_from(EvaluationScore)
+            .where(
+                EvaluationScore.school_id == school_id,
+                EvaluationScore.student_id == student_id,
+                EvaluationScore.source == "teacher_manual",
+                EvaluationScore.incident_date >= start_of_month,
+            )
+        )
+        return int(cnt or 0)
 
     @audit_lineage(
         transformation="recalculate_snapshot",
