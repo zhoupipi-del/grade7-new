@@ -9,7 +9,7 @@ modules/evaluation/schemas.py — Pydantic 请求/响应模型
 """
 
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 from pydantic import BaseModel, Field
 
 
