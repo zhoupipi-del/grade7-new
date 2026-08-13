@@ -34,15 +34,24 @@ export interface WorkspaceSummary {
   scope: { type: string; id: number | null; name: string }
   cards: {
     student_count: number | null
+    class_count?: number | null
     trusted_behavior_count: number | null
     trusted_praise_count: number | null
     open_tasks: unknown[] | null
   }
   attention: Array<{ type: string; level: string; title: string; hint: string }>
+  class_compare?: Array<{
+    class_id: number
+    class_name: string
+    student_count: number
+    trusted_behavior_count: number
+    trusted_praise_count: number
+  }>
   data_quality: {
     behavior: string
     praise: string
     attendance: string
+    grades?: string
   }
 }
 

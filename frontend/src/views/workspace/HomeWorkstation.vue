@@ -14,12 +14,13 @@
     </div>
 
     <!-- ════════════════════════════════════════ -->
-    <!-- ① 今日需要关注                           -->
+    <!-- ① 今日需要关注 / 今日重点                -->
     <!-- ════════════════════════════════════════ -->
     <el-card shadow="never" class="ws-card attention-card">
       <template #header>
         <span class="card-title">
-          <el-icon><BellFilled /></el-icon> 今日需要关注
+          <el-icon><BellFilled /></el-icon>
+          {{ isGradeLeader ? '今日重点' : '今日需要关注' }}
         </span>
       </template>
       <div v-if="summary && summary.attention.length > 0" class="attention-list">
@@ -38,18 +39,64 @@
       </div>
       <el-empty
         v-else
-        description="暂无可信数据"
+        description="暂无可信异常"
         :image-size="60"
         class="attention-empty"
       >
-        <span class="empty-hint">待真实老师产生第一条可信记录后，这里会自动出现</span>
+        <span class="empty-hint">有真实可信异常后这里会自动出现</span>
       </el-empty>
     </el-card>
 
     <!-- ════════════════════════════════════════ -->
-    <!-- ② 本班动态                               -->
+    <!-- ② 年级概览（年级组长专属）              -->
     <!-- ════════════════════════════════════════ -->
-    <el-card shadow="never" class="ws-card">
+    <el-card v-if="isGradeLeader" shadow="never" class="ws-card">
+      <template #header>
+        <span class="card-title">
+          <el-icon><DataAnalysis /></el-icon> 年级概览
+        </span>
+      </template>
+      <el-row :gutter="12" class="overview-grid">
+        <el-col :span="6" class="overview-col">
+          <div class="overview-card">
+            <div class="overview-label">学生数</div>
+            <div class="overview-value">{{ summary?.cards.student_count ?? '—' }}</div>
+          </div>
+        </el-col>
+        <el-col :span="6" class="overview-col">
+          <div class="overview-card">
+            <div class="overview-label">班级数</div>
+            <div class="overview-value">{{ summary?.cards.class_count ?? '—' }}</div>
+          </div>
+        </el-col>
+        <el-col :span="6" class="overview-col">
+          <div class="overview-card" @click="go('/behavior')">
+            <div class="overview-label">可信行为数</div>
+            <div class="overview-value">{{ summary?.cards.trusted_behavior_count ?? '—' }}</div>
+            <el-tag :type="qualityTag(summary?.data_quality.behavior)" size="small" effect="plain">
+              {{ qualityText(summary?.data_quality.behavior) }}
+            </el-tag>
+          </div>
+        </el-col>
+        <el-col :span="6" class="overview-col">
+          <div class="overview-card" @click="go('/evaluation/positive-entry')">
+            <div class="overview-label">可信表扬数</div>
+            <div class="overview-value">{{ summary?.cards.trusted_praise_count ?? '—' }}</div>
+            <el-tag :type="qualityTag(summary?.data_quality.praise)" size="small" effect="plain">
+              {{ qualityText(summary?.data_quality.praise) }}
+            </el-tag>
+          </div>
+        </el-col>
+      </el-row>
+      <div v-if="(summary?.cards.trusted_behavior_count ?? 0) === 0 && (summary?.cards.trusted_praise_count ?? 0) === 0" class="trusted-empty-note">
+        本学期暂无可信人工行为记录 · 暂无可信正向表扬记录（仅统计 teacher_manual）
+      </div>
+    </el-card>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- ②/③ 本班动态 / 班级对比                  -->
+    <!-- ════════════════════════════════════════ -->
+    <el-card v-if="!isGradeLeader" shadow="never" class="ws-card">
       <template #header>
         <span class="card-title">
           <el-icon><TrendCharts /></el-icon> 本班动态
@@ -96,7 +143,62 @@
     </el-card>
 
     <!-- ════════════════════════════════════════ -->
-    <!-- ③ 我的快捷操作                           -->
+    <!-- ③ 班级对比（年级组长专属）              -->
+    <!-- ════════════════════════════════════════ -->
+    <el-card v-if="isGradeLeader" shadow="never" class="ws-card">
+      <template #header>
+        <span class="card-title">
+          <el-icon><Histogram /></el-icon> 班级对比
+          <span class="card-hint">仅可信口径（teacher_manual）· 考勤/成绩来源未核验</span>
+        </span>
+      </template>
+      <el-table
+        :data="summary?.class_compare ?? []"
+        v-loading="loading"
+        style="width: 100%"
+        size="default"
+        stripe
+      >
+        <el-table-column prop="class_name" label="班级" width="140">
+          <template #default="{ row }">
+            <span class="class-link" @click="goClass(row.class_id)">{{ row.class_name }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="student_count" label="学生数" width="100" align="center" />
+        <el-table-column label="可信行为" width="120" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.trusted_behavior_count > 0 ? 'danger' : 'info'" size="small">
+              {{ row.trusted_behavior_count }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="正向表扬" width="120" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.trusted_praise_count > 0 ? 'success' : 'info'" size="small">
+              {{ row.trusted_praise_count }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="考勤" align="center">
+          <template #default>
+            <el-tag type="warning" size="small" effect="plain">来源未核验</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="成绩" align="center">
+          <template #default>
+            <el-tag type="info" size="small" effect="plain">待接入</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty
+        v-if="!summary?.class_compare?.length && !loading"
+        description="暂无班级数据"
+        :image-size="50"
+      />
+    </el-card>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- ④ 我的快捷操作                           -->
     <!-- ════════════════════════════════════════ -->
     <el-card shadow="never" class="ws-card">
       <template #header>
@@ -105,14 +207,26 @@
         </span>
       </template>
       <div class="quick-actions">
-        <el-button type="danger" size="large" class="quick-btn" @click="go('/behavior')">
-          <el-icon><EditPen /></el-icon> 行为登记
-          <span class="quick-sub">15 秒违纪记录</span>
-        </el-button>
-        <el-button type="success" size="large" class="quick-btn" @click="go('/evaluation/positive-entry')">
-          <el-icon><Plus /></el-icon> 正向表扬
-          <span class="quick-sub">15 秒表扬记录</span>
-        </el-button>
+        <template v-if="isGradeLeader">
+          <el-button type="primary" size="large" class="quick-btn" @click="go('/class-mgmt')">
+            <el-icon><School /></el-icon> 查看班级
+            <span class="quick-sub">班级管理</span>
+          </el-button>
+          <el-button type="warning" size="large" class="quick-btn" @click="askAI()">
+            <el-icon><MagicStick /></el-icon> AI 分析年级
+            <span class="quick-sub">一句话了解年级情况</span>
+          </el-button>
+        </template>
+        <template v-else>
+          <el-button type="danger" size="large" class="quick-btn" @click="go('/behavior')">
+            <el-icon><EditPen /></el-icon> 行为登记
+            <span class="quick-sub">15 秒违纪记录</span>
+          </el-button>
+          <el-button type="success" size="large" class="quick-btn" @click="go('/evaluation/positive-entry')">
+            <el-icon><Plus /></el-icon> 正向表扬
+            <span class="quick-sub">15 秒表扬记录</span>
+          </el-button>
+        </template>
       </div>
     </el-card>
 
@@ -164,6 +278,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   HomeFilled, BellFilled, TrendCharts, EditPen, Plus, MagicStick, Search, WarningFilled,
+  DataAnalysis, Histogram, School,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/store/user'
 import { getWorkspaceSummary, type WorkspaceSummary } from '@/api/workstation'
@@ -175,6 +290,7 @@ const summary = ref<WorkspaceSummary | null>(null)
 const loading = ref(false)
 const aiQuestion = ref('')
 
+const isGradeLeader = computed(() => userStore.currentIdentity === 'grade_leader')
 const scopeName = computed(() => summary.value?.scope?.name ?? userStore.currentWorkstationTitle ?? '本班')
 const studentCountText = computed(() => {
   const n = summary.value?.cards?.student_count
@@ -222,6 +338,11 @@ async function loadSummary() {
 
 function go(path: string) {
   router.push(path)
+}
+
+function goClass(classId: number) {
+  // 班级对比 → 查看具体班级（年级组长视角）
+  router.push({ path: '/student-registry', query: { class_id: String(classId) } })
 }
 
 function askAI() {
@@ -294,8 +415,48 @@ function askAI() {
 .empty-hint { font-size: 12px; color: #c0c4cc; }
 
 /* ② 本班动态 */
-.dynamic-grid { margin: 0; }
-.dynamic-col { padding-bottom: 4px; }
+.dynamic-grid { margin: 0; }.dynamic-col { padding-bottom: 4px; }
+
+/* ② 年级概览（年级组长） */
+.overview-grid { margin: 0; }
+.overview-col { padding-bottom: 4px; }
+.overview-card {
+  padding: 14px;
+  border-radius: 8px;
+  background: #fafafa;
+  border: 1px solid #ebeef5;
+  text-align: center;
+  cursor: default;
+}
+.overview-card:hover { border-color: #409eff; }
+.overview-label { font-size: 13px; color: #909399; }
+.overview-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: #303133;
+  margin: 6px 0;
+}
+.trusted-empty-note {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #909399;
+  text-align: center;
+}
+
+/* ③ 班级对比 */
+.card-hint {
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #909399;
+}
+.class-link {
+  color: #409eff;
+  cursor: pointer;
+  font-weight: 500;
+}
+.class-link:hover { text-decoration: underline; }
+
 .dynamic-card {
   padding: 14px;
   border-radius: 8px;

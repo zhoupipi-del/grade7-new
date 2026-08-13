@@ -328,6 +328,7 @@ async def build_workspace_summary(db, user, identity: str, scope_type: str, scop
                 "open_tasks": None,  # Task Center 未建 → 不假造待办
             },
             "attention": attention,
+            "class_compare": [],
             "data_quality": {
                 "behavior": _SUMMARY_DATA_QUALITY_TRUSTED if trusted_behavior > 0 else _SUMMARY_DATA_QUALITY_READY,
                 "praise": _SUMMARY_DATA_QUALITY_TRUSTED if trusted_praise > 0 else _SUMMARY_DATA_QUALITY_READY,
@@ -336,12 +337,28 @@ async def build_workspace_summary(db, user, identity: str, scope_type: str, scop
         }
 
     if identity == IDENTITY_GRADE_LEADER and scope_type == "grade" and scope_id_i:
-        # ── 年级组长（V1 简化）：年级级可信汇总 ──
+        # ── 年级组长（V1 完整版，2026-08-13）──
+        # 年级概览 + 班级对比；只消费可信口径（teacher_manual），
+        # legacy/test/system 永不进正式指标；成绩/考勤来源未核验诚实标注。
         from sqlalchemy import func, select
 
+        from core.models import Class, Grade, Student
         from modules.behavior.models import DisciplineRecord
         from modules.evaluation.models import EvaluationScore
 
+        # 年级学生数 / 班级数
+        student_count = await db.scalar(
+            select(func.count()).select_from(Student).where(
+                Student.school_id == school_id, Student.grade_id == scope_id_i
+            )
+        ) or 0
+        class_count = await db.scalar(
+            select(func.count()).select_from(Class).where(
+                Class.school_id == school_id, Class.grade_id == scope_id_i
+            )
+        ) or 0
+
+        # 年级可信行为/表扬
         trusted_behavior = await db.scalar(
             select(func.count()).select_from(DisciplineRecord).where(
                 DisciplineRecord.school_id == school_id,
@@ -357,16 +374,50 @@ async def build_workspace_summary(db, user, identity: str, scope_type: str, scop
             )
         ) or 0
 
-        grade_name = None
-        try:
-            from core.models import Grade
-
-            grade_name = await db.scalar(
-                select(Grade.name).where(Grade.id == scope_id_i, Grade.school_id == school_id)
+        # 班级对比：各班学生数 + 可信行为/表扬（可信口径，Grade Scope 内）
+        class_rows = (
+            await db.execute(
+                select(Class.id, Class.name)
+                .where(Class.school_id == school_id, Class.grade_id == scope_id_i)
+                .order_by(Class.id)
             )
-        except Exception:  # noqa: BLE001
-            grade_name = None
+        ).all()
+        class_compare = []
+        for cid, cname in class_rows:
+            c_students = await db.scalar(
+                select(func.count()).select_from(Student).where(
+                    Student.school_id == school_id,
+                    Student.class_id == cid,
+                    Student.grade_id == scope_id_i,
+                )
+            ) or 0
+            c_behavior = await db.scalar(
+                select(func.count()).select_from(DisciplineRecord).where(
+                    DisciplineRecord.school_id == school_id,
+                    DisciplineRecord.class_id == cid,
+                    DisciplineRecord.source == "teacher_manual",
+                )
+            ) or 0
+            c_praise = await db.scalar(
+                select(func.count()).select_from(EvaluationScore).where(
+                    EvaluationScore.school_id == school_id,
+                    EvaluationScore.class_id == cid,
+                    EvaluationScore.source == "teacher_manual",
+                )
+            ) or 0
+            class_compare.append({
+                "class_id": int(cid),
+                "class_name": cname,
+                "student_count": int(c_students),
+                "trusted_behavior_count": int(c_behavior),
+                "trusted_praise_count": int(c_praise),
+            })
 
+        grade_name = await db.scalar(
+            select(Grade.name).where(Grade.id == scope_id_i, Grade.school_id == school_id)
+        ) or f"年级{scope_id_i}"
+
+        # 今日重点：只在有真实可信异常/数据时填充；否则 []（前端显示"暂无"）
         attention = []
         if trusted_behavior > 0:
             attention.append({
@@ -386,19 +437,22 @@ async def build_workspace_summary(db, user, identity: str, scope_type: str, scop
             "scope": {
                 "type": "grade",
                 "id": scope_id_i,
-                "name": grade_name or f"年级{scope_id_i}",
+                "name": grade_name,
             },
             "cards": {
-                "student_count": None,
+                "student_count": int(student_count),
+                "class_count": int(class_count),
                 "trusted_behavior_count": int(trusted_behavior),
                 "trusted_praise_count": int(trusted_praise),
-                "open_tasks": None,
+                "open_tasks": None,  # Task Center 未建 → 不造待办
             },
             "attention": attention,
+            "class_compare": class_compare,
             "data_quality": {
                 "behavior": _SUMMARY_DATA_QUALITY_TRUSTED if trusted_behavior > 0 else _SUMMARY_DATA_QUALITY_READY,
                 "praise": _SUMMARY_DATA_QUALITY_TRUSTED if trusted_praise > 0 else _SUMMARY_DATA_QUALITY_READY,
                 "attendance": _SUMMARY_DATA_QUALITY_UNVERIFIED,
+                "grades": _SUMMARY_DATA_QUALITY_UNVERIFIED,  # 成绩表无 source 标记，诚实标注
             },
         }
 
@@ -417,6 +471,7 @@ async def build_workspace_summary(db, user, identity: str, scope_type: str, scop
             "open_tasks": None,
         },
         "attention": [],
+        "class_compare": [],
         "data_quality": {
             "behavior": _SUMMARY_DATA_QUALITY_UNVERIFIED,
             "praise": _SUMMARY_DATA_QUALITY_UNVERIFIED,

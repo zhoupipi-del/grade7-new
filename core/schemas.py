@@ -222,6 +222,7 @@ class WorkspaceDataQualityOut(BaseModel):
     behavior: str = "source_unverified"
     praise: str = "source_unverified"
     attendance: str = "source_unverified"
+    grades: str = "source_unverified"
 
 
 class WorkspaceSummaryOut(BaseModel):
@@ -229,4 +230,5 @@ class WorkspaceSummaryOut(BaseModel):
     scope: WorkspaceScopeOut
     cards: WorkspaceCardsOut
     attention: list[WorkspaceAttentionItem] = []
+    class_compare: list[dict] = []
     data_quality: WorkspaceDataQualityOut
