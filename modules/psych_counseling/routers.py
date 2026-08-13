@@ -27,6 +27,10 @@
 
 from core.models import Student, User
 from core.routers import get_current_user, get_db
+from core.privacy_audit import (
+    guard_and_audit, log_access, ACCESS_ALLOWED, ACCESS_DENIED,
+    PURPOSE_STUDENT_SUPPORT, PURPOSE_SECURITY_AUDIT,
+)
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from modules.psych_counseling.models import (
     PsyAppointment,
@@ -351,7 +355,13 @@ async def api_list_appointments(
     # P0-2: 班主任/年级组长限定本班/本年级学生范围 (读侧 IDOR 防御)
     allowed_student_ids = await _allowed_student_ids(db, current_user)
     if student_id is not None:
-        await _assert_student_access(db, current_user, student_id)
+        # CF-02: 行级越权(404/403) 与放行均写入敏感访问审计
+        await guard_and_audit(
+            db, current_user, student_id,
+            lambda: _assert_student_access(db, current_user, student_id),
+            resource_type="psych_appointment", action="read_list",
+            purpose=PURPOSE_STUDENT_SUPPORT,
+        )
 
     appointments, total = await list_appointments(
         db=db,
@@ -612,7 +622,13 @@ async def api_list_consult_records(
     # P0-2: 班主任/年级组长限定本班/本年级学生范围 (读侧 IDOR 防御)
     allowed_student_ids = await _allowed_student_ids(db, current_user)
     if student_id is not None:
-        await _assert_student_access(db, current_user, student_id)
+        # CF-02: 行级越权(404/403) 与放行均写入敏感访问审计
+        await guard_and_audit(
+            db, current_user, student_id,
+            lambda: _assert_student_access(db, current_user, student_id),
+            resource_type="psych_consult_record", action="read_list",
+            purpose=PURPOSE_STUDENT_SUPPORT,
+        )
 
     records, total = await list_consult_records(
         db=db,
@@ -676,7 +692,24 @@ async def api_get_consult_record(
             requester_student_id=requester_student_id,
             allowed_student_ids=allowed_student_ids,
         )
-        return ConsultRecordResponse(
+    except ValueError as e:
+        # CF-02: 越权/不存在 → 记 denied
+        await log_access(
+            db, user_id=current_user.id, school_id=current_user.school_id,
+            student_id=None, resource_type="psych_consult_record",
+            resource_id=str(record_id), action="read_detail",
+            purpose=PURPOSE_SECURITY_AUDIT, result=ACCESS_DENIED,
+            detail=f"consult record access denied: {e}",
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    # CF-02: 放行 → allowed
+    await log_access(
+        db, user_id=current_user.id, school_id=current_user.school_id,
+        student_id=data.get("student_id"), resource_type="psych_consult_record",
+        resource_id=str(record_id), action="read_detail",
+        purpose=PURPOSE_STUDENT_SUPPORT, result=ACCESS_ALLOWED,
+    )
+    return ConsultRecordResponse(
             id=data["id"],
             appointment_id=data["appointment_id"],
             student_id=data["student_id"],
@@ -694,8 +727,6 @@ async def api_get_consult_record(
             created_at=data["created_at"],
             updated_at=data["updated_at"],
         )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.get("/records/student/{student_id}", response_model=ConsultRecordListResponse)
@@ -713,8 +744,13 @@ async def api_student_consult_history(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="仅教师和管理员可查看学生咨询历史",
         )
-    # P0-2: 班主任/年级组长仅可查本班/本年级学生 (读侧 IDOR 防御)
-    await _assert_student_access(db, current_user, student_id)
+    # P0-2 + CF-02: 行级越权(404/403) 与放行均写入敏感访问审计
+    await guard_and_audit(
+        db, current_user, student_id,
+        lambda: _assert_student_access(db, current_user, student_id),
+        resource_type="psych_consult_record", action="read_detail",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
     records, total = await list_consult_records(
         db=db,
         school_id=current_user.school_id,

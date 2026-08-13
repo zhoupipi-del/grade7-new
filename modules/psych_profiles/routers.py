@@ -32,6 +32,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.models import User, Student, Class, Grade, get_local_now
 from core.routers import get_db, get_current_user
 from core.access import get_student_or_403
+from core.privacy_audit import (
+    guard_and_audit, log_access, ACCESS_ALLOWED, ACCESS_DENIED,
+    PURPOSE_STUDENT_SUPPORT, PURPOSE_SCREENING_REVIEW, PURPOSE_SECURITY_AUDIT,
+)
 from modules.psych_profiles.models import PsyProfile, PsyScreeningRecord
 from modules.psych_profiles import services as svc
 from modules.psych_profiles.schemas import (
@@ -50,10 +54,20 @@ router = APIRouter(tags=["心理档案与双轨预警"])
 # ============================================================
 async def require_psych_write(
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
-    """写操作门禁: MS_ADMIN / counselor / GRADE_LEADER"""
+    """写操作门禁: MS_ADMIN / counselor / GRADE_LEADER
+
+    CF-02: 角色越权(403) 写入敏感访问审计（denied）。
+    """
     role = (current_user.role or "").lower()
     if role not in {"ms_admin", "counselor", "grade_leader"}:
+        await log_access(
+            db, user_id=current_user.id, school_id=current_user.school_id,
+            student_id=None, resource_type="psych_profile", resource_id="role_check",
+            action="write_role_check", purpose=PURPOSE_SECURITY_AUDIT,
+            result=ACCESS_DENIED, detail="role not in psych write allowlist",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="仅系统管理员、心理老师和年级组长可操作心理档案",
@@ -63,10 +77,20 @@ async def require_psych_write(
 
 async def require_psych_read(
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
-    """读操作门禁: MS_ADMIN / counselor / GRADE_LEADER / CLASS_TEACHER"""
+    """读操作门禁: MS_ADMIN / counselor / GRADE_LEADER / CLASS_TEACHER
+
+    CF-02: 角色越权(403) 写入敏感访问审计（denied）。
+    """
     role = (current_user.role or "").lower()
     if role not in {"ms_admin", "counselor", "grade_leader", "class_teacher"}:
+        await log_access(
+            db, user_id=current_user.id, school_id=current_user.school_id,
+            student_id=None, resource_type="psych_profile", resource_id="role_check",
+            action="read_role_check", purpose=PURPOSE_SECURITY_AUDIT,
+            result=ACCESS_DENIED, detail="role not in psych read allowlist",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权访问心理档案数据",
@@ -160,6 +184,12 @@ async def api_list_profiles(
         item["student_name"] = name_map.get(p.student_id)
         items.append(item)
 
+    # CF-02: 合法聚合读取写入审计（allowed）
+    await log_access(
+        db, user_id=current_user.id, school_id=current_user.school_id,
+        student_id=None, resource_type="psych_profile", resource_id="scope",
+        action="read_list", purpose=PURPOSE_STUDENT_SUPPORT, result=ACCESS_ALLOWED,
+    )
     return {"total": total, "page": page, "page_size": page_size, "items": items}
 
 
@@ -175,7 +205,13 @@ async def api_get_profile(
     班主任/年级组长必须满足行级 scope 才能读该学生档案。
     """
     # S0-3 P0：行级归属（家长→bound_student_id / 班主任→本班 / 年级组长→本年级 / MS_ADMIN→本校）
-    await get_student_or_403(db, current_user, student_id)
+    # CF-02: 行级越权(403/404) 与放行均写入敏感访问审计。
+    await guard_and_audit(
+        db, current_user, student_id,
+        lambda: get_student_or_403(db, current_user, student_id),
+        resource_type="psych_profile", action="read_detail",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
     profile = await svc.get_profile(db, current_user.school_id, student_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="该学生暂无心理档案")
@@ -387,6 +423,12 @@ async def api_list_screenings(
         page=page, page_size=page_size,
         student_ids=scope,
     )
+    # CF-02: 合法聚合读取写入审计（allowed）
+    await log_access(
+        db, user_id=current_user.id, school_id=current_user.school_id,
+        student_id=None, resource_type="psych_screening_record", resource_id="scope",
+        action="read_list", purpose=PURPOSE_SCREENING_REVIEW, result=ACCESS_ALLOWED,
+    )
     return {
         "total": total, "page": page, "page_size": page_size,
         "items": [
@@ -412,8 +454,14 @@ async def api_student_screenings(
     """学生筛查历史
 
     S0-3 P0 修复：行级归属校验。
+    CF-02: 行级越权(403/404) 与放行均写入敏感访问审计。
     """
-    await get_student_or_403(db, current_user, student_id)
+    await guard_and_audit(
+        db, current_user, student_id,
+        lambda: get_student_or_403(db, current_user, student_id),
+        resource_type="psych_screening_record", action="read_detail",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     records = await svc.get_student_screenings(db, current_user.school_id, student_id, limit)
     return {
         "student_id": student_id,
@@ -461,6 +509,12 @@ async def api_comprehensive_risks(
     """
     from core.access import student_id_scope
     scope = await student_id_scope(db, current_user)
+    # CF-02: 合法聚合读取写入审计（allowed）
+    await log_access(
+        db, user_id=current_user.id, school_id=current_user.school_id,
+        student_id=None, resource_type="psych_nexus", resource_id="scope",
+        action="read_list", purpose=PURPOSE_STUDENT_SUPPORT, result=ACCESS_ALLOWED,
+    )
     data = await svc.get_comprehensive_risks(
         db, school_id=current_user.school_id,
         co_trigger_only=co_trigger_only,
@@ -480,8 +534,14 @@ async def api_student_nexus(
     """单个学生双轨详细画像 — 学业预警历史 + 筛查历史 + RDI四维 + 咨询摘要
 
     S0-3 P0 修复：行级归属校验。
+    CF-02: 行级越权(403/404) 与放行均写入敏感访问审计。
     """
-    await get_student_or_403(db, current_user, student_id)
+    await guard_and_audit(
+        db, current_user, student_id,
+        lambda: get_student_or_403(db, current_user, student_id),
+        resource_type="psych_nexus", action="read_detail",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
     detail = await svc.get_student_nexus_detail(db, current_user.school_id, student_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="学生不存在")
@@ -506,6 +566,12 @@ async def api_dashboard(
     """
     from core.access import student_id_scope
     scope = await student_id_scope(db, current_user)
+    # CF-02: 合法聚合读取写入审计（allowed）
+    await log_access(
+        db, user_id=current_user.id, school_id=current_user.school_id,
+        student_id=None, resource_type="psych_dashboard", resource_id="scope",
+        action="read_list", purpose=PURPOSE_STUDENT_SUPPORT, result=ACCESS_ALLOWED,
+    )
     data = await svc.get_dashboard_stats(
         db, current_user.school_id, student_ids=scope,
     )
@@ -520,4 +586,10 @@ async def api_tag_suggestions(
 ):
     """标签建议 — 从现有档案中提取高频标签"""
     tags = await svc.get_tag_suggestions(db, current_user.school_id, limit)
+    # CF-02: 合法读取写入审计（allowed）
+    await log_access(
+        db, user_id=current_user.id, school_id=current_user.school_id,
+        student_id=None, resource_type="psych_profile", resource_id="scope",
+        action="read_list", purpose=PURPOSE_STUDENT_SUPPORT, result=ACCESS_ALLOWED,
+    )
     return {"tags": tags}

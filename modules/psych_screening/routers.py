@@ -73,6 +73,11 @@ from modules.psych_screening.schemas import (
     EFFECT_RATING_CHOICES,
 )
 
+from core.privacy_audit import (
+    guard_and_audit, log_access, ACCESS_ALLOWED, ACCESS_DENIED,
+    PURPOSE_SCREENING_REVIEW, PURPOSE_SECURITY_AUDIT,
+)
+
 router = APIRouter(tags=["psych-screening"])
 
 
@@ -191,7 +196,13 @@ async def list_surveys(
 ):
     """心理筛查问卷列表 (含统计)"""
     # 权限 scope 覆盖
-    scope = _get_scope_params(current_user)
+    # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
+    scope = await guard_and_audit(
+        db, current_user, None,
+        lambda: _get_scope_params(current_user),
+        resource_type="psych_screening", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     if scope.get("grade_id"):
         grade_id = scope["grade_id"]
     if scope.get("class_id"):
@@ -307,7 +318,13 @@ async def get_dimension_data(
     MSSMHS-55 十维度聚合数据 (ECharts 雷达图)。
     支持按班级/年级筛选，兼容角色 scope。
     """
-    scope = _get_scope_params(current_user)
+    # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
+    scope = await guard_and_audit(
+        db, current_user, None,
+        lambda: _get_scope_params(current_user),
+        resource_type="psych_screening", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     if scope.get("grade_id"):
         grade_id = scope["grade_id"]
     if scope.get("class_id"):
@@ -333,7 +350,13 @@ async def ai_analysis(
     """
     DeepSeek AI 宏观分析 → 心理健康白皮书 (仅管理员/年级组长)。
     """
-    scope = _get_scope_params(current_user)
+    # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
+    scope = await guard_and_audit(
+        db, current_user, None,
+        lambda: _get_scope_params(current_user),
+        resource_type="psych_screening", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     grade_id = req.grade_id or scope.get("grade_id")
     class_id = req.class_id
 
@@ -357,7 +380,13 @@ async def sync_surveys(
     """
     一键同步: 扫描中高风险问卷 → 批量创建/更新评估记录 (幂等)。
     """
-    scope = _get_scope_params(current_user)
+    # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
+    scope = await guard_and_audit(
+        db, current_user, None,
+        lambda: _get_scope_params(current_user),
+        resource_type="psych_screening", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     if scope.get("grade_id"):
         grade_id = scope["grade_id"]
 
@@ -385,7 +414,13 @@ async def list_psych_assessments(
     current_user: User = Depends(get_current_user),
 ):
     """心理健康评估列表"""
-    scope = _get_scope_params(current_user)
+    # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
+    scope = await guard_and_audit(
+        db, current_user, None,
+        lambda: _get_scope_params(current_user),
+        resource_type="psych_screening", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     if scope.get("grade_id"):
         grade_id = scope["grade_id"]
     if scope.get("class_id"):
@@ -511,8 +546,13 @@ async def get_assessment_detail(
     if not assessment:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "评估记录不存在")
 
-    # 权限检查
-    _verify_student_scope(current_user, assessment.class_id, assessment.grade_id)
+    # 权限检查 + CF-02: 行级越权(403) 与放行均写入敏感访问审计
+    await guard_and_audit(
+        db, current_user, assessment.student_id,
+        lambda: _verify_student_scope(current_user, assessment.class_id, assessment.grade_id),
+        resource_type="psych_assessment", action="read_detail",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
 
     stu = assessment.student
     student_name = stu.name if stu else None
@@ -670,7 +710,13 @@ async def list_psych_interventions(
     ),
 ):
     """干预追踪列表"""
-    scope = _get_scope_params(current_user)
+    # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
+    scope = await guard_and_audit(
+        db, current_user, None,
+        lambda: _get_scope_params(current_user),
+        resource_type="psych_screening", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     if scope.get("grade_id"):
         grade_id = scope["grade_id"]
     if scope.get("class_id"):
@@ -855,7 +901,13 @@ async def intervention_timeline(
     if not student:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "学生不存在")
 
-    _verify_student_scope(current_user, student.class_id, student.grade_id)
+    # CF-02: 行级越权(403) 与放行均写入敏感访问审计
+    await guard_and_audit(
+        db, current_user, student_id,
+        lambda: _verify_student_scope(current_user, student.class_id, student.grade_id),
+        resource_type="psych_intervention", action="read_detail",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
 
     result = await get_intervention_timeline(
         db=db,
@@ -932,7 +984,13 @@ async def search_psych_students(
     搜索学生 (按姓名+权限 scope)，用于干预创建 Modal。
     返回结果含最新 MH 风险等级。
     """
-    scope = _get_scope_params(current_user)
+    # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
+    scope = await guard_and_audit(
+        db, current_user, None,
+        lambda: _get_scope_params(current_user),
+        resource_type="psych_screening", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     results = await search_students(
         db=db,
         school_id=current_user.school_id,
@@ -1034,7 +1092,13 @@ async def get_dashboard(
     ),
 ):
     """心理筛查仪表盘聚合统计"""
-    scope = _get_scope_params(current_user)
+    # CF-02: 列表/聚合读 + 作用域越权(403) 均写入敏感访问审计
+    scope = await guard_and_audit(
+        db, current_user, None,
+        lambda: _get_scope_params(current_user),
+        resource_type="psych_screening", action="read_list",
+        purpose=PURPOSE_SCREENING_REVIEW,
+    )
     if scope.get("grade_id"):
         grade_id = scope["grade_id"]
     if scope.get("class_id"):
