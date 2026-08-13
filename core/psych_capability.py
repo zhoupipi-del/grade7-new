@@ -216,7 +216,7 @@ async def require_psych_access(
         )
         raise HTTPException(status_code=403, detail="无权访问心理详情数据")
 
-    # detail / attention 均放行，写 allowed
+    # detail / attention 均放行，写 allowed（detail 字段记录访问级别，便于账本精确追溯）
     await log_access(
         db,
         user_id=user.id,
@@ -229,5 +229,6 @@ async def require_psych_access(
         scope_type=scope_type,
         scope_id=scope_id,
         result=ACCESS_ALLOWED,
+        detail=f"level={level}",
     )
     return level
