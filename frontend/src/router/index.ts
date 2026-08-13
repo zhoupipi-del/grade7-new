@@ -491,6 +491,16 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'tasks',
+        name: 'TaskCenter',
+        component: () => import('@/views/tasks/TaskCenter.vue'),
+        meta: {
+          title: '任务中心',
+          icon: 'List',
+          roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'] as UserRole[],
+        },
+      },
+      {
         path: 'teacher-mgmt',
         name: 'TeacherManagement',
         component: () => import('@/views/teacher-mgmt/Index.vue'),

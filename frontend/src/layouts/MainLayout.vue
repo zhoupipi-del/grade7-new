@@ -405,6 +405,12 @@ const allMenuGroups: MenuGroup[] = [
         icon: 'UserFilled',
         roles: ['MS_ADMIN'],
       },
+      {
+        index: '/tasks',
+        title: '任务中心',
+        icon: 'List',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
+      },
     ],
   },
   // ── 2. 德育管理中心：违纪→处分→评价→风险→处方闭环 ──
