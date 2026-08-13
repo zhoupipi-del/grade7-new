@@ -77,6 +77,9 @@ from core.privacy_audit import (
     guard_and_audit, log_access, ACCESS_ALLOWED, ACCESS_DENIED,
     PURPOSE_SCREENING_REVIEW, PURPOSE_SECURITY_AUDIT,
 )
+from core.psych_capability import (
+    require_psych_access, attention_payload, PSY_ATTENTION, PSY_DETAIL,
+)
 
 router = APIRouter(tags=["psych-screening"])
 
@@ -529,7 +532,7 @@ async def create_psych_assessment(
     )
 
 
-@router.get("/assessments/{assessment_id}", response_model=AssessmentDetailOut)
+@router.get("/assessments/{assessment_id}")
 async def get_assessment_detail(
     assessment_id: int,
     db: AsyncSession = Depends(get_db),
@@ -546,13 +549,14 @@ async def get_assessment_detail(
     if not assessment:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "评估记录不存在")
 
-    # 权限检查 + CF-02: 行级越权(403) 与放行均写入敏感访问审计
-    await guard_and_audit(
+    # CF-01: 统一专业授权入口（counselor → detail；班主任/年级组长 → 关注标记；其余 403）
+    level = await require_psych_access(
         db, current_user, assessment.student_id,
-        lambda: _verify_student_scope(current_user, assessment.class_id, assessment.grade_id),
         resource_type="psych_assessment", action="read_detail",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
 
     stu = assessment.student
     student_name = stu.name if stu else None
@@ -882,15 +886,13 @@ async def followup_psych_intervention(
     )
 
 
-@router.get("/interventions/timeline/{student_id}", response_model=InterventionTimelineResponse)
+@router.get("/interventions/timeline/{student_id}")
 async def intervention_timeline(
     student_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(
-        require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER)
-    ),
+    current_user: User = Depends(get_current_user),
 ):
-    """学生干预时间轴 (含风险变化趋势)"""
+    """学生干预时间轴 (含风险变化趋势) — CF-01 专业授权"""
     student = await db.execute(
         select(Student).where(
             Student.id == student_id,
@@ -901,13 +903,14 @@ async def intervention_timeline(
     if not student:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "学生不存在")
 
-    # CF-02: 行级越权(403) 与放行均写入敏感访问审计
-    await guard_and_audit(
+    # CF-01: 统一专业授权入口（counselor → detail；班主任/年级组长 → 关注标记；其余 403）
+    level = await require_psych_access(
         db, current_user, student_id,
-        lambda: _verify_student_scope(current_user, student.class_id, student.grade_id),
         resource_type="psych_intervention", action="read_detail",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
 
     result = await get_intervention_timeline(
         db=db,

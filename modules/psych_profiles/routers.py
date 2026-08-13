@@ -31,10 +31,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import User, Student, Class, Grade, get_local_now
 from core.routers import get_db, get_current_user
-from core.access import get_student_or_403
 from core.privacy_audit import (
-    guard_and_audit, log_access, ACCESS_ALLOWED, ACCESS_DENIED,
+    log_access, ACCESS_ALLOWED, ACCESS_DENIED,
     PURPOSE_STUDENT_SUPPORT, PURPOSE_SCREENING_REVIEW, PURPOSE_SECURITY_AUDIT,
+)
+from core.psych_capability import (
+    require_psych_access, attention_payload, PSY_ATTENTION, PSY_DETAIL,
 )
 from modules.psych_profiles.models import PsyProfile, PsyScreeningRecord
 from modules.psych_profiles import services as svc
@@ -197,22 +199,26 @@ async def api_list_profiles(
 async def api_get_profile(
     student_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
 ):
     """心理档案详情 — 含学生基本信息 + 最近筛查/咨询记录
 
-    S0-3 P0 修复：行级归属校验。家长/学生被 require_psych_read 排除，
-    班主任/年级组长必须满足行级 scope 才能读该学生档案。
+    CF-01：统一专业授权入口。
+      counselor assignment → 完整详情；班主任/年级组长(本班/本年级) → 仅关注标记；
+      其余(任课教师/ms_admin/跨 scope) → 403/404。CF-02 审计由 require_psych_access 内聚。
     """
-    # S0-3 P0：行级归属（家长→bound_student_id / 班主任→本班 / 年级组长→本年级 / MS_ADMIN→本校）
-    # CF-02: 行级越权(403/404) 与放行均写入敏感访问审计。
-    await guard_and_audit(
+    level = await require_psych_access(
         db, current_user, student_id,
-        lambda: get_student_or_403(db, current_user, student_id),
         resource_type="psych_profile", action="read_detail",
         purpose=PURPOSE_STUDENT_SUPPORT,
     )
     profile = await svc.get_profile(db, current_user.school_id, student_id)
+
+    if level == PSY_ATTENTION:
+        # 关注标记：只返回专业跟进信号，不返回任何量表/风险/咨询/危机详情
+        return attention_payload(professional_followup_required=(profile is not None))
+
+    # level == PSY_DETAIL：完整详情
     if profile is None:
         raise HTTPException(status_code=404, detail="该学生暂无心理档案")
 
@@ -449,20 +455,17 @@ async def api_student_screenings(
     student_id: int,
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
 ):
-    """学生筛查历史
-
-    S0-3 P0 修复：行级归属校验。
-    CF-02: 行级越权(403/404) 与放行均写入敏感访问审计。
-    """
-    await guard_and_audit(
+    """学生筛查历史 — CF-01 专业授权：counselor 详情 / 班主任年级组长关注标记 / 其余 403"""
+    level = await require_psych_access(
         db, current_user, student_id,
-        lambda: get_student_or_403(db, current_user, student_id),
         resource_type="psych_screening_record", action="read_detail",
         purpose=PURPOSE_SCREENING_REVIEW,
     )
     records = await svc.get_student_screenings(db, current_user.school_id, student_id, limit)
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=bool(records))
     return {
         "student_id": student_id,
         "total": len(records),
@@ -529,20 +532,17 @@ async def api_comprehensive_risks(
 async def api_student_nexus(
     student_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_psych_read),
+    current_user: User = Depends(get_current_user),
 ):
-    """单个学生双轨详细画像 — 学业预警历史 + 筛查历史 + RDI四维 + 咨询摘要
-
-    S0-3 P0 修复：行级归属校验。
-    CF-02: 行级越权(403/404) 与放行均写入敏感访问审计。
-    """
-    await guard_and_audit(
+    """单个学生双轨详细画像 — CF-01 专业授权：counselor 详情 / 班主任年级组长关注标记 / 其余 403"""
+    level = await require_psych_access(
         db, current_user, student_id,
-        lambda: get_student_or_403(db, current_user, student_id),
         resource_type="psych_nexus", action="read_detail",
         purpose=PURPOSE_STUDENT_SUPPORT,
     )
     detail = await svc.get_student_nexus_detail(db, current_user.school_id, student_id)
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=(detail is not None))
     if detail is None:
         raise HTTPException(status_code=404, detail="学生不存在")
     return detail

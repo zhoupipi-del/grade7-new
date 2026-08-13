@@ -31,9 +31,13 @@ from core.privacy_audit import (
     guard_and_audit, log_access, ACCESS_ALLOWED, ACCESS_DENIED,
     PURPOSE_STUDENT_SUPPORT, PURPOSE_SECURITY_AUDIT,
 )
+from core.psych_capability import (
+    require_psych_access, attention_payload, PSY_ATTENTION, PSY_DETAIL,
+)
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from modules.psych_counseling.models import (
     PsyAppointment,
+    PsyConsultRecord,
 )
 from modules.psych_counseling.schemas import (
     AppointmentCreateRequest,
@@ -666,48 +670,38 @@ async def api_list_consult_records(
     return ConsultRecordListResponse(status="success", records=items, total=total)
 
 
-@router.get("/records/{record_id}", response_model=ConsultRecordResponse)
+@router.get("/records/{record_id}")
 async def api_get_consult_record(
     record_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取单条咨询记录 — 按角色自动解密/脱敏"""
-    role = (current_user.role or "").lower()
-    # P0-1: 学生/家长仅可查看绑定学生本人的咨询记录，防止同校 IDOR 越权
-    requester_student_id = current_user.bound_student_id if role in {"student", "parent"} else None
-    # P0-2: 班主任/年级组长仅可查本班/本年级学生的记录 (读侧 IDOR 防御)
-    allowed_student_ids = (
-        await _allowed_student_ids(db, current_user)
-        if role in {"class_teacher", "grade_leader"}
-        else None
+    """获取单条咨询记录 — CF-01 专业授权：counselor 详情 / 班主任年级组长关注标记 / 其余 403"""
+    rec = await db.execute(
+        select(PsyConsultRecord).where(
+            PsyConsultRecord.id == record_id,
+            PsyConsultRecord.school_id == current_user.school_id,
+        )
     )
-    try:
-        data = await get_consult_record(
-            db=db,
-            school_id=current_user.school_id,
-            record_id=record_id,
-            user_role=current_user.role,
-            user_id=current_user.id,
-            requester_student_id=requester_student_id,
-            allowed_student_ids=allowed_student_ids,
-        )
-    except ValueError as e:
-        # CF-02: 越权/不存在 → 记 denied
-        await log_access(
-            db, user_id=current_user.id, school_id=current_user.school_id,
-            student_id=None, resource_type="psych_consult_record",
-            resource_id=str(record_id), action="read_detail",
-            purpose=PURPOSE_SECURITY_AUDIT, result=ACCESS_DENIED,
-            detail=f"consult record access denied: {e}",
-        )
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    # CF-02: 放行 → allowed
-    await log_access(
-        db, user_id=current_user.id, school_id=current_user.school_id,
-        student_id=data.get("student_id"), resource_type="psych_consult_record",
-        resource_id=str(record_id), action="read_detail",
-        purpose=PURPOSE_STUDENT_SUPPORT, result=ACCESS_ALLOWED,
+    rec = rec.scalar_one_or_none()
+    if not rec:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="咨询记录不存在")
+
+    level = await require_psych_access(
+        db, current_user, rec.student_id,
+        resource_type="psych_consult_record", action="read_detail",
+        purpose=PURPOSE_STUDENT_SUPPORT,
+    )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=True)
+
+    # level == PSY_DETAIL：完整详情（counselor assignment，可解密）
+    data = await get_consult_record(
+        db=db,
+        school_id=current_user.school_id,
+        record_id=record_id,
+        user_role=current_user.role,
+        user_id=current_user.id,
     )
     return ConsultRecordResponse(
             id=data["id"],
@@ -729,7 +723,7 @@ async def api_get_consult_record(
         )
 
 
-@router.get("/records/student/{student_id}", response_model=ConsultRecordListResponse)
+@router.get("/records/student/{student_id}")
 async def api_student_consult_history(
     student_id: int,
     limit: int = Query(20, ge=1, le=100),
@@ -737,17 +731,9 @@ async def api_student_consult_history(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """某学生的全部咨询历史 — 班主任/心理老师/管理员可查"""
-    role = (current_user.role or "").lower()
-    if role not in {"ms_admin", "counselor", "grade_leader", "class_teacher"}:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="仅教师和管理员可查看学生咨询历史",
-        )
-    # P0-2 + CF-02: 行级越权(404/403) 与放行均写入敏感访问审计
-    await guard_and_audit(
+    """某学生的全部咨询历史 — CF-01 专业授权：counselor 详情 / 班主任年级组长关注标记 / 其余 403"""
+    level = await require_psych_access(
         db, current_user, student_id,
-        lambda: _assert_student_access(db, current_user, student_id),
         resource_type="psych_consult_record", action="read_detail",
         purpose=PURPOSE_STUDENT_SUPPORT,
     )
@@ -758,6 +744,8 @@ async def api_student_consult_history(
         limit=limit,
         offset=offset,
     )
+    if level == PSY_ATTENTION:
+        return attention_payload(professional_followup_required=bool(records))
     items = []
     for r in records:
         items.append(

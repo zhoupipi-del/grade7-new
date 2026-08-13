@@ -48,13 +48,9 @@ async def _check_counselor_role(
 ) -> bool:
     """
     双重验证: 检查用户是否为心理老师。
-    1. 先看 user.role 是否为 counselor
-    2. 再看 teacher_role_assignments 中是否有有效 counselor 分配
+    CF-01：只认 role_type=counselor 的 active TeacherRoleAssignment，
+    不再把 user.role in {ms_admin, counselor} 当作解密权 —— ms_admin 默认无心理详情。
     """
-    role_lower = (user_role or "").lower()
-    if role_lower in PRIVILEGED_ROLES:
-        return True
-
     # 查 teacher_role_assignments 表
     from modules.teacher_mgmt.models import TeacherRoleAssignment
 
@@ -436,15 +432,12 @@ async def get_consult_record(
     if allowed_student_ids is not None and record.student_id not in allowed_student_ids:
         raise ValueError("咨询记录不存在")
 
-    # 解密权限判断
-    can_decrypt = await _is_counselor_or_admin(user_role)
-    if not can_decrypt:
-        # 进一步查 teacher_role_assignments
-        can_decrypt = await _check_counselor_role(db, user_id, school_id, user_role)
+    # 解密权限判断 — CF-01：仅 counselor assignment（ms_admin 不默认解密）
+    can_decrypt = await _check_counselor_role(db, user_id, school_id, user_role)
 
-    plaintext = decrypt_clog(record.encrypted_clog)
+    plaintext = decrypt_clog(record.encrypted_clog) if record.encrypted_clog else ""
     clog_display = (
-        _mask_plaintext(plaintext, user_role) if can_decrypt else _mask_plaintext("", "other")
+        plaintext if can_decrypt else "【详细记录仅心理老师可查看】"
     )
 
     if can_decrypt:
