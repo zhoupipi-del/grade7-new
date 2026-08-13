@@ -23,9 +23,6 @@ import os
 import time
 from datetime import datetime, timezone
 
-from core.deepseek_provider import DeepSeekProvider
-
-_deepseek = DeepSeekProvider()
 from celery import Task
 from celery.exceptions import Retry
 from sqlalchemy import Engine, create_engine
@@ -90,15 +87,24 @@ _CIRCUIT_THRESHOLD = 3
 _CIRCUIT_COOLDOWN = 60  # seconds
 
 
-def _call_deepseek(prompt: str, system_prompt: str, timeout: int = 60) -> dict:
+def _call_deepseek(
+    prompt: str,
+    system_prompt: str,
+    timeout: int = 60,
+    *,
+    context: dict | None = None,
+    data_classification: str = "psych_sensitive",
+) -> dict | None:
     """
-    调用 DeepSeek API，带熔断器 + 超时控制
-    返回解析后的 JSON dict
+    ⑤.5 CF-03：经 AI Privacy Gateway 调用外部 LLM（唯一合规出口）。
+
+    返回解析后的 JSON dict；若被 Gateway 阻断（psych/PII fail-closed）或总开关关闭，
+    或 JSON 解析失败，返回 None → 调用方须走确定性降级，绝不外发
+    姓名/心理量表明细/咨询危机元数据/电话/身份证/地址。
     """
     global _circuit_failures, _circuit_cooldown_until
 
-    # ⑤.5 P0-0：外部心理 AI 总开关（默认禁用）
-    # 命中即返回 None，绝不向任何外部 Provider 发送数据（含姓名/心理/电话/身份证/地址）
+    # ⑤.5 P0-0：外部心理 AI 总开关（默认禁用）—— 最快短路，不触碰任何 Provider
     if not EXTERNAL_PSYCH_AI_ENABLED:
         logger.warning(
             "[AI-Tasks] 外部心理 AI 已按 ⑤.5 合规要求停用，"
@@ -106,7 +112,7 @@ def _call_deepseek(prompt: str, system_prompt: str, timeout: int = 60) -> dict:
         )
         return None
 
-    # 熔断器检查
+    # 熔断器检查（保留原语义）
     if _circuit_failures >= _CIRCUIT_THRESHOLD:
         if time.time() < _circuit_cooldown_until:
             raise RuntimeError("LLM 熔断器开启中，暂时不可用")
@@ -114,32 +120,52 @@ def _call_deepseek(prompt: str, system_prompt: str, timeout: int = 60) -> dict:
             # 冷却结束，重置
             _circuit_failures = 0
 
+    # ⑤.5 CF-03：经 Gateway 收编（psych/PII fail-closed 阻断；字段最小化 + 去标识化）
+    from core.privacy_gateway import PrivacyGateway
+
+    gw = PrivacyGateway()
+    school_id = context.get("school_id") if context else None
+    student_id = (context.get("student") or {}).get("id") if context else None
     try:
-        content, _ = _deepseek.call(
+        content, audit = gw.call(
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
+            data_classification=data_classification,
+            school_id=school_id,
+            student_id=student_id,
             timeout=timeout,
             json_mode=True,
-            temperature=0.3,
             max_tokens=4096,
         )
-        result = json.loads(content)
-
-        # 成功 → 重置熔断器
-        _circuit_failures = 0
-        return result
-
     except Exception as exc:
+        # 传输层异常 → 触发熔断器并重试
         _circuit_failures += 1
         if _circuit_failures >= _CIRCUIT_THRESHOLD:
             _circuit_cooldown_until = time.time() + _CIRCUIT_COOLDOWN
             logger.error(
                 "[AI-Tasks] 熔断器触发！连续失败 %s 次，冷却 %s 秒",
-                _circuit_failures, _CIRCUIT_COOLDOWN
+                _circuit_failures, _CIRCUIT_COOLDOWN,
             )
         raise RuntimeError(f"DeepSeek 调用失败：{exc}") from exc
+
+    # 审计回写：随 context 落 raw_snapshot，可追「这次外部 LLM 到底看到了什么」
+    if context is not None:
+        context["privacy_audit"] = audit
+
+    if content is None:
+        logger.warning(
+            "[AI-Tasks] Gateway 阻断外发（%s），走确定性降级", audit.get("reason", "")
+        )
+        return None
+
+    try:
+        result = json.loads(content)
+        _circuit_failures = 0  # 成功 → 重置熔断器
+        return result
+    except Exception:
+        return None
 
 
 # ─────────────────────────────────────────────
@@ -240,7 +266,7 @@ def generate_class_diagnosis(
 
         # 调用 DeepSeek
         logger.info("[AI-Tasks] 开始生成班级诊断：class_id=%s", context["class"]["id"])
-        result = _call_deepseek(prompt, SYSTEM_PROMPT_CLASS)
+        result = _call_deepseek(prompt, SYSTEM_PROMPT_CLASS, context=context)
         if result is None:
             # ⑤.5 P0-0：外部 AI 停用 → 确定性降级（无 PII / 无心理明细 / 不调外部）
             result = _deterministic_class_result(context)
@@ -332,7 +358,7 @@ def generate_student_intervention(
 
         # 调用 DeepSeek
         logger.info("[AI-Tasks] 开始生成学生干预处方 (V3)：student_id=%s", context["student"]["id"])
-        result = _call_deepseek(prompt, SYSTEM_PROMPT_STUDENT)
+        result = _call_deepseek(prompt, SYSTEM_PROMPT_STUDENT, context=context)
         if result is None:
             # ⑤.5 P0-0：外部 AI 停用 → 确定性降级（仅 RDI 聚合 / 不含姓名/心理/电话/身份证/地址）
             result = _deterministic_student_result(context)
@@ -1124,7 +1150,10 @@ def bridge_rdi_to_approval(
 
         # ── Step 2: 调用 DeepSeek 生成干预处方 (V3 三段式) ──
         prompt = _build_student_prompt(context)
-        result = _call_deepseek(prompt, SYSTEM_PROMPT_STUDENT)
+        result = _call_deepseek(prompt, SYSTEM_PROMPT_STUDENT, context=context)
+        if result is None:
+            # ⑤.5 CF-03：Gateway 阻断（或开关关闭）→ 确定性降级，避免桥接链路崩溃
+            result = _deterministic_student_result(context)
 
         risk_level_str = result.get("risk_level", "HIGH")
         summary = result.get("summary", "")
