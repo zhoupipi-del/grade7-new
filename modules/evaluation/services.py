@@ -1091,44 +1091,61 @@ class EvaluationService:
         dimension: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        sort_by: str = "score",  # score=正向积分榜 / count=表扬次数榜
     ) -> List[dict]:
         """
-        正向加分排行榜 — 按正向加分总分降序
+        正向加分排行榜 — 只消费「可信正向 EvaluationScore」（2026-08-13 治理）。
 
-        Args:
-            class_id: 班级ID（可选，不传则返回全校排名）
-            grade_id: 年级ID（可选）
-            school_id: 学校ID
-            dimension: 维度筛选（可选：moral/academic/health/art/social）
-            limit: 返回记录数
-            offset: 偏移量
+        数据源（修复 G4 断裂）：
+          旧实现读 score_logs(change_amount>0)，而正向加分写 EvaluationScore，
+          两表断裂导致排行榜永远查不到。现改为直读 EvaluationScore 且严格过滤：
+            school_id = 当前学校
+            AND source = 'teacher_manual'        ← 只统计真实老师登记
+            AND indicator_id IN 正向表扬指标白名单  ← 成绩导入/常规评分永不进榜
 
-        Returns:
-            排名列表，每项包含 student_id, student_name, class_name, positive_score, record_count
+        两种榜单（sort_by）：
+          score → 正向积分榜：SUM(score) 降序
+          count → 表扬次数榜：COUNT(events) 降序
         """
-        # 构建基础查询：从 score_logs 表统计正向加分
-        # 只统计 change_amount > 0 的记录（正向加分）
         from core.models import Student, Class
+
+        # 正向表扬指标白名单（QuickPraise 治理 2026-08-13）：
+        #   德育正向（品德之星/助人为乐/拾金不昧/诚信守诺/责任担当/文明礼仪）
+        #   社会实践（志愿服务/劳动技能/校园志愿/社区服务/公益捐赠/劳动实践）
+        #   健康/艺术正向（体育竞赛/文体活动/文艺演出/艺术考级）
+        # 学业成绩(ind 8 等)与常规素质评分不属表扬，永不入榜。
+        positive_indicator_ids = {
+            4, 5,      # 责任担当 / 文明礼仪
+            21, 22,    # 志愿服务 / 劳动技能
+            25, 26, 27, 28,  # 品德之星 / 助人为乐 / 拾金不昧 / 诚信守诺
+            29,        # 体育竞赛
+            30, 31, 32,  # 文体活动 / 文艺演出 / 艺术考级
+            33, 34, 35, 36,  # 校园志愿 / 社区服务 / 公益捐赠 / 劳动实践
+        }
 
         query = (
             select(
-                ScoreLog.student_id,
+                EvaluationScore.student_id,
                 Student.name.label("student_name"),
                 Class.name.label("class_name"),
-                func.sum(ScoreLog.change_amount).label("positive_score"),
-                func.count(ScoreLog.id).label("record_count"),
+                func.sum(EvaluationScore.score).label("positive_score"),
+                func.count(EvaluationScore.id).label("record_count"),
             )
-            .join(Student, ScoreLog.student_id == Student.id)
+            .join(Student, EvaluationScore.student_id == Student.id)
             .join(Class, Student.class_id == Class.id)
             .where(
-                ScoreLog.change_amount > 0,  # 只统计正向加分
-                Class.school_id == school_id,
+                EvaluationScore.school_id == school_id,
+                EvaluationScore.source == "teacher_manual",  # 只统计真实老师登记
+                EvaluationScore.indicator_id.in_(positive_indicator_ids),
             )
         )
 
-        # 维度筛选（ScoreLog 自带 dimension 字段）
+        # 维度筛选（通过指标维度）
         if dimension:
-            query = query.where(ScoreLog.dimension == dimension)
+            query = query.join(
+                EvaluationIndicator,
+                EvaluationScore.indicator_id == EvaluationIndicator.id,
+            ).where(EvaluationIndicator.dimension == dimension)
 
         # 班级/年级筛选
         if class_id:
@@ -1136,10 +1153,19 @@ class EvaluationService:
         if grade_id:
             query = query.where(Class.grade_id == grade_id)
 
-        # 分组、排序、分页
+        # 分组、排序（积分榜或次数榜）、分页
+        order_col = (
+            func.sum(EvaluationScore.score)
+            if sort_by == "count"
+            else func.sum(EvaluationScore.score)
+        )
+        # sort_by=count → 按次数排；否则按积分排
+        if sort_by == "count":
+            order_col = func.count(EvaluationScore.id)
+
         query = (
-            query.group_by(ScoreLog.student_id, Student.name, Class.name)
-            .order_by(func.sum(ScoreLog.change_amount).desc())
+            query.group_by(EvaluationScore.student_id, Student.name, Class.name)
+            .order_by(order_col.desc())
             .limit(limit)
             .offset(offset)
         )

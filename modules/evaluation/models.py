@@ -97,6 +97,16 @@ class EvaluationScore(Base, SchoolMixin):
     semester = Column(String(20), nullable=False)
     comment = Column(Text, default="")
     created_at = Column(DateTime, default=get_local_now)
+    # 数据来源（2026-08-13 Data Capture Audit）：
+    #   teacher_manual=真实老师登记 / import=批量导入(成绩) / system_generated=系统派生
+    #   test_demo=测试 / legacy_unknown=历史来源不明（默认，保守）
+    source = Column(
+        String(20), nullable=False, default="legacy_unknown", server_default="legacy_unknown",
+        index=True,
+        comment="数据来源: teacher_manual/system_generated/import/device/test_demo/legacy_unknown",
+    )
+    # 事件发生日期（表扬是"某天发生的事"）；旧数据可为 NULL，查询兼容 created_at
+    incident_date = Column(Date, nullable=True, comment="事件发生日期；NULL 表示未知，兼容 created_at")
 
     # 关系
     indicator = relationship("EvaluationIndicator", lazy="selectin")

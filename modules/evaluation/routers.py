@@ -511,15 +511,21 @@ async def get_positive_score_ranking(
     class_id: int | None = Query(None, description="班级ID（不传则返回全校排名）"),
     grade_id: int | None = Query(None, description="年级ID"),
     dimension: str | None = Query(None, description="维度筛选（moral/academic/health/art/social）"),
+    sort_by: str = Query("score", description="score=正向积分榜 / count=表扬次数榜"),
     limit: int = Query(50, ge=1, le=200, description="返回记录数"),
     offset: int = Query(0, ge=0, description="偏移量"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    正向加分排行榜 — 按正向加分总分降序
+    正向加分排行榜 — 只消费「可信正向 EvaluationScore」（2026-08-13 治理）。
 
-    支持按班级、年级、维度筛选。
+    数据源修复：旧实现读 score_logs(change_amount>0) 与 EvaluationScore 断裂，
+    排行榜永远查不到正向加分。现直读 EvaluationScore 且严格过滤：
+      source='teacher_manual' AND indicator∈正向表扬指标白名单
+    成绩导入(import)与常规评分永不进榜。
+
+    支持 sort_by：score=正向积分榜 / count=表扬次数榜；班级/年级/维度筛选。
 
     权限:
       - MS_ADMIN: 可查看全校
@@ -544,6 +550,7 @@ async def get_positive_score_ranking(
         grade_id=grade_id,
         school_id=current_user.school_id,
         dimension=dimension,
+        sort_by=sort_by,
         limit=limit,
         offset=offset,
     )
