@@ -467,7 +467,12 @@ class BehaviorService:
           []    → 零可见，恒假条件（fail-closed）
           [...] → 白名单 IN 过滤
         """
-        conditions = [DisciplineRecord.school_id == school_id]
+        # 数据来源口径(Data Capture Audit 2026-08-13): 正式统计只消费可信原始事件
+        # teacher_manual=老师真实登记; system_generated/legacy_unknown/test_demo 不计入
+        conditions = [
+            DisciplineRecord.school_id == school_id,
+            DisciplineRecord.source == "teacher_manual",
+        ]
         if student_ids is not None:
             conditions.append(
                 DisciplineRecord.student_id.in_(student_ids) if student_ids else false()
@@ -536,6 +541,7 @@ class BehaviorService:
             )
             .where(
                 DisciplineRecord.school_id == school_id,
+                DisciplineRecord.source == "teacher_manual",
                 DisciplineRecord.incident_date >= six_months_ago,
             )
             .group_by("year", "month")
