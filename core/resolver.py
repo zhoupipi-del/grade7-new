@@ -8,7 +8,7 @@ core/resolver.py — ResponsibleOwnerResolver V1（责任归属解析）
   1. Assignment 是唯一责任事实源——绝不从 teacher.class_id / 历史字段 /
      姓名匹配 / 角色猜测责任人；没有 Assignment 就返回 unresolved。
   2. Resolver 只解析责任，不制造任务——输出 owner/scope/source/confidence/
-     unresolved_reason；Task Center 才负责生成/分派/状态流转。
+     assignment_id；Task Center 才负责生成/分派/状态流转。
   3. 越权用户不能借 Resolver 枚举其他年级/班级责任人——解析前先验 scope。
 
 解析能力（V1）：
@@ -16,15 +16,20 @@ core/resolver.py — ResponsibleOwnerResolver V1（责任归属解析）
   student_id + subject  → 任课教师（teacher_subjects 学科+班级粒度优先，
                           assignment subject_teacher@class 兜底）
   grade_id              → grade_leader@grade（年级组长）
+  need_counselor=True   → counselor（心理负责人：class>grade>school 优先，
+                          仅返回已配置的 Assignment，没配置返回 no_assignment）
 
-输出约定：
-  resolved: true/false
-  owner/owner_name/owner_role   （resolved=true 时）
-  role_type/scope_type/scope_id （责任岗位）
-  source: assignment_* | teacher_subjects | unresolved
+输出约定（每条都带证据）：
+  status: resolved / unresolved
+  owner_user_id / owner            （resolved=true 时）
+  responsibility / role_type       （责任岗位）
+  scope_type / scope_id
+  source: assignment_homeroom_teacher | assignment_grade_leader |
+          teacher_subjects | assignment_subject_teacher | assignment_counselor | unresolved
   confidence: high/medium/low
-  unresolved_reason             （resolved=false 时: no_assignment / conflict / no_access）
-  conflict: [owner 列表]        （同一 Assignment 多条 → 显式冲突）
+  assignment_id                    （命中 Assignment 的主键，证据；unresolved 为 null）
+  unresolved_reason / reason       （resolved=false 时: no_assignment / conflict / no_access / invalid_request）
+  conflict: [owner 列表]            （同一 Assignment 多条 → 显式冲突）
 """
 
 from __future__ import annotations
@@ -49,13 +54,13 @@ async def _get_student_class(db, school_id: int, student_id: int):
 
 
 async def _homeroom_of_class(db, school_id: int, class_id: int) -> list[dict]:
-    """class 的班主任（Assignment 事实源，is_active + 未过期）"""
+    """class 的班主任（Assignment 事实源，is_active + 未过期）→ [{user_id, assignment_id}]"""
     from modules.teacher_mgmt.models import TeacherRoleAssignment as TRA
 
     now = datetime.now()
     rows = (
         await db.execute(
-            select(TRA.teacher_user_id)
+            select(TRA.teacher_user_id, TRA.id)
             .where(
                 TRA.school_id == school_id,
                 TRA.role_type == "homeroom_teacher",
@@ -66,17 +71,17 @@ async def _homeroom_of_class(db, school_id: int, class_id: int) -> list[dict]:
             )
         )
     ).all()
-    return [int(r[0]) for r in rows]
+    return [{"user_id": int(r[0]), "assignment_id": int(r[1])} for r in rows]
 
 
 async def _grade_leader_of_grade(db, school_id: int, grade_id: int) -> list[dict]:
-    """grade 的年级组长（Assignment 事实源）"""
+    """grade 的年级组长（Assignment 事实源）→ [{user_id, assignment_id}]"""
     from modules.teacher_mgmt.models import TeacherRoleAssignment as TRA
 
     now = datetime.now()
     rows = (
         await db.execute(
-            select(TRA.teacher_user_id)
+            select(TRA.teacher_user_id, TRA.id)
             .where(
                 TRA.school_id == school_id,
                 TRA.role_type == "grade_leader",
@@ -87,11 +92,11 @@ async def _grade_leader_of_grade(db, school_id: int, grade_id: int) -> list[dict
             )
         )
     ).all()
-    return [int(r[0]) for r in rows]
+    return [{"user_id": int(r[0]), "assignment_id": int(r[1])} for r in rows]
 
 
 async def _subject_teacher(db, school_id: int, class_id: int, subject: str) -> list[dict]:
-    """任课教师（teacher_subjects 学科+班级粒度；is_active）"""
+    """任课教师（teacher_subjects 学科+班级粒度；is_active）→ [{user_id, assignment_id=None}]"""
     from modules.teacher_mgmt.models import TeacherSubject
 
     now = datetime.now()
@@ -107,17 +112,17 @@ async def _subject_teacher(db, school_id: int, class_id: int, subject: str) -> l
             )
         )
     ).all()
-    return [int(r[0]) for r in rows]
+    return [{"user_id": int(r[0]), "assignment_id": None} for r in rows]
 
 
 async def _assignment_subject_teacher(db, school_id: int, class_id: int) -> list[dict]:
-    """兜底：assignment subject_teacher@class（无学科维度，只能到班级级）"""
+    """兜底：assignment subject_teacher@class（无学科维度，只能到班级级）→ [{user_id, assignment_id}]"""
     from modules.teacher_mgmt.models import TeacherRoleAssignment as TRA
 
     now = datetime.now()
     rows = (
         await db.execute(
-            select(TRA.teacher_user_id)
+            select(TRA.teacher_user_id, TRA.id)
             .where(
                 TRA.school_id == school_id,
                 TRA.role_type == "subject_teacher",
@@ -128,7 +133,39 @@ async def _assignment_subject_teacher(db, school_id: int, class_id: int) -> list
             )
         )
     ).all()
-    return [int(r[0]) for r in rows]
+    return [{"user_id": int(r[0]), "assignment_id": int(r[1])} for r in rows]
+
+
+async def _counselor_for_scope(db, school_id: int, class_id=None, grade_id=None) -> list[dict]:
+    """心理负责人（counselor）：class > grade > school 优先级；仅返回已配置 Assignment。
+
+    返回 [{user_id, assignment_id}]，按优先级排序（class 最优先）。
+    """
+    from modules.teacher_mgmt.models import TeacherRoleAssignment as TRA
+
+    now = datetime.now()
+    rows = (
+        await db.execute(
+            select(TRA.teacher_user_id, TRA.id, TRA.scope_type, TRA.scope_id)
+            .where(
+                TRA.school_id == school_id,
+                TRA.role_type == "counselor",
+                TRA.is_active.is_(True),
+                TRA.expires_at.is_(None) | (TRA.expires_at > now),
+            )
+        )
+    ).all()
+    matched = []
+    for r in rows:
+        s_type, s_id = r[2], r[3]
+        if s_type == "class" and class_id is not None and s_id == class_id:
+            matched.append({"user_id": int(r[0]), "assignment_id": int(r[1]), "prio": 0})
+        elif s_type == "grade" and grade_id is not None and s_id == grade_id:
+            matched.append({"user_id": int(r[0]), "assignment_id": int(r[1]), "prio": 1})
+        elif s_type == "school":
+            matched.append({"user_id": int(r[0]), "assignment_id": int(r[1]), "prio": 2})
+    matched.sort(key=lambda x: x["prio"])
+    return [{"user_id": m["user_id"], "assignment_id": m["assignment_id"]} for m in matched]
 
 
 async def _user_names(db, user_ids: list[int]) -> dict[int, str]:
@@ -145,38 +182,50 @@ async def _user_names(db, user_ids: list[int]) -> dict[int, str]:
 def _unresolved(reason: str, **extra) -> dict:
     return {
         "resolved": False,
+        "status": "unresolved",
         "owner": None,
+        "owner_user_id": None,
         "owner_name": None,
         "owner_role": None,
         "role_type": None,
+        "responsibility": None,
         "scope_type": None,
         "scope_id": None,
         "source": "unresolved",
         "confidence": None,
         "unresolved_reason": reason,
+        "reason": reason,
         "conflict": [],
+        "assignment_id": None,
         **extra,
     }
 
 
 def _resolved(owner_id: int, owner_name: str, role: str, scope_type: str,
-              scope_id, source: str, confidence: str, conflict: list = None) -> dict:
+              scope_id, source: str, confidence: str, assignment_id=None,
+              conflict: list = None) -> dict:
     return {
         "resolved": True,
+        "status": "resolved",
         "owner": owner_id,
+        "owner_user_id": owner_id,
         "owner_name": owner_name,
         "owner_role": role,
         "role_type": role,
+        "responsibility": role,
         "scope_type": scope_type,
         "scope_id": scope_id,
         "source": source,
         "confidence": confidence,
         "unresolved_reason": None,
+        "reason": None,
         "conflict": conflict or [],
+        "assignment_id": assignment_id,
     }
 
 
-async def resolve_owner(db, user, *, student_id=None, grade_id=None, subject=None):
+async def resolve_owner(db, user, *, student_id=None, grade_id=None, subject=None,
+                        need_counselor: bool = False):
     """
     责任解析入口（Assignment 唯一事实源，不猜人，不造任务）。
 
@@ -227,21 +276,59 @@ async def resolve_owner(db, user, *, student_id=None, grade_id=None, subject=Non
         return _unresolved("no_access", reason_detail="当前角色无权解析责任")
 
     # ── 2) 按请求类型解析 ──
+    # 2d) 心理事项 → 心理负责人（counselor，class>grade>school 优先）
+    if need_counselor:
+        owners = await _counselor_for_scope(db, school_id, target_class_id, target_grade_id)
+        if not owners:
+            return _unresolved(
+                "no_assignment",
+                reason_detail="该校/年级/班级未配置心理负责人 Assignment（不猜人）",
+            )
+        if len(owners) > 1:
+            names = await _user_names(db, [o["user_id"] for o in owners])
+            return {
+                **_unresolved(
+                    "conflict",
+                    reason_detail=f"存在 {len(owners)} 个心理负责人 Assignment",
+                ),
+                "conflict": [
+                    {"user_id": o["user_id"], "username": names.get(o["user_id"], str(o["user_id"])),
+                     "assignment_id": o["assignment_id"]}
+                    for o in owners
+                ],
+            }
+        o = owners[0]
+        names = await _user_names(db, [o["user_id"]])
+        return _resolved(
+            o["user_id"], names.get(o["user_id"], str(o["user_id"])),
+            "counselor",
+            "class" if target_class_id else ("grade" if target_grade_id else "school"),
+            target_class_id or target_grade_id or school_id,
+            "assignment_counselor", "high", assignment_id=o["assignment_id"],
+        )
+
     # 2a) student_id → 班主任
     if student_id is not None and subject is None:
         owners = await _homeroom_of_class(db, school_id, target_class_id)
         if not owners:
             return _unresolved("no_assignment", reason_detail="该班无班主任 Assignment（不猜人）")
         if len(owners) > 1:
-            names = await _user_names(db, owners)
+            names = await _user_names(db, [o["user_id"] for o in owners])
             return {
                 **_unresolved("conflict", reason_detail=f"该班存在 {len(owners)} 个班主任 Assignment"),
-                "conflict": [{"user_id": o, "username": names.get(o, str(o))} for o in owners],
+                "conflict": [
+                    {"user_id": o["user_id"], "username": names.get(o["user_id"], str(o["user_id"])),
+                     "assignment_id": o["assignment_id"]}
+                    for o in owners
+                ],
             }
-        names = await _user_names(db, owners)
-        return _resolved(owners[0], names.get(owners[0], str(owners[0])),
-                         "homeroom_teacher", "class", target_class_id,
-                         "assignment_homeroom_teacher", "high")
+        o = owners[0]
+        names = await _user_names(db, [o["user_id"]])
+        return _resolved(
+            o["user_id"], names.get(o["user_id"], str(o["user_id"])),
+            "homeroom_teacher", "class", target_class_id,
+            "assignment_homeroom_teacher", "high", assignment_id=o["assignment_id"],
+        )
 
     # 2b) student_id + subject → 任课教师
     if student_id is not None and subject:
@@ -256,15 +343,22 @@ async def resolve_owner(db, user, *, student_id=None, grade_id=None, subject=Non
             return _unresolved("no_assignment",
                                reason_detail=f"该班无「{subject}」任课教师 Assignment（不猜人）")
         if len(owners) > 1:
-            names = await _user_names(db, owners)
+            names = await _user_names(db, [o["user_id"] for o in owners])
             return {
                 **_unresolved("conflict", reason_detail=f"该班「{subject}」存在 {len(owners)} 个任课教师"),
-                "conflict": [{"user_id": o, "username": names.get(o, str(o))} for o in owners],
+                "conflict": [
+                    {"user_id": o["user_id"], "username": names.get(o["user_id"], str(o["user_id"])),
+                     "assignment_id": o["assignment_id"]}
+                    for o in owners
+                ],
             }
-        names = await _user_names(db, owners)
-        return _resolved(owners[0], names.get(owners[0], str(owners[0])),
-                         "subject_teacher", "class", target_class_id,
-                         source, confidence)
+        o = owners[0]
+        names = await _user_names(db, [o["user_id"]])
+        return _resolved(
+            o["user_id"], names.get(o["user_id"], str(o["user_id"])),
+            "subject_teacher", "class", target_class_id,
+            source, confidence, assignment_id=o["assignment_id"],
+        )
 
     # 2c) grade_id → 年级组长
     if grade_id is not None:
@@ -272,14 +366,21 @@ async def resolve_owner(db, user, *, student_id=None, grade_id=None, subject=Non
         if not owners:
             return _unresolved("no_assignment", reason_detail="该年级无年级组长 Assignment（不猜人）")
         if len(owners) > 1:
-            names = await _user_names(db, owners)
+            names = await _user_names(db, [o["user_id"] for o in owners])
             return {
                 **_unresolved("conflict", reason_detail=f"该年级存在 {len(owners)} 个年级组长"),
-                "conflict": [{"user_id": o, "username": names.get(o, str(o))} for o in owners],
+                "conflict": [
+                    {"user_id": o["user_id"], "username": names.get(o["user_id"], str(o["user_id"])),
+                     "assignment_id": o["assignment_id"]}
+                    for o in owners
+                ],
             }
-        names = await _user_names(db, owners)
-        return _resolved(owners[0], names.get(owners[0], str(owners[0])),
-                         "grade_leader", "grade", int(grade_id),
-                         "assignment_grade_leader", "high")
+        o = owners[0]
+        names = await _user_names(db, [o["user_id"]])
+        return _resolved(
+            o["user_id"], names.get(o["user_id"], str(o["user_id"])),
+            "grade_leader", "grade", int(grade_id),
+            "assignment_grade_leader", "high", assignment_id=o["assignment_id"],
+        )
 
     return _unresolved("invalid_request", reason_detail="必须提供 student_id 或 grade_id")

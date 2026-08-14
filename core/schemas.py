@@ -241,17 +241,23 @@ class WorkspaceSummaryOut(BaseModel):
 class ResolveConflictItem(BaseModel):
     user_id: int
     username: Optional[str] = None
+    assignment_id: Optional[int] = None
 
 
 class ResolveOut(BaseModel):
     resolved: bool
     owner: Optional[int] = None
+    owner_user_id: Optional[int] = None
     owner_name: Optional[str] = None
     owner_role: Optional[str] = None
     role_type: Optional[str] = None
+    responsibility: Optional[str] = None
     scope_type: Optional[str] = None
     scope_id: Optional[int] = None
     source: str = "unresolved"
     confidence: Optional[str] = None
     unresolved_reason: Optional[str] = None
+    reason: Optional[str] = None
     conflict: list[ResolveConflictItem] = []
+    assignment_id: Optional[int] = None
+    status: Optional[str] = None
