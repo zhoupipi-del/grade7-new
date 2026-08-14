@@ -31,6 +31,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from modules.ai_prescription.models import (
     AIPrescription,
     PrescriptionType,
+    ReviewStatus,
     RiskLevel,
 )
 from modules.reports.celery_app import celery_engine
@@ -295,6 +296,7 @@ def generate_class_diagnosis(
                 full_text=full_text,
                 raw_snapshot=context,
                 creator_id=creator_id,
+                review_status=ReviewStatus.PENDING_REVIEW,
             )
             db.add(record)
             db.commit()
@@ -327,6 +329,7 @@ def generate_class_diagnosis(
                 full_text=f"## 生成失败\n\n{str(exc)}",
                 raw_snapshot=context,
                 creator_id=creator_id,
+                review_status=ReviewStatus.PENDING_REVIEW,
             )
             db.add(record)
             db.commit()
@@ -402,6 +405,7 @@ def generate_student_intervention(
                     },
                 },
                 creator_id=creator_id,
+                review_status=ReviewStatus.PENDING_REVIEW,
             )
             db.add(record)
             db.commit()
@@ -437,6 +441,7 @@ def generate_student_intervention(
                 full_text=f"## 生成失败\n\n{str(exc)}",
                 raw_snapshot=context,
                 creator_id=creator_id,
+                review_status=ReviewStatus.PENDING_REVIEW,
             )
             db.add(record)
             db.commit()
@@ -999,6 +1004,7 @@ def _create_approval_request(
     prescription_id: int,
     warning_id: int,
     rdi_score: float,
+    effective_content: str | None = None,
 ) -> int:
     """创建审批工单 — 将 AI 处方挂接到审批链
 
@@ -1054,6 +1060,10 @@ def _create_approval_request(
         }
         logger.info("[BRIDGE] 使用默认审批链 | school=%s", school_id)
 
+    # CF-04: 携带人工复核生效内容（MODIFIED→modified_content / CONFIRMED→full_text），
+    # 审批链下游（班主任/年级组长）看到的是「人审版」而非 AI 原版。
+    chain_config["prescription_effective_content"] = effective_content
+
     ar = ApprovalRequest(
         school_id=school_id,
         student_id=student_id,
@@ -1084,10 +1094,29 @@ def _try_notify_class_teacher(
     prescription_id: int,
     ar_id: int,
     rdi_score: float,
+    effective_content: str | None = None,
 ):
-    """通知班主任 — 解耦: 失败不影响主流程"""
+    """通知班主任 — 解耦: 失败不影响主流程；幂等: 同一处方不重复通知（Celery 重试安全）"""
     try:
         from modules.notifications.models import Notification
+
+        # 幂等检查：同一处方已发过通知则跳过（避免 Celery 重试重复打扰班主任）
+        existing = sync_db.query(Notification).filter(
+            Notification.school_id == school_id,
+            Notification.recipient_id == teacher_id,
+            Notification.entity_type == "ai_prescription",
+            Notification.entity_id == prescription_id,
+            Notification.type == "ai_intervention",
+        ).first()
+        if existing:
+            logger.info("[BRIDGE] 通知幂等跳过: prescription=%s 已有通知 #%s", prescription_id, existing.id)
+            return
+
+        # 人工复核生效内容预览（MODIFIED→人工修改版 / CONFIRMED→AI 原版）
+        preview = ""
+        if effective_content:
+            _p = effective_content.strip()
+            preview = _p[:300] + ("…" if len(_p) > 300 else "")
 
         notif = Notification(
             school_id=school_id,
@@ -1099,6 +1128,7 @@ def _try_notify_class_teacher(
                 f"系统检测到您的学生存在高危风险偏离 (RDI={rdi_score:.2f})，\n"
                 f"AI 已自动生成干预话术处方 (#{prescription_id})。\n"
                 f"请尽快查看并审批。审批工单编号: #{ar_id}"
+                + (f"\n\n—— 人工复核生效内容 ——\n{preview}" if preview else "")
             ),
             entity_type="ai_prescription",
             entity_id=prescription_id,
@@ -1125,17 +1155,18 @@ def bridge_rdi_to_approval(
     rdi_score: float,
 ) -> dict:
     """
-    Phase 2C 全自动桥接: RDI intervention → AI 处方 → 审批工单 → 通知班主任
+    CF-04 语义改造: RDI intervention → 仅生成 PENDING_REVIEW 处方（AI 建议，非正式事实）
 
     触发条件: risk_models RDI 扫描发现 risk_level == 'intervention'
     执行队列: high_priority (含 LLM 调用, 预计 10-30s)
 
-    流程:
+    流程 (CF-04 后不再自动桥接):
       1. 构建学生黄金上下文 (async → asyncio.run 桥接)
       2. 调用 DeepSeek 生成干预话术
-      3. 落库 ai_prescriptions
-      4. 创建 approval_requests (幂等: 同一 warning 仅创建一次)
-      5. 通知班主任 (try/except 解耦)
+      3. 落库 ai_prescriptions (review_status=PENDING_REVIEW)
+      —— 停止 —— 不再自动创建审批工单、不再自动通知班主任。
+      人工复核 (confirm/modify/reject API) 后，CONFIRMED/MODIFIED 才由
+      activate_prescription_after_review 触发真正的 bridge；REJECTED 永不 bridge。
     """
     t0 = time.time()
     logger.info(
@@ -1196,6 +1227,7 @@ def bridge_rdi_to_approval(
                     },
                 },
                 creator_id=0,  # 0 = 系统
+                review_status=ReviewStatus.PENDING_REVIEW,
             )
             db.add(record)
             db.commit()
@@ -1205,43 +1237,25 @@ def bridge_rdi_to_approval(
             db.close()
 
         logger.info(
-            "[BRIDGE] AI 处方已生成 | prescription_id=%s risk=%s",
+            "[BRIDGE] AI 处方已生成(PENDING_REVIEW) | prescription_id=%s risk=%s",
             prescription_id, risk_level.value,
         )
 
-        # ── Step 4: 创建审批工单 ──
-        db = _get_sync_session()
-        try:
-            ar_id = _create_approval_request(
-                db, student_id, school_id, prescription_id, warning_id, rdi_score
-            )
-
-            # ── Step 5: 通知班主任 ──
-            teacher_id = _find_class_teacher(db, student_id, school_id)
-            if teacher_id:
-                _try_notify_class_teacher(
-                    db, teacher_id, school_id, student_id,
-                    prescription_id, ar_id, rdi_score,
-                )
-            else:
-                logger.warning(
-                    "[BRIDGE] 未找到班主任 | student=%s — 跳过通知",
-                    student_id,
-                )
-        finally:
-            db.close()
-
+        # ── CF-04: 不再自动桥接 ──
+        # 此处仅落 PENDING_REVIEW 处方（AI 建议，非正式事实）。
+        # 人工 CONFIRMED/MODIFIED 后由 activate_prescription_after_review 才创建
+        # 审批工单 + 通知班主任；REJECTED 永不 bridge。
         elapsed = round(time.time() - t0, 2)
         logger.info(
-            "[BRIDGE] 桥接完成 | student=%s prescription=%s ar=%s 耗时=%.2fs",
-            student_id, prescription_id, ar_id, elapsed,
+            "[BRIDGE] 待人工复核处方已落库 | student=%s prescription=%s 耗时=%.2fs",
+            student_id, prescription_id, elapsed,
         )
 
         return {
             "status": "SUCCESS",
             "student_id": student_id,
             "prescription_id": prescription_id,
-            "approval_request_id": ar_id,
+            "review_status": ReviewStatus.PENDING_REVIEW.value,
             "risk_level": risk_level.value,
             "elapsed_s": elapsed,
         }
@@ -1255,3 +1269,79 @@ def bridge_rdi_to_approval(
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc, countdown=2 ** self.request.retries * 10)
         return {"status": "FAILURE", "student_id": student_id, "error": str(exc)}
+
+
+@celery_engine.task(
+    bind=True,
+    name="ai_prescription.activate_prescription_after_review",
+    max_retries=2,
+    default_retry_delay=30,
+)
+def activate_prescription_after_review(
+    self: Task,
+    prescription_id: int,
+    school_id: int,
+) -> dict:
+    """
+    CF-04 人审后桥接器：仅在人工 CONFIRMED / MODIFIED 之后调用。
+
+    - RDI 桥接处方 (raw_snapshot.trigger == 'rdi_bridge')：创建审批工单 + 通知班主任。
+    - 教师主动生成的处方：人工确认即生效，不重复建审批工单（教师本身即人审）。
+    - REJECTED / PENDING_REVIEW：永不桥接，直接跳过。
+    """
+    db = _get_sync_session()
+    try:
+        prescription = db.query(AIPrescription).filter(
+            AIPrescription.id == prescription_id,
+            AIPrescription.school_id == school_id,
+        ).first()
+        if not prescription:
+            return {"status": "NO_RECORD", "prescription_id": prescription_id}
+
+        if prescription.review_status not in (ReviewStatus.CONFIRMED, ReviewStatus.MODIFIED):
+            # REJECTED 永不桥接；PENDING_REVIEW 未过闸
+            return {
+                "status": "SKIPPED",
+                "prescription_id": prescription_id,
+                "review_status": (
+                    prescription.review_status.value
+                    if prescription.review_status else None
+                ),
+            }
+
+        snapshot = prescription.raw_snapshot or {}
+        if snapshot.get("trigger") != "rdi_bridge":
+            # 教师主动生成：确认即生效，无需再建审批工单
+            return {"status": "ACTIVATED", "prescription_id": prescription_id, "note": "non-rdi"}
+
+        warning_id = snapshot.get("warning_id")
+        rdi_score = float(snapshot.get("rdi_score") or 0)
+        # CF-04: 统一 effective_content 语义
+        #   CONFIRMED → full_text（人工确认采用 AI 原版）
+        #   MODIFIED  → modified_content（人工修改版，不覆盖 AI 原文）
+        effective_content = (
+            prescription.modified_content
+            if prescription.review_status == ReviewStatus.MODIFIED
+            else prescription.full_text
+        )
+        ar_id = _create_approval_request(
+            db, prescription.target_id, school_id, prescription_id, warning_id, rdi_score,
+            effective_content,
+        )
+        teacher_id = _find_class_teacher(db, prescription.target_id, school_id)
+        if teacher_id:
+            _try_notify_class_teacher(
+                db, teacher_id, school_id, prescription.target_id,
+                prescription_id, ar_id, rdi_score, effective_content,
+            )
+        logger.info(
+            "[CF-04] 人审后桥接完成 | prescription=%s ar=%s",
+            prescription_id, ar_id,
+        )
+        return {
+            "status": "BRIDGED",
+            "prescription_id": prescription_id,
+            "approval_request_id": ar_id,
+        }
+    finally:
+        db.close()

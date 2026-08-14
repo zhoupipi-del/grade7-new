@@ -35,6 +35,19 @@ class RiskLevel(str, enum.Enum):
     LOW = "LOW"         # 低风险（正常）
 
 
+class ReviewStatus(str, enum.Enum):
+    """CF-04 人工复核状态机（Human Review Gate）
+
+    铁律：AI generate 永远只能落 PENDING_REVIEW；
+    只有人工 CONFIRMED / MODIFIED 之后才允许 bridge 进正式业务；
+    REJECTED 永不 bridge。CONFIRMED/MODIFIED/REJECTED 为终态，不可重复复核。
+    """
+    PENDING_REVIEW = "PENDING_REVIEW"   # 待人工复核（默认，AI 建议非正式事实）
+    CONFIRMED = "CONFIRMED"             # 人工确认采用 AI 原输出
+    MODIFIED = "MODIFIED"               # 人工修改后采用
+    REJECTED = "REJECTED"               # 人工驳回，永不进入业务
+
+
 class AIPrescription(Base, SchoolMixin):
     """
     AI 处方记录表
@@ -59,6 +72,24 @@ class AIPrescription(Base, SchoolMixin):
 
     # 原始快照（JSON，用于溯源 / 复现 / 审计）
     raw_snapshot = Column(JSON, nullable=True)
+
+    # ── CF-04 人工复核状态机（Human Review Gate）──
+    # AI generate 永远只能落 PENDING_REVIEW；只有人工 CONFIRMED/MODIFIED
+    # 才能 bridge 进正式业务；REJECTED 永不 bridge。
+    review_status = Column(
+        Enum(ReviewStatus),
+        # CF-04 V1：历史记录 review_status=NULL（legacy_unreviewed，不可 activate）；
+        # 新记录由业务代码显式写 PENDING_REVIEW（见 tasks.py 各生成点）。
+        # 不带 server_default，避免把历史 163 行假造成"待审核"。
+        nullable=True,
+        default=ReviewStatus.PENDING_REVIEW,
+        index=True,
+    )
+    reviewed_by = Column(Integer, nullable=True)          # 复核人（users.id）
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    review_note = Column(Text, nullable=True)            # 复核意见
+    modified_content = Column(Text, nullable=True)       # 人工修改后的完整文本（不覆盖 AI 原文）
+    modified_payload = Column(JSON, nullable=True)       # 人工修改后的结构化载荷
 
     # 创建人（触发 AI 生成的用户，无外键约束以兼容 users.id 类型）
     creator_id = Column(
@@ -98,6 +129,12 @@ class AIPrescription(Base, SchoolMixin):
             "summary": self.summary,
             "full_text": self.full_text,
             "raw_snapshot": self.raw_snapshot,
+            "review_status": self.review_status.value if self.review_status else None,
+            "reviewed_by": self.reviewed_by,
+            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
+            "review_note": self.review_note,
+            "modified_content": self.modified_content,
+            "modified_payload": self.modified_payload,
             "creator_id": self.creator_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

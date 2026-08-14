@@ -87,6 +87,7 @@ class PrescriptionHistoryItem(BaseModel):
     target_type: str
     risk_level: Optional[str] = None
     summary: Optional[str] = None
+    review_status: Optional[str] = None
     created_at: str
     creator_name: Optional[str] = None
 
@@ -95,3 +96,33 @@ class PrescriptionHistoryOut(BaseModel):
     """历史处方列表（分页）"""
     total: int
     items: list[PrescriptionHistoryItem]
+
+
+# ─────────────────────────────────────────────
+# CF-04 人工复核（Human Review Gate）
+# ─────────────────────────────────────────────
+
+class ReviewNoteRequest(BaseModel):
+    """确认 / 驳回时附带的人工复核意见"""
+    review_note: Optional[str] = Field(None, description="复核意见")
+
+
+class ModifyRequest(BaseModel):
+    """人工修改 AI 处方（不覆盖 AI 原文，写入 modified_content/modified_payload）"""
+    review_note: Optional[str] = Field(None, description="复核意见")
+    modified_content: str = Field(..., description="人工修改后的完整处方文本")
+    modified_payload: Optional[Any] = Field(None, description="人工修改后的结构化载荷（可选）")
+
+
+class ReviewResultOut(BaseModel):
+    """人审结果"""
+    id: int
+    review_status: str
+    reviewed_by: Optional[int] = None
+    reviewed_at: Optional[str] = None
+    review_note: Optional[str] = None
+    modified_content: Optional[str] = None
+    bridged: bool = Field(
+        False,
+        description="是否触发 bridge（仅 RDI 处方 CONFIRMED/MODIFIED 时为 True）",
+    )
