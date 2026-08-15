@@ -10,6 +10,7 @@ V2 变更（2026-08-12）：
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -103,7 +104,11 @@ class BoundedPlanner:
         wants_attendance = any(k in text for k in ATTENDANCE_KEYWORDS)
         wants_behavior = any(k in text for k in BEHAVIOR_KEYWORDS)
         wants_risk = any(k in text for k in RISK_KEYWORDS)
-        wants_write_marker = any(k in text for k in WRITE_MARKER_KEYWORDS)
+        # FT-015 test-only：仅 AI_APPROVAL_TEST_TOOL=1 时识别写工具意图（生产不暴露）
+        wants_write_marker = (
+            os.environ.get("AI_APPROVAL_TEST_TOOL") == "1"
+            and any(k in text for k in WRITE_MARKER_KEYWORDS)
+        )
         wants_comprehensive = any(k in text for k in COMPREHENSIVE_KEYWORDS)
 
         wants_compare = any(
