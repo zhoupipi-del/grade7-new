@@ -141,6 +141,20 @@ def _fallback_from_evidence(evidence: list[dict[str, Any]]) -> dict[str, Any]:
                     bits.append(f"{k}={v}")
             if bits:
                 findings.append(f"[{domain}] " + "，".join(bits[:4]))
+        # REAL EVENT #1：班级维度（帮助主任缩小关注范围）——
+        # risk/behavior 的 by_class 按 count 降序呈现 Top3 班级
+        by_class = result.get("by_class") or []
+        if by_class:
+            top = sorted(
+                by_class,
+                key=lambda x: x.get("count", 0) or x.get("anomalies", 0),
+                reverse=True,
+            )[:3]
+            parts = [
+                f"{c.get('class_name') or c.get('name')}({c.get('count', c.get('anomalies', 0))})"
+                for c in top
+            ]
+            findings.append(f"[{domain}] 需优先关注的班级 Top：{ '，'.join(parts) }")
     return {
         "overview": {"note": "AI 综合结论暂不可用，以下为各域聚合数据"},
         "findings": findings or ["暂无可用聚合数据"],
