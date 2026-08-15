@@ -160,7 +160,7 @@ class _RiskWarningAggregator:
                 "intervention": sum(r["count"] for r in by_level if r["level"] == "intervention"),
                 "attention": sum(r["count"] for r in by_level if r["level"] == "attention"),
             },
-            "by_level": by_level, "by_class": by_class, "by_trigger": by_trigger,
+            "by_level": by_level, "data_coverage": {"total_records": total, "empty_window": total == 0}, "by_class": by_class, "by_trigger": by_trigger,
             "unhandled": int(unhandled),
             "data_json": json.dumps({
                 "summary": {
@@ -174,6 +174,7 @@ class _RiskWarningAggregator:
                     for c in sorted(by_class, key=lambda x: x["count"], reverse=True)
                 ],
                 "note": "心理敏感字段(psych_deviation等)已在此层滤除",
+                "data_coverage": {"total_records": total, "empty_window": total == 0},
             }, ensure_ascii=False),
         }
 

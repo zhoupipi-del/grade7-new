@@ -129,7 +129,13 @@ class BoundedPlanner:
 
         # ── Step assembly ──
 
-        if wants_comprehensive or (wants_grade and wants_attendance and wants_behavior):
+        # REAL EVENT #1：德育晨报意图——(考勤 AND 行为 AND 风险) 也走多工具综合
+        # （德育主任"今日重点关注"= 考勤+行为+已有预警，通常不查成绩）
+        wants_moral_morning = (
+            wants_attendance and wants_behavior and wants_risk
+        )
+        if wants_comprehensive or (wants_grade and wants_attendance and wants_behavior) \
+                or wants_moral_morning:
             # 综合查询：全工具
             steps.append(PlanStep(
                 tool="read_class_grade_summary",

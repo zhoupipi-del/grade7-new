@@ -209,9 +209,20 @@ class _AttendanceAggregator:
         pending_sql = f"SELECT COUNT(1) FROM leave_requests l WHERE {leave_conds}"
         pending = (await self.db.execute(text(pending_sql), params)).scalar_one_or_none() or 0
 
+        # REAL EVENT #1：数据覆盖度（区分"无数据"与"无异常"）
+        total_records = sum(status_counts.values()) or 0
+        coverage = {
+            "total_records": total_records,
+            "days_with_data": len({r[0] for r in trend_rows}),
+            "first_date": str(daily_trends[0]["date"]) if daily_trends else None,
+            "last_date": str(daily_trends[-1]["date"]) if daily_trends else None,
+            "empty_window": total_records == 0,
+        }
+
         return {
             "grade_id": grade_id, "class_id": class_id,
             "period": {"days": days, "from": str(cutoff), "to": str(date.today())},
+            "data_coverage": coverage,
             "summary": {
                 "total_anomalies": total_anomalies,
                 "late": status_counts.get("late", 0),
@@ -238,6 +249,7 @@ class _AttendanceAggregator:
                     for c in sorted(by_class, key=lambda x: x["total"], reverse=True)
                 ],
                 "leave_pending": pending,
+                "data_coverage": coverage,
             }, ensure_ascii=False),
         }
 

@@ -74,6 +74,11 @@ class CopilotSynthesizer:
             "1. 编造 evidence 中不存在的事实；\n"
             "2. 输出学生姓名、学号、手机号、身份证等 PII；\n"
             "3. 把相关性表述成因果关系。\n"
+            "4. 判读规则：若某领域 evidence.data_coverage.empty_window=true 或 total_records=0，"
+            "必须明确声明该窗口内无数据记录（可能为假期/未录入），严禁据此归纳为低风险或无需关注"
+            "——无数据不等于无异常；\n"
+            "5. 若某领域（grades/behavior/risk）完全没有 evidence，必须声明该领域无可用数据，"
+            "不得静默跳过或假装已分析。\n"
             "\n严格返回 JSON：\n"
             '{"overview": {}, "findings": ["..."], '
             '"recommendations": [...], '
