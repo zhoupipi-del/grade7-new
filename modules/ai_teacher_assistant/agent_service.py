@@ -962,7 +962,8 @@ class AgentCopilotService:
             action=descriptor.action,
             side_effect=descriptor.side_effect,
             arguments_hash=args_hash,
-            idempotency_key=f"{descriptor.name}:{run_id}:{args_hash[:16]}",
+            # :fail 后缀——与成功记录(无 tag)区分，避免 uq_school_idempotency 冲突
+            idempotency_key=f"{descriptor.name}:{run_id}:{args_hash[:16]}:fail",
             resource_scope={
                 "grade_id": params.get("grade_id"),
                 "class_id": params.get("class_id"),
