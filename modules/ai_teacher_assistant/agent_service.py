@@ -770,6 +770,7 @@ class AgentCopilotService:
             "user_id": run.user_id,
             "run_id": run.id,
             "db": self.db,
+            "session": self.db,  # handler 契约：write_test_marker 从 session 取
             "user": self.user,
             "approval_args": args,
         }
