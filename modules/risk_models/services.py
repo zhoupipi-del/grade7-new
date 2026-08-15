@@ -32,6 +32,7 @@ from core.models import Class, Student, User, UserRole
 from modules.attendance.models import AttendanceRecord
 from modules.behavior.models import DisciplineRecord
 from modules.evaluation.models import StudentScore
+import hashlib
 from sqlalchemy import and_, case, false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1090,7 +1091,18 @@ class RiskWarningService:
         trigger_event_type: str | None = None,
         trigger_event_id: int | None = None,
     ) -> RiskWarning:
-        """创建风险预警记录 — 四维版 (v3.1: 新增 psych_deviation + veto 字段)"""
+        """创建/幂等更新风险预警 — DATA-GOV-001 Phase 2。
+
+        幂等语义（同 fingerprint = school+student+trigger_type+risk_level+rule_version）：
+          - 存在同 fingerprint 的"当前有效"(active 未过期未处置) 预警
+            → UPDATE last_seen_at / occurrence_count+=1 / 最新指标，
+              不 INSERT 新行（堵住每日重复报警）；
+          - 不存在（首次跨阈值，或旧记录已终态/过期/处置）
+            → INSERT 新行 occurrence_count=1, last_seen_at=now。
+
+        生命周期硬 invariant：expires_at < NOW 的记录由 truth.current_actionable_where
+        排除，绝不进入当前风险统计。
+        """
         # 查询 Student 获取真实班级/年级
         student_result = await db.execute(
             select(Student.class_id, Student.grade_id).where(Student.id == rdi_result["student_id"])
@@ -1100,6 +1112,52 @@ class RiskWarningService:
             raise ValueError(f"学生不存在: id={rdi_result['student_id']}")
         class_id, grade_id = row[0], row[1]
 
+        now = get_local_now()
+        # 幂等 fingerprint：school+student+signal(trigger_type)+level+rule_version
+        rule_version = rdi_result.get("rule_version", "rdi-v3.1")
+        fp_raw = "|".join([
+            str(school_id), str(rdi_result["student_id"]),
+            str(trigger_event_type or "unknown"), str(rdi_result["risk_level"]),
+            str(rule_version),
+        ])
+        fingerprint = hashlib.sha256(fp_raw.encode("utf-8")).hexdigest()[:64]
+
+        # 查同 fingerprint 的当前有效预警（active + 未过期 + 未处置）
+        existing = (
+            await db.execute(
+                select(RiskWarning)
+                .where(
+                    RiskWarning.school_id == school_id,
+                    RiskWarning.student_id == rdi_result["student_id"],
+                    RiskWarning.source_fingerprint == fingerprint,
+                    RiskWarning.status == "active",
+                    RiskWarning.handled_by.is_(None),
+                    (RiskWarning.expires_at.is_(None) | (RiskWarning.expires_at >= now)),
+                )
+                .order_by(RiskWarning.warned_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if existing is not None:
+            # 幂等命中：更新 last_seen / 计数 / 最新指标，不 INSERT
+            existing.occurrence_count = (existing.occurrence_count or 0) + 1
+            existing.last_seen_at = now
+            existing.rdi_score = rdi_result["rdi_score"]
+            existing.risk_level = rdi_result["risk_level"]
+            existing.behavior_deviation = rdi_result["behavior_deviation"]
+            existing.attendance_deviation = rdi_result["attendance_deviation"]
+            existing.score_deviation = rdi_result["score_deviation"]
+            existing.psych_deviation = rdi_result.get("psych_deviation", 0.0)
+            existing.psych_veto_triggered = rdi_result.get("psych_veto_triggered", False)
+            existing.veto_dimension = rdi_result.get("veto_dimension")
+            existing.ewma_trend = rdi_result.get("ewma_trend", 0.0)
+            existing.is_escalating = rdi_result.get("is_escalating", False)
+            existing.updated_at = now
+            await db.flush()
+            return existing
+
+        # 首次命中 / 旧记录已终态 → INSERT 新行
         warning = RiskWarning(
             school_id=school_id,
             student_id=rdi_result["student_id"],
@@ -1119,8 +1177,11 @@ class RiskWarningService:
             trigger_event_type=trigger_event_type,
             trigger_event_id=trigger_event_id,
             status="active",
-            warned_at=get_local_now(),
-            expires_at=get_local_now() + timedelta(days=7),
+            warned_at=now,
+            expires_at=now + timedelta(days=7),
+            source_fingerprint=fingerprint,
+            occurrence_count=1,
+            last_seen_at=now,
         )
         db.add(warning)
         await db.flush()

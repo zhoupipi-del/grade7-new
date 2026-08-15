@@ -65,6 +65,16 @@ class RiskWarning(Base, SchoolMixin):
     trigger_event_type = Column(String(40), nullable=True, comment="触发事件类型 (fighting/lateness/...)")
     trigger_event_id = Column(BigInteger, nullable=True, comment="触发事件ID")
 
+    # DATA-GOV-001 Phase 2/3：幂等 + 生命周期 + 治理打标字段
+    source_fingerprint = Column(String(80), nullable=True, index=True,
+        comment="幂等键: school+student+signal+source+version 稳定 hash; NULL=legacy")
+    occurrence_count = Column(Integer, default=1, nullable=False,
+        comment="同一 fingerprint 累计命中次数 (幂等 UPDATE 计数, 非 INSERT 行数)")
+    last_seen_at = Column(DateTime, nullable=True,
+        comment="该信号最近一次被扫描/确认的时间 (幂等 UPDATE 用)")
+    governance_status = Column(String(30), nullable=True,
+        comment="历史 reconciliation 治理打标: VALID_CURRENT/EXPIRED/DUPLICATE/SUPERSEDED/UNANCHORED/DATA_QUALITY_DEGRADED")
+
     # 时间戳
     warned_at = Column(DateTime, default=get_local_now, comment="预警生成时间")
     expires_at = Column(DateTime, nullable=True, comment="预警过期时间 (默认7天后)")
