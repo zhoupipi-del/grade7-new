@@ -3,19 +3,27 @@ modules/risk_models/truth.py — Current-risk truth model (DATA-GOV-001 Phase 1)
 
 定义"当前有效预警"的 canonical 语义，供晨报/统计/API 统一复用。
 
-CURRENT_ACTIONABLE_WARNING =
-    status 是 current（active）
+三层 canonical 语义（Closure A 拆分，未过期 ≠ 可处置）：
+
+CURRENT_UNEXPIRED
+    = status 是 current（active）
     AND 未过期 (expires_at IS NULL OR expires_at >= NOW())
     AND 未处置 (handled_by IS NULL)
-    AND 学生存在 (JOIN 保证)
-    AND school/class 有效 (调用方 where 保证)
-    AND 来源质量可接受 (data_quality 分级)
 
-数据质量分级：
-    event_anchored = trigger_event_id IS NOT NULL AND > 0  → QUALITY_OK
-    trigger_event_id 为 NULL 或 0                          → DEGRADED
-                                                             actionability = REQUIRES_VERIFICATION
-    有锚点但缺失 fingerprint (legacy)                       → 可处置但注明 legacy
+CURRENT_ACTIONABLE
+    = CURRENT_UNEXPIRED
+    AND 事件/来源锚点有效 (trigger_event_id > 0)
+
+CURRENT_REQUIRES_VERIFICATION
+    = CURRENT_UNEXPIRED
+    AND 无事件锚点 (trigger_event_id IS NULL OR = 0)
+    （governance_status 为 UNANCHORED / DATA_QUALITY_DEGRADED 的行归入此类）
+
+设计纪律：
+    - 未过期 ≠ 可处置：CURRENT_ACTIONABLE 必须同时满足事件锚定。
+    - 无锚点的 CURRENT_UNEXPIRED 一律 REQUIRES_VERIFICATION，不得与有锚点同权重。
+    - expires_at < NOW 且 status='active' 的记录，在当前风险查询中必须为 0（硬 invariant）。
+    - 原始行数 total_records 永远是审计数字，绝不参与风险强度/班级排序。
 
 设计纪律：
     - expires_at < NOW 且 status='active' 的记录，在当前风险查询中必须为 0（硬 invariant）。
@@ -36,16 +44,35 @@ GOV_UNANCHORED = "UNANCHORED"
 GOV_DATA_QUALITY_DEGRADED = "DATA_QUALITY_DEGRADED"
 
 
-def current_actionable_where(alias: str = "r") -> str:
-    """返回 canonical "当前有效预警" 的 SQL where 片段（含数据质量降级标注列）。
-
-    alias: SQL 表别名（默认 r），须与调用方查询一致。
-    """
+def current_unexpired_where(alias: str = "r") -> str:
+    """CURRENT_UNEXPIRED：active + 未过期 + 未处置（不判断锚点）。"""
     a = alias
     return (
         f"{a}.status IN ('active') "
         f"AND ({a}.expires_at IS NULL OR {a}.expires_at >= NOW()) "
         f"AND {a}.handled_by IS NULL"
+    )
+
+
+def current_actionable_where(alias: str = "r") -> str:
+    """CURRENT_ACTIONABLE：CURRENT_UNEXPIRED AND 事件锚点有效 (trigger_event_id > 0)。"""
+    a = alias
+    return (
+        f"{a}.status IN ('active') "
+        f"AND ({a}.expires_at IS NULL OR {a}.expires_at >= NOW()) "
+        f"AND {a}.handled_by IS NULL "
+        f"AND {a}.trigger_event_id IS NOT NULL AND {a}.trigger_event_id > 0"
+    )
+
+
+def current_requires_verification_where(alias: str = "r") -> str:
+    """CURRENT_REQUIRES_VERIFICATION：CURRENT_UNEXPIRED AND 无事件锚点。"""
+    a = alias
+    return (
+        f"{a}.status IN ('active') "
+        f"AND ({a}.expires_at IS NULL OR {a}.expires_at >= NOW()) "
+        f"AND {a}.handled_by IS NULL "
+        f"AND ({a}.trigger_event_id IS NULL OR {a}.trigger_event_id = 0)"
     )
 
 

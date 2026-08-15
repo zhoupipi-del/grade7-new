@@ -134,6 +134,12 @@ class _RiskWarningAggregator:
             f"COUNT(DISTINCT r.student_id) AS unique_students, "
             f"SUM(CASE WHEN r.status='active' AND r.handled_by IS NULL "
             f"AND (r.expires_at IS NULL OR r.expires_at >= NOW()) THEN 1 ELSE 0 END) AS active_unexpired, "
+            f"SUM(CASE WHEN r.status='active' AND r.handled_by IS NULL "
+            f"AND (r.expires_at IS NULL OR r.expires_at >= NOW()) "
+            f"AND r.trigger_event_id IS NOT NULL AND r.trigger_event_id > 0 THEN 1 ELSE 0 END) AS actionable, "
+            f"SUM(CASE WHEN r.status='active' AND r.handled_by IS NULL "
+            f"AND (r.expires_at IS NULL OR r.expires_at >= NOW()) "
+            f"AND (r.trigger_event_id IS NULL OR r.trigger_event_id = 0) THEN 1 ELSE 0 END) AS requires_verification, "
             f"SUM(CASE WHEN r.expires_at IS NOT NULL AND r.expires_at < NOW() THEN 1 ELSE 0 END) AS expired_not_closed, "
             f"SUM(CASE WHEN r.trigger_event_id IS NOT NULL AND r.trigger_event_id > 0 THEN 1 ELSE 0 END) AS anchored, "
             f"MAX(r.warned_at) AS last_warning_at "
@@ -165,21 +171,25 @@ class _RiskWarningAggregator:
             total_records = int(r[2])
             unique_students = int(r[3] or 0)
             active_unexpired = int(r[4] or 0)
-            expired_not_closed = int(r[5] or 0)
-            anchored = int(r[6] or 0)
+            actionable = int(r[5] or 0)
+            requires_verification = int(r[6] or 0)
+            expired_not_closed = int(r[7] or 0)
+            anchored = int(r[8] or 0)
             by_class.append({
                 "class_id": cid, "class_name": r[1],
                 "unique_students": unique_students,
                 "total_records": total_records,
                 "active_unexpired": active_unexpired,
+                "actionable": actionable,
+                "requires_verification": requires_verification,
                 "expired_not_closed": expired_not_closed,
                 "new_students_in_window": new_rows.get(cid, 0),
                 "duplicate_day_groups": dup_rows.get(cid, 0),
                 "event_anchored_ratio": round(anchored / total_records, 3) if total_records else 0.0,
-                "last_warning_at": str(r[7]) if r[7] else None,
+                "last_warning_at": str(r[9]) if r[9] else None,
             })
-        # 排序：涉及学生数优先，其次当前未过期未处置
-        by_class.sort(key=lambda x: (x["unique_students"], x["active_unexpired"]), reverse=True)
+        # 排序：涉及学生数优先，其次可处置数，再次需核验数（可处置 > 需核验，语义分级）
+        by_class.sort(key=lambda x: (x["unique_students"], x["actionable"], x["requires_verification"]), reverse=True)
 
         # Trigger type (safe, no psych fields)
         trigger_sql = (
@@ -217,7 +227,10 @@ class _RiskWarningAggregator:
                 "by_trigger": by_trigger[:5],
                 "by_class": [
                     {"class_name": c["class_name"], "unique_students": c["unique_students"],
-                     "active_unexpired": c["active_unexpired"], "total_records": c["total_records"],
+                     "active_unexpired": c["active_unexpired"],
+                     "actionable": c["actionable"],
+                     "requires_verification": c["requires_verification"],
+                     "total_records": c["total_records"],
                      "expired_not_closed": c["expired_not_closed"],
                      "new_students_in_window": c["new_students_in_window"],
                      "duplicate_day_groups": c["duplicate_day_groups"],

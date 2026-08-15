@@ -1113,14 +1113,25 @@ class RiskWarningService:
         class_id, grade_id = row[0], row[1]
 
         now = get_local_now()
-        # 幂等 fingerprint：school+student+signal(trigger_type)+level+rule_version
+        # ── 幂等 fingerprint（Closure B）：加稳定 source identity，防不同事件被错误合并 ──
+        # 组件：school | student | trigger_type | level | rule_version | source_identity
+        # source_identity:
+        #   trigger_event_id > 0 → "evt:<id>"（不同事件 → 不同 fingerprint，天然不合并）
+        #   trigger_event_id = 0/NULL → "NO_ANCHOR"（无稳定来源身份，不伪装成同一事实）
         rule_version = rdi_result.get("rule_version", "rdi-v3.1")
+        if trigger_event_id is not None and int(trigger_event_id) > 0:
+            source_identity = f"evt:{int(trigger_event_id)}"
+        else:
+            source_identity = "NO_ANCHOR"
         fp_raw = "|".join([
             str(school_id), str(rdi_result["student_id"]),
             str(trigger_event_type or "unknown"), str(rdi_result["risk_level"]),
-            str(rule_version),
+            str(rule_version), source_identity,
         ])
         fingerprint = hashlib.sha256(fp_raw.encode("utf-8")).hexdigest()[:64]
+
+        # 信号实质变化阈值（RDI 是 Z-Score，绝对差 ≥ 0.5 或等级变化视为新信号事件）
+        RDI_CHANGE_THRESHOLD = 0.5
 
         # 查同 fingerprint 的当前有效预警（active + 未过期 + 未处置）
         existing = (
@@ -1140,7 +1151,39 @@ class RiskWarningService:
         ).scalar_one_or_none()
 
         if existing is not None:
-            # 幂等命中：更新 last_seen / 计数 / 最新指标，不 INSERT
+            # ── 信号实质变化检测：变化大 → 视为新事件，INSERT 新行，绝不合并 ──
+            rdi_delta = abs(float(rdi_result["rdi_score"]) - float(existing.rdi_score or 0.0))
+            level_changed = (rdi_result["risk_level"] != existing.risk_level)
+            if rdi_delta >= RDI_CHANGE_THRESHOLD or level_changed:
+                # 新信号事件：INSERT（旧行保留，新行 = 新事实）
+                warning = RiskWarning(
+                    school_id=school_id,
+                    student_id=rdi_result["student_id"],
+                    class_id=class_id,
+                    grade_id=grade_id,
+                    rdi_score=rdi_result["rdi_score"],
+                    risk_level=rdi_result["risk_level"],
+                    behavior_deviation=rdi_result["behavior_deviation"],
+                    attendance_deviation=rdi_result["attendance_deviation"],
+                    score_deviation=rdi_result["score_deviation"],
+                    psych_deviation=rdi_result.get("psych_deviation", 0.0),
+                    psych_veto_triggered=rdi_result.get("psych_veto_triggered", False),
+                    veto_dimension=rdi_result.get("veto_dimension"),
+                    ewma_trend=rdi_result.get("ewma_trend", 0.0),
+                    is_escalating=rdi_result.get("is_escalating", False),
+                    trigger_event_type=trigger_event_type,
+                    trigger_event_id=trigger_event_id,
+                    status="active",
+                    warned_at=now,
+                    expires_at=now + timedelta(days=7),
+                    source_fingerprint=fingerprint,
+                    occurrence_count=1,
+                    last_seen_at=now,
+                )
+                db.add(warning)
+                await db.flush()
+                return warning
+            # 同一静态信号 → UPDATE（不 INSERT）
             existing.occurrence_count = (existing.occurrence_count or 0) + 1
             existing.last_seen_at = now
             existing.rdi_score = rdi_result["rdi_score"]

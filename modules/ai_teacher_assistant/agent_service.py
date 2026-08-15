@@ -153,22 +153,27 @@ def _fallback_from_evidence(evidence: list[dict[str, Any]]) -> dict[str, Any]:
         if by_class:
             def _rank(c):
                 if "unique_students" in c:
-                    return (c.get("unique_students", 0), c.get("active_unexpired", 0))
+                    return (c.get("unique_students", 0), c.get("actionable", 0),
+                            c.get("requires_verification", 0))
                 return (0, c.get("count", 0) or c.get("anomalies", 0))
             top = sorted(by_class, key=_rank, reverse=True)[:3]
             parts = []
             for c in top:
                 name = c.get("class_name") or c.get("name")
                 if "unique_students" in c:
+                    anchor_ratio = c.get("event_anchored_ratio", 0)
                     parts.append(
                         f"{name}(涉及学生{c.get('unique_students', 0)}人/"
-                        f"未过期{c.get('active_unexpired', 0)}条/"
-                        f"原始{c.get('total_records', 0)}条)"
+                        f"可直接处置{c.get('actionable', 0)}条/"
+                        f"需人工核验{c.get('requires_verification', 0)}条/"
+                        f"过期{c.get('expired_not_closed', 0)}条/"
+                        f"原始{c.get('total_records', 0)}条/"
+                        f"事件锚定率{round(anchor_ratio * 100, 0):.0f}%)"
                     )
                 else:
                     parts.append(f"{name}({c.get('count', c.get('anomalies', 0))})")
             findings.append(
-                f"[{domain}] 需优先关注的班级 Top（按涉及学生数，非原始预警条数）："
+                f"[{domain}] 需优先关注的班级 Top（按涉及学生数，未过期≠可处置）："
                 f"{'，'.join(parts)}"
             )
     return {
