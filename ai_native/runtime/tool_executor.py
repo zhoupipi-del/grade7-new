@@ -180,12 +180,35 @@ class ToolExecutor:
         descriptor: Any,
         provider: Optional[Callable] = None,
         incident_sink: Optional[Callable] = None,
+        session: Any = None,
+        tool_call_id: Optional[int] = None,
+        approval_args: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """pre/post Taint 编排（Inv 13）。
 
         descriptor 可为 ToolDescriptor 对象（主路径）或 dict（兼容旧测试）。
         handler 可为 sync 或 async（async 时本方法 await 其结果）。
         """
+        # ── ★ FT-015：Approval Gate 强制执行点（不可绕过，fail-closed）──
+        # WRITE / HIGH_RISK tool（approval_policy != none）必须持有有效 APPROVED approval
+        # 且实际参数 canonical hash == 批准时 arguments_hash（反 TOCTOU）。
+        _policy = _get_attr(descriptor, "approval_policy", "none")
+        if _policy in ("always", "policy_decides"):
+            from ai_native.runtime.approval_gate import ApprovalGate, ApprovalGateError
+            if session is None or tool_call_id is None:
+                raise ApprovalGateError(
+                    "HARD REFUSE: approval required but no session/tool_call_id")
+            _gate = ApprovalGate(session, run.get("school_id"))
+            _ok, _reason = await _gate.validate(
+                run_id=run.get("run_id"),
+                school_id=run.get("school_id"),
+                tool_call_id=tool_call_id,
+                actual_args=(approval_args if approval_args is not None
+                             else (run.get("approval_args") or {})),
+            )
+            if not _ok:
+                raise ApprovalGateError("HARD REFUSE: %s" % _reason)
+
         current = run.get("data_classification")
         declared = _get_attr(descriptor, "declared_output_classification")
 

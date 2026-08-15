@@ -180,6 +180,9 @@ def _build_all_tool_descriptors() -> list[ToolDescriptor]:
         build_read_risk_warning_summary_descriptor,
         read_risk_warning_summary_copilot_handler,
     )
+    from modules.ai_teacher_assistant.tools.write_test_marker import (
+        build_write_test_marker_descriptor,
+    )
 
     descriptors = [
         build_read_class_grade_summary_descriptor(),
@@ -197,6 +200,7 @@ def _build_all_tool_descriptors() -> list[ToolDescriptor]:
         build_read_attendance_summary_descriptor(),
         build_read_behavior_summary_descriptor(),
         build_read_risk_warning_summary_descriptor(),
+        build_write_test_marker_descriptor(),
     ]
     # V2 copilot 路径：所有 Tool 的 handler 统一指向"聚合型"handler
     # （handler 内部调用 _*Aggregator，不绕过 ToolExecutor，不调 DeepSeek）
