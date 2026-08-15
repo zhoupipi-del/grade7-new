@@ -147,7 +147,13 @@ async def approve_approval(
         service = AgentCopilotService(db=db, user=current_user)
         resume_result = await service.resume_after_approval(approval_id=approval_id)
         await db.commit()
-        return {"status": "APPROVED", "approval_id": approval_id, **resume_result}
+        # 动作状态与 run 执行状态分列（resume_result["status"] 为 run 终态）
+        return {
+            "status": "APPROVED",
+            "approval_id": approval_id,
+            "run_id": resume_result.get("run_id"),
+            "run_status": resume_result.get("status"),
+        }
     except ApprovalGateError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -177,7 +183,12 @@ async def reject_approval(
         service = AgentCopilotService(db=db, user=current_user)
         cancel_result = await service.cancel_after_reject(approval_id=approval_id)
         await db.commit()
-        return {"status": "REJECTED", "approval_id": approval_id, **cancel_result}
+        return {
+            "status": "REJECTED",
+            "approval_id": approval_id,
+            "run_id": cancel_result.get("run_id"),
+            "run_status": cancel_result.get("status"),
+        }
     except ApprovalGateError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
