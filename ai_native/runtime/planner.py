@@ -1,27 +1,25 @@
 """
-ai_native/runtime/planner.py — V1 Bounded Planner
+ai_native/runtime/planner.py — V2 Domain-Aware Bounded Planner
 
-V1 确定性 bounded planner。不做无限 ReAct，不引入 LangGraph。
-- max_steps <= 3
-- 工具白名单
-- 不会让 LLM 自己编 Tool
+V2 变更（2026-08-12）：
+- 按领域拆分关键词（GRADE/ATTENDANCE/BEHAVIOR/RISK/COMPREHENSIVE）
+- 删除"分析""关注"等通用词从成绩关键词
+- 消除 fallback=默认成绩的设计 → 未知意图返回 needs_input
+- comprehensive intent 触发多工具调用
 """
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-AllowedTool = Literal[
-    "read_class_grade_summary",
-    "compare_exam_performance",
-]
+AllowedTool = str  # V2: 放宽到 str，由 registry 校验
 
 
 class PlanStep(BaseModel):
-    tool: AllowedTool
+    tool: str
     args: dict[str, Any] = Field(default_factory=dict)
     reason: str
 
@@ -29,20 +27,50 @@ class PlanStep(BaseModel):
 class AgentPlan(BaseModel):
     goal: str
     steps: list[PlanStep]
-    max_steps: int = 3
+    max_steps: int = 5  # V2: 提升到 5（综合查询需要多工具）
+
+
+# ── Domain Keywords ──
+
+GRADE_KEYWORDS = {
+    "成绩", "考试", "分数", "学科", "平均分", "及格率",
+    "学情", "排名", "得分", "满分", "试卷",
+}
+
+ATTENDANCE_KEYWORDS = {
+    "考勤", "迟到", "早退", "缺勤", "请假",
+    "出勤", "旷课",
+}
+
+BEHAVIOR_KEYWORDS = {
+    "行为", "违纪", "纪律", "德育", "扣分",
+    "处分", "违规", "打架", "吸烟",
+}
+
+RISK_KEYWORDS = {
+    "风险", "预警", "异常", "高风险",
+}
+
+COMPREHENSIVE_KEYWORDS = {
+    "重点关注", "整体情况", "综合分析", "综合评估",
+    "本周重点", "最近有什么问题", "需要关注什么",
+    "全面分析", "管理简报", "年级管理",
+    # V2 补强：覆盖"最近值得关注的问题"等自然问法
+    "值得关注", "关注的问题", "有什么问题", "最近有什么",
+    "重点关注的问题", "值得重点关注", "整体情况如何",
+}
 
 
 class BoundedPlanner:
-    """V1 确定性有界规划器。
+    """V2 领域感知有界规划器。
 
-    目标：
-    - 自然语言 → Tool plan
-    - 不允许模型发明 Tool
-    - max_steps <= 3
-    - 不无限循环
+    升级：
+    - 领域关键词路由（不再是"一切→成绩"）
+    - 综合意图 → 多工具并行
+    - 未知意图 → 不默认成绩
     """
 
-    MAX_STEPS = 3
+    MAX_STEPS = 5
 
     def plan(
         self,
@@ -61,71 +89,102 @@ class BoundedPlanner:
             "class_id": class_id,
             "exam_id": exam_id,
         }
+        clean_args = {k: v for k, v in base_args.items() if v is not None}
 
-        # 所有成绩类任务至少先读取当前成绩摘要
-        if any(k in text for k in ("成绩", "考试", "学情", "表现", "分析", "关注", "默认")):
-            steps.append(
-                PlanStep(
-                    tool="read_class_grade_summary",
-                    args={k: v for k, v in base_args.items() if v is not None},
-                    reason="读取当前授权范围内的成绩聚合事实",
-                )
-            )
+        # ── Intent detection ──
 
-        # 有明显趋势/比较意图才调用 compare
+        wants_grade = any(k in text for k in GRADE_KEYWORDS)
+        wants_attendance = any(k in text for k in ATTENDANCE_KEYWORDS)
+        wants_behavior = any(k in text for k in BEHAVIOR_KEYWORDS)
+        wants_risk = any(k in text for k in RISK_KEYWORDS)
+        wants_comprehensive = any(k in text for k in COMPREHENSIVE_KEYWORDS)
+
         wants_compare = any(
-            k in text
-            for k in (
-                "趋势",
-                "变化",
-                "退步",
-                "进步",
-                "最近",
-                "上次",
-                "对比",
-                "比较",
-                "波动",
+            k in text for k in (
+                "趋势", "变化", "退步", "进步",
+                "最近", "上次", "对比", "比较", "波动",
             )
         )
 
-        if wants_compare or compare_exam_ids:
-            args: dict[str, Any] = {
-                "grade_id": grade_id,
-                "class_id": class_id,
-            }
-            if compare_exam_ids:
-                args["exam_ids"] = compare_exam_ids
+        # ── Step assembly ──
 
-            steps.append(
-                PlanStep(
+        if wants_comprehensive or (wants_grade and wants_attendance and wants_behavior):
+            # 综合查询：全工具
+            steps.append(PlanStep(
+                tool="read_class_grade_summary",
+                args=clean_args,
+                reason="综合审查：读取学业数据",
+            ))
+            if wants_compare or compare_exam_ids:
+                cmp_args = {k: v for k, v in base_args.items() if v is not None}
+                if compare_exam_ids:
+                    cmp_args["exam_ids"] = compare_exam_ids
+                steps.append(PlanStep(
                     tool="compare_exam_performance",
-                    args={k: v for k, v in args.items() if v is not None},
+                    args={k: v for k, v in cmp_args.items() if v is not None},
+                    reason="综合审查：比较考试变化趋势",
+                ))
+            steps.append(PlanStep(
+                tool="read_attendance_summary",
+                args=clean_args,
+                reason="综合审查：读取考勤数据",
+            ))
+            steps.append(PlanStep(
+                tool="read_behavior_summary",
+                args=clean_args,
+                reason="综合审查：读取行为纪律数据",
+            ))
+            steps.append(PlanStep(
+                tool="read_risk_warning_summary",
+                args=clean_args,
+                reason="综合审查：读取风险预警数据",
+            ))
+        elif wants_grade:
+            # 成绩领域
+            steps.append(PlanStep(
+                tool="read_class_grade_summary",
+                args=clean_args,
+                reason="读取当前授权范围内的成绩聚合事实",
+            ))
+            if wants_compare or compare_exam_ids:
+                cmp_args = {k: v for k, v in base_args.items() if v is not None}
+                if compare_exam_ids:
+                    cmp_args["exam_ids"] = compare_exam_ids
+                steps.append(PlanStep(
+                    tool="compare_exam_performance",
+                    args={k: v for k, v in cmp_args.items() if v is not None},
                     reason="比较考试间的科目表现和变化趋势",
-                )
-            )
+                ))
+        elif wants_attendance:
+            steps.append(PlanStep(
+                tool="read_attendance_summary",
+                args=clean_args,
+                reason="查询考勤数据",
+            ))
+        elif wants_behavior:
+            steps.append(PlanStep(
+                tool="read_behavior_summary",
+                args=clean_args,
+                reason="查询行为纪律数据",
+            ))
+        elif wants_risk:
+            steps.append(PlanStep(
+                tool="read_risk_warning_summary",
+                args=clean_args,
+                reason="查询风险预警数据",
+            ))
 
-        # 没命中关键词也不给空 plan
+        # ── Fallback: 未知意图 → needs_input（不默认成绩）──
         if not steps:
-            steps.append(
-                PlanStep(
-                    tool="read_class_grade_summary",
-                    args={k: v for k, v in base_args.items() if v is not None},
-                    reason="默认执行授权范围内的成绩分析",
-                )
+            # 返回空 plan，由 agent_service 标记 needs_input
+            return AgentPlan(
+                goal=goal,
+                steps=[],
+                max_steps=self.MAX_STEPS,
             )
-
-        # 去重 + bounded
-        deduped: list[PlanStep] = []
-        seen: set[str] = set()
-
-        for step in steps:
-            if step.tool in seen:
-                continue
-            seen.add(step.tool)
-            deduped.append(step)
 
         return AgentPlan(
             goal=goal,
-            steps=deduped[: self.MAX_STEPS],
+            steps=steps[:self.MAX_STEPS],
             max_steps=self.MAX_STEPS,
         )

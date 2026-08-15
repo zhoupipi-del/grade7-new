@@ -25,6 +25,7 @@ Inv 27 — CallSeqAllocator：
 
 from __future__ import annotations
 
+import inspect
 import threading
 from collections import defaultdict
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -172,7 +173,7 @@ class ToolExecutor:
             handler()
             tool_call["status"] = "EXECUTED"
 
-    def execute(
+    async def execute(
         self,
         *,
         run: Dict[str, Any],
@@ -183,6 +184,7 @@ class ToolExecutor:
         """pre/post Taint 编排（Inv 13）。
 
         descriptor 可为 ToolDescriptor 对象（主路径）或 dict（兼容旧测试）。
+        handler 可为 sync 或 async（async 时本方法 await 其结果）。
         """
         current = run.get("data_classification")
         declared = _get_attr(descriptor, "declared_output_classification")
@@ -193,11 +195,13 @@ class ToolExecutor:
         if provider is not None:
             provider(run)  # provider 看到的 Run 已是升级后
 
-        # ── 执行 handler ──
+        # ── 执行 handler（支持 async handler：handler 内部可 await 聚合层）──
         handler = _get_attr(descriptor, "handler")
         result: Dict[str, Any] = {}
         if handler is not None:
             result = handler(run=run) or {}
+            if inspect.isawaitable(result):
+                result = await result
 
         # ── post-call ──
         actual = result.get("actual_classification")

@@ -257,6 +257,7 @@ class AgentCopilotService:
             tool_name="agent_copilot",
             role=self.user.role or "teacher",
             session=self.db,
+            query=goal,
         )
         await agent_run.start()
 
