@@ -159,6 +159,46 @@ class ApprovalGate:
         await self._decide(approval_id=approval_id, approver_id=approver_id,
                            school_id=school_id, decision="REJECTED")
 
+    # ── resume 支持：解密 envelope，恢复批准时的原始 args（HTTP E2E / services 用）──
+    async def reveal_args(self, *, approval_id: int, school_id: int) -> Dict[str, Any]:
+        """解密 envelope payload，返回批准时的原始 args（resume SAME run 用）。
+
+        fail-closed：approval/envelope 缺失、tenant 不匹配、非 APPROVED、过期 → 拒绝。
+        """
+        from ai_native.models.ai_approvals import AiApprovals
+        from ai_native.models.ai_command_envelopes import AiCommandEnvelopes
+
+        approval = await self.db.get(AiApprovals, approval_id)
+        if approval is None:
+            raise ApprovalGateError("approval record missing")
+        if approval.school_id != school_id:
+            raise ApprovalGateError("approval tenant mismatch")
+        if approval.decision != "APPROVED":
+            raise ApprovalGateError(f"approval not approved: {approval.decision}")
+
+        res = await self.db.execute(
+            select(AiCommandEnvelopes).where(
+                AiCommandEnvelopes.school_id == school_id,
+                AiCommandEnvelopes.run_id == approval.run_id,
+                AiCommandEnvelopes.tool_call_id == approval.tool_call_id,
+            )
+        )
+        env = res.scalar_one_or_none()
+        if env is None:
+            raise ApprovalGateError("envelope missing")
+        if env.expires_at < datetime.utcnow():
+            raise ApprovalGateError("envelope expired")
+
+        aesgcm = AESGCM(_env_key())
+        try:
+            plain = aesgcm.decrypt(
+                env.nonce, env.payload_ciphertext + env.auth_tag, None
+            ).decode("utf-8")
+        except Exception:
+            raise ApprovalGateError("envelope decrypt failed")
+        payload = json.loads(plain)
+        return payload.get("args", {})
+
     # ── 强制执行点：ToolExecutor 调用（fail-closed）────────────────────────
     async def validate(
         self,

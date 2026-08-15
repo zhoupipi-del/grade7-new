@@ -10,6 +10,7 @@ V2 变更（2026-08-12）：
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -49,6 +50,11 @@ BEHAVIOR_KEYWORDS = {
 
 RISK_KEYWORDS = {
     "风险", "预警", "异常", "高风险",
+}
+
+# FT-015 test-only：写工具测试意图（HTTP E2E 触发入口；验证后随工具一并移除）
+WRITE_MARKER_KEYWORDS = {
+    "写测试标记", "写入测试标记", "写标记", "write marker",
 }
 
 COMPREHENSIVE_KEYWORDS = {
@@ -97,6 +103,7 @@ class BoundedPlanner:
         wants_attendance = any(k in text for k in ATTENDANCE_KEYWORDS)
         wants_behavior = any(k in text for k in BEHAVIOR_KEYWORDS)
         wants_risk = any(k in text for k in RISK_KEYWORDS)
+        wants_write_marker = any(k in text for k in WRITE_MARKER_KEYWORDS)
         wants_comprehensive = any(k in text for k in COMPREHENSIVE_KEYWORDS)
 
         wants_compare = any(
@@ -172,6 +179,17 @@ class BoundedPlanner:
                 tool="read_risk_warning_summary",
                 args=clean_args,
                 reason="查询风险预警数据",
+            ))
+
+        # ── FT-015 test-only：写测试标记 → write_test_marker 单 step ──
+        if wants_write_marker:
+            m = re.search(r"写(?:入)?(?:测试)?标记\s+([\w-]+)(?:\s+(\w+))?", text)
+            marker = m.group(1) if m else "e2e"
+            value = m.group(2) if m and m.group(2) else "1"
+            steps.append(PlanStep(
+                tool="write_test_marker",
+                args={"marker": marker, "value": value},
+                reason="FT-015 HTTP E2E：写入隔离测试标记",
             ))
 
         # ── Fallback: 未知意图 → needs_input（不默认成绩）──

@@ -61,6 +61,7 @@ class CopilotCriticView(BaseModel):
 class CopilotRunResponse(BaseModel):
     status: str
     run_id: int
+    approval_id: Optional[int] = None  # FT-015: awaiting_approval 时返回
     goal: str
     plan: list[CopilotStepView]
     overview: dict[str, _Any]

@@ -32,6 +32,7 @@ from ai_native.governance.approval_policy import ApprovalPolicy
 from ai_native.governance.resource_scope import ResourceScope, resolve_scope
 from ai_native.runtime.agent_run import AgentRun
 from ai_native.runtime.critic import EvidenceCritic
+from ai_native.runtime.approval_gate import ApprovalGate, ApprovalGateError
 from ai_native.runtime.permission import PermissionChecker
 from ai_native.runtime.planner import BoundedPlanner
 from ai_native.runtime.provider_router import ProviderRouter
@@ -358,6 +359,20 @@ class AgentCopilotService:
 
             args = dict(step.args)
 
+            # ── ★ FT-015 HTTP 闭环：WRITE tool → 审批挂起（不进 executor）──
+            # 识别写工具 → tool_call(AWAITING_APPROVAL) + envelope + approval(PENDING)
+            # → run=WAITING_APPROVAL → 返回 approval_id，停止执行。
+            if descriptor.approval_policy in ("always", "policy_decides"):
+                pending = await self._suspend_for_approval(
+                    agent_run=agent_run,
+                    descriptor=descriptor,
+                    args=args,
+                    step=step,
+                    grade_id=grade_id,
+                    class_id=class_id,
+                )
+                return pending
+
             # ── ToolExecutor.execute → descriptor.handler（内部调 _*Aggregator）──
             run_ctx: dict[str, Any] = {
                 "status": "EXECUTING",
@@ -605,6 +620,256 @@ class AgentCopilotService:
                     status_code=403,
                     detail="无权访问该班级数据（跨校请求被拒绝）",
                 )
+
+    # ═══════════════════════════════════════════════════════════════════
+    # FT-015 HTTP 审批闭环（SAME run 原则）
+    # ═══════════════════════════════════════════════════════════════════
+
+    async def _suspend_for_approval(
+        self,
+        *,
+        agent_run: AgentRun,
+        descriptor: ToolDescriptor,
+        args: dict,
+        step,
+        grade_id: int | None,
+        class_id: int | None,
+    ) -> dict:
+        """WRITE tool 审批挂起：tool_call(AWAITING_APPROVAL) + envelope + approval(PENDING)。
+
+        返回 awaiting_approval 响应（含 approval_id），绝不调用 executor。
+        """
+        from ai_native.models.ai_tool_calls import AiToolCalls
+
+        args_hash = hashlib.sha256(
+            _json.dumps(args, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+
+        # 1. 预建 tool_call（AWAITING_APPROVAL）—— approval 绑定 tool_call_id
+        tool_call = AiToolCalls(
+            school_id=self.user.school_id,
+            run_id=agent_run.run_id,
+            tool_name=descriptor.name,
+            tool_version=descriptor.version,
+            schema_version="1",
+            action=descriptor.action,
+            side_effect=descriptor.side_effect,
+            arguments_hash=args_hash,
+            idempotency_key=f"{descriptor.name}:{agent_run.run_id}:{args_hash[:16]}",
+            resource_scope={
+                "grade_id": grade_id,
+                "class_id": class_id,
+            },
+            declared_output_classification=descriptor.declared_output_classification,
+            status="AWAITING_APPROVAL",
+            started_at=datetime.now(),
+        )
+        self.db.add(tool_call)
+        await self.db.flush()
+
+        # 2. envelope + approval(PENDING)
+        gate = ApprovalGate(self.db, self.user.school_id)
+        envelope_uuid, approval_id = await gate.create_envelope(
+            run_id=agent_run.run_id,
+            user_id=self.user.id,
+            tool_call_id=tool_call.id,
+            tool_name=descriptor.name,
+            tool_version=descriptor.version,
+            args=args,
+        )
+
+        # 3. run → WAITING_APPROVAL（非 terminal，completed_at 保持 NULL）
+        await agent_run.transition("WAITING_APPROVAL")
+        await self.db.commit()
+
+        return {
+            "status": "awaiting_approval",
+            "run_id": agent_run.run_id,
+            "approval_id": approval_id,
+            "goal": agent_run.query,
+            "plan": [{
+                "tool": descriptor.name,
+                "status": "AWAITING_APPROVAL",
+                "reason": step.reason,
+            }],
+            "overview": {},
+            "findings": [],
+            "recommendations": [],
+            "critic": {"passed": None, "issues": []},
+            "provider": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+            "model": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+            "trust": {
+                "permission_checked": True,
+                "approval_required": True,
+                "approval_id": approval_id,
+            },
+            "outcome": "awaiting_approval",
+            "outcome_reason": "该操作需要人工审批",
+            "student_count": 0,
+            "examined_count": 0,
+            "grade_record_count": 0,
+            "domain_counts": {},
+            "domains": {},
+        }
+
+    async def resume_after_approval(self, *, approval_id: int) -> dict:
+        """approve 后恢复 SAME run：executor 最终 approval/hash 校验 → execute once → COMPLETED。
+
+        不新建 run（SAME run_id）；证据链：approval → envelope(args) → tool_call → snapshot 全链同 run。
+        """
+        from ai_native.models.ai_approvals import AiApprovals
+        from ai_native.models.ai_runs import AiRuns
+        from ai_native.models.ai_tool_calls import AiToolCalls
+
+        approval = await self.db.get(AiApprovals, approval_id)
+        if approval is None or approval.school_id != self.user.school_id:
+            raise ApprovalGateError("approval record missing or tenant mismatch")
+        if approval.decision != "APPROVED":
+            raise ApprovalGateError(f"approval not approved: {approval.decision}")
+
+        run = await self.db.get(AiRuns, approval.run_id)
+        if run is None:
+            raise ApprovalGateError("run missing")
+        if run.status != "WAITING_APPROVAL":
+            raise ApprovalGateError(f"run status not WAITING_APPROVAL: {run.status}")
+
+        tool_call = await self.db.get(AiToolCalls, approval.tool_call_id)
+        if tool_call is None:
+            raise ApprovalGateError("tool_call missing")
+
+        descriptor = self.registry.get(approval.tool_name)
+        if descriptor is None:
+            raise ApprovalGateError(f"tool not registered: {approval.tool_name}")
+
+        # 解密 envelope → 恢复批准时的原始 args（SAME run 上下文）
+        gate = ApprovalGate(self.db, self.user.school_id)
+        args = await gate.reveal_args(
+            approval_id=approval.id, school_id=self.user.school_id,
+        )
+
+        # 重建 AgentRun 上下文（SAME run_id，不重新 start）
+        agent_run = AgentRun(
+            school_id=run.school_id, user_id=run.user_id,
+            tool_name=descriptor.name,
+            session=self.db,
+        )
+        agent_run.run_id = run.id
+        agent_run.run_uuid = run.run_uuid
+        agent_run.trace_id = run.trace_id
+        agent_run.status = run.status
+        agent_run.data_classification = run.data_classification or "internal"
+
+        await agent_run.transition("EXECUTING", session=self.db)
+
+        run_ctx = {
+            "status": "EXECUTING",
+            "data_classification": agent_run.data_classification,
+            "school_id": run.school_id,
+            "user_id": run.user_id,
+            "run_id": run.id,
+            "db": self.db,
+            "user": self.user,
+            "approval_args": args,
+        }
+        incidents: list[dict] = []
+        result = await self.executor.execute(
+            run=run_ctx,
+            descriptor=descriptor,
+            incident_sink=incidents.append,
+            session=self.db,
+            tool_call_id=tool_call.id,
+            approval_args=args,
+        )
+
+        # tool_call → EXECUTED（executor 已做最终校验，fail-closed）
+        tool_call.status = "EXECUTED"
+        tool_call.actual_output_classification = result.get(
+            "actual_classification", descriptor.declared_output_classification,
+        )
+
+        # finish → COMPLETED + snapshot（approval_refs 入快照，证据链同 run）
+        await agent_run.finish(
+            snapshot={
+                "run_id": run.id,
+                "school_id": run.school_id,
+                "tool": descriptor.name,
+                "approval_refs": [approval.id],
+                "classification_peak": run_ctx.get("data_classification"),
+                "incidents": incidents,
+            },
+            session=self.db,
+        )
+        await self.db.commit()
+
+        return {
+            "status": "completed",
+            "run_id": run.id,
+            "approval_id": approval.id,
+            "goal": run.query_redacted or "",
+            "plan": [{
+                "tool": descriptor.name,
+                "status": "EXECUTED",
+                "reason": "审批通过后执行",
+            }],
+            "overview": {},
+            "findings": [],
+            "recommendations": [],
+            "critic": {"passed": True, "issues": []},
+            "provider": "deepseek",
+            "model": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+            "trust": {
+                "permission_checked": True,
+                "approval_required": True,
+                "approval_id": approval.id,
+            },
+            "outcome": "success",
+            "outcome_reason": "approval approved; executed exactly once",
+            "student_count": 0,
+            "examined_count": 0,
+            "grade_record_count": 0,
+            "domain_counts": {},
+            "domains": {},
+        }
+
+    async def cancel_after_reject(self, *, approval_id: int) -> dict:
+        """reject 后：SAME run → CANCELLED（completed_at 落库）；tool_call → DENIED；永不执行。"""
+        from ai_native.models.ai_approvals import AiApprovals
+        from ai_native.models.ai_runs import AiRuns
+        from ai_native.models.ai_tool_calls import AiToolCalls
+
+        approval = await self.db.get(AiApprovals, approval_id)
+        if approval is None or approval.school_id != self.user.school_id:
+            raise ApprovalGateError("approval record missing or tenant mismatch")
+
+        run = await self.db.get(AiRuns, approval.run_id)
+        if run is None:
+            raise ApprovalGateError("run missing")
+        if run.status != "WAITING_APPROVAL":
+            raise ApprovalGateError(f"run status not WAITING_APPROVAL: {run.status}")
+
+        tool_call = await self.db.get(AiToolCalls, approval.tool_call_id)
+        if tool_call is not None and tool_call.status == "AWAITING_APPROVAL":
+            tool_call.status = "DENIED"
+
+        agent_run = AgentRun(
+            school_id=run.school_id, user_id=run.user_id,
+            tool_name=approval.tool_name,
+            session=self.db,
+        )
+        agent_run.run_id = run.id
+        agent_run.run_uuid = run.run_uuid
+        agent_run.trace_id = run.trace_id
+        agent_run.status = run.status
+
+        # CANCELLED ∈ TERMINAL_STATES → completed_at 自动落库
+        await agent_run.transition("CANCELLED", session=self.db)
+        await self.db.commit()
+
+        return {
+            "status": "cancelled",
+            "run_id": run.id,
+            "approval_id": approval.id,
+        }
 
     async def _record_tool_call(self, *, run_id: int, descriptor: ToolDescriptor,
                                 result: dict[str, Any], params: dict[str, Any]) -> None:

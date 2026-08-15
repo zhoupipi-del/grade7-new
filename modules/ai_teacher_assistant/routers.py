@@ -129,7 +129,11 @@ async def approve_approval(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    """人工批准：仅 PENDING 且未过期的 approval 可批；tenant 必须匹配当前用户学校。"""
+    """人工批准：仅 PENDING 且未过期的 approval 可批；tenant 必须匹配当前用户学校。
+
+    FT-015 HTTP 闭环：批准后 resume SAME run（不新建 run），
+    ToolExecutor 做最终 approval/hash 校验 → execute exactly once → COMPLETED。
+    """
     if current_user.school_id is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="未绑定学校")
     try:
@@ -137,8 +141,13 @@ async def approve_approval(
         await gate.approve(approval_id=approval_id,
                            approver_id=current_user.id,
                            school_id=current_user.school_id)
+        await db.flush()
+
+        # resume SAME run（approval 已 APPROVED；executor 最终校验 fail-closed）
+        service = AgentCopilotService(db=db, user=current_user)
+        resume_result = await service.resume_after_approval(approval_id=approval_id)
         await db.commit()
-        return {"status": "APPROVED", "approval_id": approval_id}
+        return {"status": "APPROVED", "approval_id": approval_id, **resume_result}
     except ApprovalGateError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -154,7 +163,7 @@ async def reject_approval(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    """人工拒绝：PENDING → REJECTED；run 由调用方/轮询侧转 CANCELLED。"""
+    """人工拒绝：PENDING → REJECTED；SAME run → CANCELLED（completed_at 落库）；永不执行。"""
     if current_user.school_id is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="未绑定学校")
     try:
@@ -162,8 +171,13 @@ async def reject_approval(
         await gate.reject(approval_id=approval_id,
                           approver_id=current_user.id,
                           school_id=current_user.school_id)
+        await db.flush()
+
+        # cancel SAME run（CANCELLED 终态；tool_call → DENIED）
+        service = AgentCopilotService(db=db, user=current_user)
+        cancel_result = await service.cancel_after_reject(approval_id=approval_id)
         await db.commit()
-        return {"status": "REJECTED", "approval_id": approval_id}
+        return {"status": "REJECTED", "approval_id": approval_id, **cancel_result}
     except ApprovalGateError as exc:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
