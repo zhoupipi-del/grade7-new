@@ -39,16 +39,22 @@ def _load_dotenv():
     if not env_path.is_file():
         return
 
-    with open(env_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, val = line.split("=", 1)
-            key = key.strip()
-            val = val.strip().strip("'\"").strip("'").strip('"')
-            if key and key not in os.environ:
-                os.environ[key] = val
+    try:
+        with open(env_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                key = key.strip()
+                val = val.strip().strip("'\"").strip("'").strip('"')
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except OSError:
+        # SEC-001 非 root 迁移：.env 存在但不可读（root-only secret，
+        # 如 backend/.env → /opt/wings3/config/production.env）时安全跳过。
+        # 环境变量由 systemd EnvironmentFile 注入，dotenv 仅为兜底，不阻塞启动。
+        pass
 
 
 _load_dotenv()
