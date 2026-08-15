@@ -334,10 +334,12 @@ class AgentCopilotService:
                 class_ids={class_id} if class_id else None,
             )
 
-            # ── Permission（越权 → 403，0 Tool execution）──
+            # ── Permission（越权 → 403，0 Tool execution；action 取 descriptor.action，
+            #    WRITE tool 按 write 判定，不再硬编码 read）──
             if not self.permission.check(
                 user=self.user, agent=None, tool=descriptor,
-                requested=requested, authorized=authorized, action="read",
+                requested=requested, authorized=authorized,
+                action=descriptor.action,
             ):
                 await agent_run.transition("FAILED")
                 await self.db.commit()
