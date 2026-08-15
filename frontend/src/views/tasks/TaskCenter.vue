@@ -14,12 +14,10 @@
     <!-- 状态筛选 -->
     <el-radio-group v-model="statusFilter" class="tc-filter" @change="load">
       <el-radio-button value="">全部</el-radio-button>
-      <el-radio-button value="OPEN">待处理</el-radio-button>
-      <el-radio-button value="ACCEPTED">已接受</el-radio-button>
-      <el-radio-button value="IN_PROGRESS">进行中</el-radio-button>
-      <el-radio-button value="DONE">已完成</el-radio-button>
-      <el-radio-button value="REJECTED">已驳回</el-radio-button>
-      <el-radio-button value="CANCELLED">已取消</el-radio-button>
+      <el-radio-button value="pending">待处理</el-radio-button>
+      <el-radio-button value="in_progress">进行中</el-radio-button>
+      <el-radio-button value="completed">已完成</el-radio-button>
+      <el-radio-button value="cancelled">已取消</el-radio-button>
     </el-radio-group>
 
     <!-- 列表 -->
@@ -51,7 +49,7 @@
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)" effect="light">{{ statusLabel(row.status) }}</el-tag>
-            <el-tag v-if="row.status === 'DONE'" size="small" :type="row.closure_status === 'verified' ? 'success' : 'info'" effect="plain">
+            <el-tag v-if="row.status === 'completed'" size="small" :type="row.closure_status === 'verified' ? 'success' : 'info'" effect="plain">
               {{ row.closure_status === 'verified' ? '已复核' : '待复核' }}
             </el-tag>
           </template>
@@ -111,6 +109,33 @@
             <el-option label="紧急" value="urgent" />
           </el-select>
         </el-form-item>
+
+        <!-- 责任解析预览 / 未配置责任人拦截（创建前先问 Resolver，未配置禁止 INSERT） -->
+        <el-alert
+          v-if="resolveError"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="tc-resolve-alert"
+        >
+          <template #title>当前未配置责任人，无法创建任务</template>
+          <div class="tc-resolve-msg">{{ resolveError }}</div>
+          <el-button size="small" type="primary" plain class="tc-resolve-btn" @click="goOrgConfig">
+            去组织与责任配置
+          </el-button>
+        </el-alert>
+        <el-alert
+          v-else-if="resolvePreview && resolvePreview.resolved"
+          type="success"
+          :closable="false"
+          show-icon
+          class="tc-resolve-alert"
+        >
+          <template #title>
+            系统将把任务分派给：{{ resolvePreview.owner_name }}（{{ roleLabel(resolvePreview.role_type) }}）
+          </template>
+          <div class="tc-resolve-msg">点击「创建」即确认该责任分派并写入待办，确认前不会创建任何任务。</div>
+        </el-alert>
       </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
@@ -143,22 +168,20 @@
         <!-- 状态 -->
         <div class="tc-status-line">
           <el-tag :type="statusType(current.status)" effect="dark" size="large">{{ statusLabel(current.status) }}</el-tag>
-          <el-tag v-if="current.status === 'DONE'" :type="current.closure_status === 'verified' ? 'success' : 'info'" size="large">
-            {{ current.closure_status === 'verified' ? '已复核' : '待复核（DONE≠verified）' }}
+          <el-tag v-if="current.status === 'completed'" :type="current.closure_status === 'verified' ? 'success' : 'info'" size="large">
+            {{ current.closure_status === 'verified' ? '已复核' : '待复核（completed≠verified）' }}
           </el-tag>
         </div>
 
         <!-- 操作 -->
         <div class="tc-actions">
-          <el-button v-if="current.status === 'OPEN'" type="primary" @click="act('accept')">接受</el-button>
-          <el-button v-if="current.status === 'ACCEPTED'" type="primary" @click="act('start')">开始处理</el-button>
+          <el-button v-if="current.status === 'pending'" type="primary" @click="act('start')">开始处理</el-button>
           <el-button
-            v-if="['IN_PROGRESS', 'ACCEPTED'].includes(current.status)"
+            v-if="current.status === 'in_progress'"
             type="success"
             @click="act('complete')"
           >完成（标记待复核）</el-button>
-          <el-button v-if="['OPEN', 'ACCEPTED', 'IN_PROGRESS'].includes(current.status)" type="warning" plain @click="act('reject')">驳回</el-button>
-          <el-button v-if="['OPEN', 'ACCEPTED', 'IN_PROGRESS'].includes(current.status)" type="danger" plain @click="act('cancel')">取消</el-button>
+          <el-button v-if="['pending', 'in_progress'].includes(current.status)" type="danger" plain @click="act('cancel')">取消任务</el-button>
         </div>
 
         <!-- 证据 -->
@@ -213,16 +236,19 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import {
   addComment, addEvidence, cancelTask, completeTask, createTask,
-  getTaskStudents, listTasks, type TaskItem, type TaskStudentOption,
-  acceptTask, startTask, rejectTask,
+  getTaskStudents, listTasks, resolveResponsibility,
+  type TaskItem, type TaskStudentOption, type TaskResolveOut,
+  startTask,
 } from '@/api/tasks'
 import { useUserStore } from '@/store/user'
 
 const userStore = useUserStore()
+const router = useRouter()
 
 const tasks = ref<TaskItem[]>([])
 const loading = ref(false)
@@ -233,6 +259,8 @@ const detailVisible = ref(false)
 const current = ref<TaskItem | null>(null)
 
 const createForm = ref({ title: '', description: '', student_id: undefined as number | undefined, subject: '', priority: 'normal' })
+const resolvePreview = ref<TaskResolveOut | null>(null)
+const resolveError = ref('')
 const studentOptions = ref<TaskStudentOption[]>([])
 const studentLoading = ref(false)
 const evContent = ref('')
@@ -253,7 +281,13 @@ async function load() {
 function openCreate() {
   createForm.value = { title: '', description: '', student_id: undefined, subject: '', priority: 'normal' }
   studentOptions.value = []
+  resolvePreview.value = null
+  resolveError.value = ''
   createVisible.value = true
+}
+
+function goOrgConfig() {
+  router.push({ name: 'OrgResponsibility' })
 }
 
 async function searchStudents(kw: string) {
@@ -271,15 +305,51 @@ async function submitCreate() {
     return
   }
   creating.value = true
+  resolveError.value = ''
   try {
+    // ① 先问 Resolver：这件事归谁（不猜人）
+    const r = await resolveResponsibility({
+      student_id: createForm.value.student_id,
+      subject: createForm.value.subject || undefined,
+    })
+    resolvePreview.value = r
+
+    // ② 未配置责任人 → 拦截，禁止创建（绝不智能兜底）
+    if (!r.resolved) {
+      const reason = r.unresolved_reason || 'unresolved'
+      if (reason === 'no_access') {
+        resolveError.value = '当前账号无权为该范围创建任务（越权）。'
+      } else if (reason === 'conflict') {
+        resolveError.value = '该范围存在多个候选责任人，系统无法自动判定，请先在「组织与责任配置」中明确唯一责任人。'
+      } else if (reason === 'invalid_request') {
+        resolveError.value = '请选择学生或年级后再创建。'
+      } else {
+        resolveError.value = '未找到对应的责任 Assignment（班主任/年级组长/任课教师未配置），请先在「组织与责任配置」中补齐后再创建。'
+      }
+      return
+    }
+
+    // ③ 已解析 → 用户确认责任分派后才 INSERT
+    try {
+      await ElMessageBox.confirm(
+        `系统将把任务分派给：${r.owner_name}（${roleLabel(r.role_type)}）\n确认创建该责任任务？`,
+        '责任预览 · 确认创建',
+        { type: 'info', confirmButtonText: '确认创建', cancelButtonText: '再想想' },
+      )
+    } catch {
+      return // 用户取消，不创建
+    }
+
     const t = await createTask({
       title: createForm.value.title,
       description: createForm.value.description || undefined,
       priority: createForm.value.priority,
       student_id: createForm.value.student_id,
       subject: createForm.value.subject || undefined,
+      source_type: 'student',
+      source_id: createForm.value.student_id,
     })
-    ElMessage.success(t.owner_user_id ? `已创建，负责人：${t.owner_name_snapshot}` : '已创建（未分派，待补责任）')
+    ElMessage.success(`已创建，负责人：${t.owner_name_snapshot || r.owner_name}`)
     createVisible.value = false
     load()
   } catch (e: any) {
@@ -296,20 +366,18 @@ async function openDetail(row: TaskItem) {
 }
 
 function canAct(row: TaskItem): boolean {
-  if (row.status === 'DONE' || row.status === 'CANCELLED' || row.status === 'REJECTED') return false
+  if (row.status === 'completed' || row.status === 'cancelled') return false
   const me = userStore.userInfo?.id
   return row.owner_user_id === me
 }
 
 function fastActionLabel(row: TaskItem): string {
-  if (row.status === 'OPEN') return '接受'
-  if (row.status === 'ACCEPTED') return '开始'
+  if (row.status === 'pending') return '开始'
   return '完成'
 }
 
 async function fastAction(row: TaskItem) {
-  if (row.status === 'OPEN') await act('accept', row.id)
-  else if (row.status === 'ACCEPTED') await act('start', row.id)
+  if (row.status === 'pending') await act('start', row.id)
   else await act('complete', row.id)
 }
 
@@ -318,12 +386,11 @@ async function act(kind: string, id?: number) {
   if (!tid) return
   try {
     let msg = ''
-    if (kind === 'accept') { await acceptTask(tid); msg = '已接受' }
     if (kind === 'start') { await startTask(tid); msg = '已开始处理' }
-    if (kind === 'complete') { await completeTask(tid); msg = '已完成（待复核）' }
-    if (kind === 'reject') {
-      const { value } = await ElMessageBox.prompt('驳回原因', '驳回任务')
-      await rejectTask(tid, value); msg = '已驳回'
+    if (kind === 'complete') {
+      const { value } = await ElMessageBox.prompt('处理结果（必填，将写入任务并标记待复核）', '完成任务', { inputType: 'textarea' })
+      if (!value || !value.trim()) { ElMessage.warning('请填写处理结果'); return }
+      await completeTask(tid, value.trim()); msg = '已完成（待复核）'
     }
     if (kind === 'cancel') {
       const { value } = await ElMessageBox.prompt('取消原因', '取消任务')
@@ -333,6 +400,7 @@ async function act(kind: string, id?: number) {
     detailVisible.value = false
     load()
   } catch (e: any) {
+    if (e === 'cancel' || e?.action === 'cancel') return
     ElMessage.error(e?.detail || '操作失败')
   }
 }
@@ -358,13 +426,13 @@ async function submitComment() {
 }
 
 function statusLabel(s: string): string {
-  return ({ OPEN: '待处理', ACCEPTED: '已接受', IN_PROGRESS: '进行中', DONE: '已完成', REJECTED: '已驳回', CANCELLED: '已取消' } as Record<string, string>)[s] || s
+  return ({ pending: '待处理', in_progress: '进行中', completed: '已完成', cancelled: '已取消' } as Record<string, string>)[s] || s
 }
 function statusType(s: string): any {
-  return ({ OPEN: 'warning', ACCEPTED: 'primary', IN_PROGRESS: 'info', DONE: 'success', REJECTED: 'danger', CANCELLED: 'info' } as Record<string, any>)[s] || 'info'
+  return ({ pending: 'warning', in_progress: 'info', completed: 'success', cancelled: 'info' } as Record<string, any>)[s] || 'info'
 }
 function roleLabel(r: string | null): string {
-  return ({ homeroom_teacher: '班主任', grade_leader: '年级组长', subject_teacher: '任课教师', moral_admin: '德育处' } as Record<string, string>)[r || ''] || r || ''
+  return ({ homeroom_teacher: '班主任', grade_leader: '年级组长', subject_teacher: '任课教师', counselor: '心理负责人', moral_admin: '德育处' } as Record<string, string>)[r || ''] || r || ''
 }
 function scopeLabel(t: string | null, id: number | null): string {
   if (!t) return '—'
@@ -374,10 +442,10 @@ function priorityLabel(p: string): string {
   return ({ low: '低', normal: '正常', high: '高', urgent: '紧急' } as Record<string, string>)[p] || p
 }
 function eventLabel(e: string): string {
-  return ({ created: '创建', accepted: '接受', started: '开始处理', completed: '完成', rejected: '驳回', cancelled: '取消', reassigned: '转交', evidence_added: '提交证据', comment_added: '评论', resolution_required: '责任待解析' } as Record<string, string>)[e] || e
+  return ({ created: '创建', started: '开始处理', completed: '完成', cancelled: '取消', reassigned: '转交', evidence_added: '提交证据', comment_added: '评论' } as Record<string, string>)[e] || e
 }
 function timelineType(e: string): any {
-  return ({ completed: 'success', rejected: 'danger', cancelled: 'info', created: 'primary', resolution_required: 'warning' } as Record<string, any>)[e] || 'primary'
+  return ({ completed: 'success', cancelled: 'info', created: 'primary', started: 'primary', reassigned: 'warning' } as Record<string, any>)[e] || 'primary'
 }
 function fmtTime(t: string | null): string {
   return t ? t.replace('T', ' ').slice(0, 16) : '—'
@@ -403,4 +471,7 @@ onMounted(load)
 .tc-evidence-item, .tc-comment-item { font-size: 13px; padding: 6px 0; border-bottom: 1px dashed #ebeef5; }
 .tc-meta { color: #909399; font-size: 12px; }
 .tc-empty-hint { color: #c0c4cc; font-size: 12px; padding: 6px 0; }
+.tc-resolve-alert { margin-bottom: 0; }
+.tc-resolve-msg { font-size: 12px; color: #606266; margin-top: 4px; }
+.tc-resolve-btn { margin-top: 8px; }
 </style>

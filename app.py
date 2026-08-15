@@ -165,6 +165,9 @@ async def lifespan(app: FastAPI):
     import modules.teach_math.models  # noqa: F401
     import modules.teacher_mgmt.models  # noqa: F401
     import modules.timetable.models  # noqa: F401
+
+    # ── Task Center V1（责任闭环底座）：任务/分派/事件/证据/评论 5 表 ──
+    import modules.tasks.models  # noqa: F401
     from core.models import Base
 
     # ── 三级组织架构模型（Organization/Branch/CascadingConfig/ScopeType）──
@@ -707,6 +710,24 @@ async def _seed_default_data():
             session.add(sm)
             await session.commit()
             logger.info("默认模块已配置: research_activities (已启用)")
+
+        # ── tasks 模块（Task Center V1 责任闭环底座）────────────
+        result = await session.execute(
+            select(SchoolModule).where(
+                SchoolModule.school_id == 1,
+                SchoolModule.module_code == "tasks",
+            )
+        )
+        sm = result.scalar_one_or_none()
+        if not sm:
+            sm = SchoolModule(
+                school_id=1,
+                module_code="tasks",
+                enabled=True,
+            )
+            session.add(sm)
+            await session.commit()
+            logger.info("默认模块已配置: tasks (已启用)")
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -3,12 +3,13 @@ modules/tasks/services.py — Task Center Foundation V1 服务层
 
 核心职责：
   1. create 时经 ResponsibleOwnerResolver 解析责任（禁止猜人）。
-     resolved → 责任快照写入 tasks + task_assignments(is_current=True)
-     no_assignment/conflict → 允许创建但 owner=NULL + unresolved_reason
+     resolved → 责任快照（含真实 assignment_id）+ source 关联写入 tasks + task_assignments(is_current=True)
+     no_assignment / conflict / invalid_request → 拒绝建任务（422，前端显示"未配置责任人，无法创建"）
      no_access → 403（创建者越权）
-  2. 状态机：OPEN → ACCEPTED → IN_PROGRESS → DONE；REJECTED/CANCELLED 分支。
+  2. 状态机（4 态）：pending → in_progress → completed；cancelled 分支。
+     start：pending→in_progress，写 started_at；complete：in_progress→completed，写 completed_at+result。
   3. reassign：追加分派历史（is_current 翻转），历史任务保留原责任人。
-  4. complete：status=DONE 且 closure_status='pending'（DONE ≠ verified）。
+  4. complete：status=completed 且 closure_status='pending'（completed ≠ verified）。
   5. 权限：ms_admin 全校 / grade_leader 本年级 / class_teacher 本班；owner 才能处理。
 """
 
@@ -24,23 +25,17 @@ from core.models import User
 from core.resolver import resolve_owner
 from .models import (
     CLOSURE_PENDING,
-    EV_ACCEPTED,
     EV_CANCELLED,
     EV_COMMENT_ADDED,
     EV_COMPLETED,
     EV_CREATED,
     EV_EVIDENCE_ADDED,
     EV_REASSIGNED,
-    EV_REJECTED,
-    EV_RESOLUTION_REQUIRED,
     EV_STARTED,
-    TASK_STATUS_ACCEPTED,
-    TASK_STATUS_ACTIVE,
     TASK_STATUS_CANCELLED,
-    TASK_STATUS_DONE,
+    TASK_STATUS_COMPLETED,
     TASK_STATUS_IN_PROGRESS,
-    TASK_STATUS_OPEN,
-    TASK_STATUS_REJECTED,
+    TASK_STATUS_PENDING,
     TASK_STATUS_TERMINAL,
     Task,
     TaskAssignment,
@@ -89,60 +84,89 @@ class TaskService:
         if resolution.get("unresolved_reason") == "no_access":
             raise HTTPException(status_code=403, detail=resolution.get("reason_detail", "无权创建该范围任务"))
 
-        # 2) 写任务主表（责任快照）
+        # 2) 未解析（no_assignment / conflict / invalid_request）→ 拒绝建任务（禁智能兜底）
+        if not resolution.get("resolved"):
+            reason = resolution.get("unresolved_reason") or "unresolved"
+            raise HTTPException(
+                status_code=422,
+                detail=f"无法创建任务：当前未配置责任人（{reason}），请先到「组织与责任配置」页配置后再创建。",
+            )
+
+        # 3) 来源关联派生（student → class → grade）
+        source_type = getattr(data, "source_type", None)
+        source_id = getattr(data, "source_id", None)
+        student_id = data.student_id
+        class_id = data.class_id if getattr(data, "class_id", None) else None
+        grade_id = data.grade_id
+        if student_id is not None and (class_id is None or grade_id is None):
+            from core.models import Class as _Class, Student as _Student
+            cls_id = await db.scalar(
+                select(_Student.class_id).where(_Student.id == student_id, _Student.school_id == school_id)
+            )
+            if cls_id is not None:
+                class_id = cls_id
+                if grade_id is None:
+                    grade_id = await db.scalar(
+                        select(_Class.grade_id).where(_Class.id == cls_id, _Class.school_id == school_id)
+                    )
+
+        # 4) 写任务主表（责任快照 + 真实 assignment_id + 来源关联）
+        now = datetime.now()
         task = Task(
             school_id=school_id,
             task_type="manual",
             title=data.title,
             description=data.description,
-            status=TASK_STATUS_OPEN,
+            status=TASK_STATUS_PENDING,
             priority=data.priority,
             due_at=data.due_at,
-            owner_user_id=resolution.get("owner"),
+            owner_user_id=resolution.get("owner_user_id"),
             owner_name_snapshot=resolution.get("owner_name"),
             responsibility_role=resolution.get("role_type"),
             responsibility_scope_type=resolution.get("scope_type"),
             responsibility_scope_id=resolution.get("scope_id"),
             resolution_source=resolution.get("source"),
             resolution_confidence=resolution.get("confidence"),
-            resolved_at=datetime.now() if resolution.get("resolved") else None,
-            assignment_id=None,  # V1：assignment_id 由业务侧回填（Resolver 返回无 id，可后续升级）
-            unresolved_reason=None if resolution.get("resolved") else resolution.get("unresolved_reason"),
+            resolved_at=now,
+            assignment_id=resolution.get("assignment_id"),
+            unresolved_reason=None,
+            source_type=source_type,
+            source_id=source_id,
+            student_id=student_id,
+            class_id=class_id,
+            grade_id=grade_id,
             created_by=user.id,
         )
         db.add(task)
         await db.flush()
 
-        # 3) 分派历史（is_current=True）
+        # 5) 分派历史（is_current=True，保留真实 assignment_id 证据）
         db.add(TaskAssignment(
             task_id=task.id,
-            assignment_id=None,
-            owner_user_id=resolution.get("owner"),
+            assignment_id=resolution.get("assignment_id"),
+            owner_user_id=resolution.get("owner_user_id"),
             owner_name_snapshot=resolution.get("owner_name"),
             responsibility_role=resolution.get("role_type"),
             responsibility_scope_type=resolution.get("scope_type"),
             responsibility_scope_id=resolution.get("scope_id"),
             resolution_source=resolution.get("source"),
             resolution_confidence=resolution.get("confidence"),
-            resolved_at=datetime.now() if resolution.get("resolved") else None,
+            resolved_at=now,
             assigned_by=user.id,
             is_current=True,
         ))
 
-        # 4) 事件流
-        ev_type = EV_CREATED
-        if not resolution.get("resolved"):
-            ev_type = EV_RESOLUTION_REQUIRED
+        # 6) 事件流
         db.add(TaskEvent(
             task_id=task.id,
-            event_type=ev_type,
+            event_type=EV_CREATED,
             actor_user_id=user.id,
             actor_name=getattr(user, "real_name", None) or user.username,
             detail=_json_dumps({
                 "title": data.title,
                 "resolution": resolution,
-                "resolved": bool(resolution.get("resolved")),
-                "unresolved_reason": resolution.get("unresolved_reason"),
+                "resolved": True,
+                "assignment_id": resolution.get("assignment_id"),
             }),
         ))
         await db.commit()
@@ -211,7 +235,7 @@ class TaskService:
 
         conds = TaskService._visible_filter(user, user.school_id)
         if status:
-            conds = list(conds) + [Task.status == status.upper()]
+            conds = list(conds) + [Task.status == status.lower()]
         stmt = (
             _select(Task)
             .where(*conds)
@@ -282,8 +306,8 @@ class TaskService:
             raise HTTPException(status_code=400, detail=f"任务已终止（{task.status}），不可再流转")
         old_status = task.status
         task.status = target
-        if target == TASK_STATUS_DONE:
-            task.closure_status = CLOSURE_PENDING  # DONE ≠ verified
+        if target == TASK_STATUS_COMPLETED:
+            task.closure_status = CLOSURE_PENDING  # completed ≠ verified
             task.closed_at = datetime.now()
         db.add(TaskEvent(
             task_id=task.id,
@@ -297,26 +321,51 @@ class TaskService:
         return await TaskService.get_task(db, user, task_id)
 
     @staticmethod
-    async def accept(db: AsyncSession, user: User, task_id: int) -> Task:
-        return await TaskService._transition(db, user, task_id, TASK_STATUS_ACCEPTED, EV_ACCEPTED, require_act=True)
-
-    @staticmethod
     async def start(db: AsyncSession, user: User, task_id: int) -> Task:
+        """pending → in_progress（仅负责人；写 started_at）"""
         task = await TaskService.get_task(db, user, task_id)
-        if task.status not in (TASK_STATUS_ACCEPTED, TASK_STATUS_OPEN):
-            raise HTTPException(status_code=400, detail=f"任务当前状态 {task.status}，仅 ACCEPTED/OPEN 可开始")
-        return await TaskService._transition(db, user, task_id, TASK_STATUS_IN_PROGRESS, EV_STARTED, require_act=True)
+        if not TaskService._can_act(db, user, task):
+            raise HTTPException(status_code=403, detail="仅任务负责人可执行该操作")
+        if task.status != TASK_STATUS_PENDING:
+            raise HTTPException(status_code=400, detail=f"任务当前状态 {task.status}，仅 pending 可开始处理")
+        old_status = task.status
+        task.status = TASK_STATUS_IN_PROGRESS
+        task.started_at = datetime.now()
+        db.add(TaskEvent(
+            task_id=task.id,
+            event_type=EV_STARTED,
+            actor_user_id=user.id,
+            actor_name=getattr(user, "real_name", None) or user.username,
+            detail=_json_dumps({"from_status": old_status, "to_status": TASK_STATUS_IN_PROGRESS}),
+        ))
+        await db.commit()
+        db.expire(task)
+        return await TaskService.get_task(db, user, task_id)
 
     @staticmethod
     async def complete(db: AsyncSession, user: User, task_id: int, note: str | None = None) -> Task:
+        """in_progress → completed（仅负责人；写 completed_at + result + closure_status=pending）"""
         task = await TaskService.get_task(db, user, task_id)
-        if task.status not in (TASK_STATUS_IN_PROGRESS, TASK_STATUS_ACCEPTED):
-            raise HTTPException(status_code=400, detail=f"任务当前状态 {task.status}，仅 IN_PROGRESS/ACCEPTED 可完成")
-        return await TaskService._transition(db, user, task_id, TASK_STATUS_DONE, EV_COMPLETED, note, require_act=True)
-
-    @staticmethod
-    async def reject(db: AsyncSession, user: User, task_id: int, note: str | None = None) -> Task:
-        return await TaskService._transition(db, user, task_id, TASK_STATUS_REJECTED, EV_REJECTED, note, require_act=True)
+        if not TaskService._can_act(db, user, task):
+            raise HTTPException(status_code=403, detail="仅任务负责人可执行该操作")
+        if task.status != TASK_STATUS_IN_PROGRESS:
+            raise HTTPException(status_code=400, detail=f"任务当前状态 {task.status}，仅 in_progress 可完成")
+        old_status = task.status
+        task.status = TASK_STATUS_COMPLETED
+        task.completed_at = datetime.now()
+        task.result = note
+        task.closure_status = CLOSURE_PENDING  # completed ≠ verified
+        task.closed_at = task.completed_at
+        db.add(TaskEvent(
+            task_id=task.id,
+            event_type=EV_COMPLETED,
+            actor_user_id=user.id,
+            actor_name=getattr(user, "real_name", None) or user.username,
+            detail=_json_dumps({"note": note, "from_status": old_status, "to_status": TASK_STATUS_COMPLETED}),
+        ))
+        await db.commit()
+        db.expire(task)
+        return await TaskService.get_task(db, user, task_id)
 
     @staticmethod
     async def cancel(db: AsyncSession, user: User, task_id: int, note: str | None = None) -> Task:

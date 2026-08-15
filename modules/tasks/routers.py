@@ -4,7 +4,7 @@ modules/tasks/routers.py — Task Center Foundation V1 API
 权限模型（复用 scope verification + ResponsibleOwnerResolver）：
   - 创建：ms_admin 全校 / grade_leader 本年级 / class_teacher 本班（Resolver 内部校验，越权 403）
   - 查看：创建者 / 负责人 / 本人管理 scope 内
-  - 处理（accept/start/complete/reject/evidence）：仅负责人（ms_admin 全校）
+  - 处理（start/complete/evidence）：仅负责人（ms_admin 全校）
   - cancel：创建者 / 负责人 / 管理员
   - reassign：创建者 / 管理员（V1 保守：负责人不可自我甩锅）
 """
@@ -56,6 +56,14 @@ def _task_out(t: object) -> TaskOut:
         resolved_at=t.resolved_at,
         assignment_id=t.assignment_id,
         unresolved_reason=t.unresolved_reason,
+        source_type=t.source_type,
+        source_id=t.source_id,
+        student_id=t.student_id,
+        class_id=t.class_id,
+        grade_id=t.grade_id,
+        started_at=t.started_at,
+        completed_at=t.completed_at,
+        result=t.result,
         closure_status=t.closure_status,
         closed_at=t.closed_at,
         created_by=t.created_by,
@@ -116,7 +124,7 @@ async def create_task(
 
 @router.get("", response_model=TaskListOut)
 async def list_tasks(
-    status: str | None = Query(None, description="OPEN/ACCEPTED/IN_PROGRESS/DONE/REJECTED/CANCELLED"),
+    status: str | None = Query(None, description="pending/in_progress/completed/cancelled"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
@@ -140,13 +148,6 @@ async def get_task(
     return _task_out(task)
 
 
-@router.post("/{task_id}/accept", response_model=TaskActionOut)
-async def accept_task(task_id: int, current_user: User = Depends(get_current_user),
-                      db: AsyncSession = Depends(get_db)):
-    t = await TaskService.accept(db, current_user, task_id)
-    return TaskActionOut(id=t.id, status=t.status, message="已接受")
-
-
 @router.post("/{task_id}/start", response_model=TaskActionOut)
 async def start_task(task_id: int, current_user: User = Depends(get_current_user),
                      db: AsyncSession = Depends(get_db)):
@@ -160,14 +161,6 @@ async def complete_task(task_id: int, note: str | None = Query(None, max_length=
                         db: AsyncSession = Depends(get_db)):
     t = await TaskService.complete(db, current_user, task_id, note=note)
     return _task_out(t)  # 返回完整任务（含 closure_status=pending）
-
-
-@router.post("/{task_id}/reject", response_model=TaskActionOut)
-async def reject_task(task_id: int, note: str | None = Query(None, max_length=500),
-                      current_user: User = Depends(get_current_user),
-                      db: AsyncSession = Depends(get_db)):
-    t = await TaskService.reject(db, current_user, task_id, note=note)
-    return TaskActionOut(id=t.id, status=t.status, message="已驳回")
 
 
 @router.post("/{task_id}/cancel", response_model=TaskActionOut)

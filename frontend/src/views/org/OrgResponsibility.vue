@@ -9,7 +9,7 @@
           <el-icon :size="22"><UserFilled /></el-icon>
           组织与责任配置
         </h2>
-        <span class="page-subtitle">年级组长 · 班主任 · 任课教师（Assignment 唯一责任事实源）</span>
+        <span class="page-subtitle">年级组长 · 班主任 · 任课教师 · 心理负责人（Assignment 唯一责任事实源，缺谁显示「未配置」绝不补假数据）</span>
       </div>
       <div class="header-right">
         <el-tag type="danger" effect="plain" size="small">冲突</el-tag>
@@ -19,6 +19,47 @@
         </el-button>
       </div>
     </div>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- 责任覆盖概览：缺谁显示「未配置」绝不补假数据 -->
+    <!-- ════════════════════════════════════════ -->
+    <el-card shadow="never" class="overview-card">
+      <template #header><span class="overview-title">责任覆盖概览（缺谁显示「未配置」，绝不补假数据）</span></template>
+      <div class="overview-grid">
+        <div class="ov-item">
+          <div class="ov-label">年级组长</div>
+          <div class="ov-body">
+            <el-tag v-for="g in gradeLeaderCoverage" :key="g.id" size="small"
+              :type="g.configured ? 'success' : 'warning'" effect="plain">
+              {{ g.name }}{{ g.configured ? ' ✓' : ' · 未配置' }}
+            </el-tag>
+            <span v-if="!gradeLeaderCoverage.length" class="ov-empty">暂无年级数据</span>
+          </div>
+        </div>
+        <div class="ov-item">
+          <div class="ov-label">班主任</div>
+          <div class="ov-body">
+            <el-tag size="small" :type="missingClasses.length ? 'warning' : 'success'" effect="plain">
+              {{ classes.length - missingClasses.length }}/{{ classes.length }} 班已配{{ missingClasses.length ? ' · 缺 ' + missingClasses.length + ' 班' : ' ✓' }}
+            </el-tag>
+          </div>
+        </div>
+        <div class="ov-item">
+          <div class="ov-label">心理负责人</div>
+          <div class="ov-body">
+            <el-tag size="small" :type="psychConfigured ? 'success' : 'warning'" effect="plain">
+              {{ psychConfigured ? '已配置 ✓' : '未配置' }}
+            </el-tag>
+          </div>
+        </div>
+        <div class="ov-item">
+          <div class="ov-label">任课教师</div>
+          <div class="ov-body">
+            <el-tag size="small" type="info" effect="plain">已配置 {{ subjectCount }} 条</el-tag>
+          </div>
+        </div>
+      </div>
+    </el-card>
 
     <!-- ════════════════════════════════════════ -->
     <!-- 缺失提示：无班主任的班级                 -->
@@ -112,6 +153,7 @@
             <el-option label="班主任" value="homeroom_teacher" />
             <el-option label="年级组长" value="grade_leader" />
             <el-option label="任课教师" value="subject_teacher" />
+            <el-option label="心理负责人" value="counselor" />
             <el-option label="德育主任" value="moral_admin" />
           </el-select>
         </el-form-item>
@@ -200,12 +242,14 @@ const ROLE_LABEL: Record<string, string> = {
   grade_leader: '年级组长',
   subject_teacher: '任课教师',
   moral_admin: '德育主任',
+  counselor: '心理负责人',
 }
 const ROLE_TAG: Record<string, string> = {
   homeroom_teacher: 'success',
   grade_leader: 'warning',
   subject_teacher: 'primary',
   moral_admin: 'danger',
+  counselor: 'info',
 }
 
 function roleLabel(r: string) { return ROLE_LABEL[r] || r }
@@ -220,6 +264,22 @@ const missingClasses = computed(() => {
   )
   return classes.value.filter((c) => !assigned.has(c.id))
 })
+
+// 责任覆盖概览（诚实显示「未配置」，绝不补假数据）
+const gradeLeaderCoverage = computed(() => {
+  const configured = new Set(
+    assignments.value
+      .filter((a) => a.role_type === 'grade_leader' && a.is_active && a.scope_type === 'grade')
+      .map((a) => a.scope_id),
+  )
+  return grades.value.map((g) => ({ id: g.id, name: g.name, configured: configured.has(g.id) }))
+})
+const psychConfigured = computed(() =>
+  assignments.value.some((a) => a.role_type === 'counselor' && a.is_active),
+)
+const subjectCount = computed(() =>
+  assignments.value.filter((a) => a.role_type === 'subject_teacher' && a.is_active).length,
+)
 
 onMounted(async () => {
   await Promise.all([loadAssignments(), loadTeachers(), loadClasses()])
@@ -340,6 +400,14 @@ async function remove(row: Assignment) {
 .header-right { display: flex; align-items: center; gap: 8px; }
 .missing-alert { margin-bottom: 14px; }
 .missing-tag { margin-right: 6px; }
+.overview-card { border-radius: 10px; margin-bottom: 14px; }
+.overview-title { font-weight: 600; font-size: 15px; color: #303133; }
+.overview-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.ov-item { border: 1px solid #ebeef5; border-radius: 8px; padding: 10px 12px; }
+.ov-label { font-size: 13px; color: #606266; font-weight: 600; margin-bottom: 8px; }
+.ov-body { display: flex; flex-wrap: wrap; gap: 6px; }
+.ov-empty { font-size: 12px; color: #c0c4cc; }
+@media (max-width: 768px) { .overview-grid { grid-template-columns: 1fr; } }
 .list-card { border-radius: 10px; }
 .teacher-name { font-weight: 600; }
 .scope-sub { color: #c0c4cc; font-size: 12px; }

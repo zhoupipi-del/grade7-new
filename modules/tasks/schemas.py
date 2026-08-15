@@ -21,6 +21,11 @@ class TaskCreate(BaseModel):
     grade_id: Optional[int] = Field(None, gt=0, description="年级ID → 解析年级组长")
     subject: Optional[str] = Field(None, max_length=32, description="学科（配合 student_id → 任课教师）")
 
+    # 来源关联（可选；student→class→grade 由服务端派生）
+    source_type: Optional[str] = Field(None, max_length=32, description="来源类型（behavior/attendance/class_affair...）")
+    source_id: Optional[int] = Field(None, gt=0, description="来源记录ID")
+    class_id: Optional[int] = Field(None, gt=0, description="班级ID（不填则由 student_id 派生）")
+
 
 # ── 状态流转 ──
 class TaskReassign(BaseModel):
@@ -105,6 +110,18 @@ class TaskOut(BaseModel):
     resolved_at: Optional[datetime] = None
     assignment_id: Optional[int] = None
     unresolved_reason: Optional[str] = None
+
+    # 来源关联
+    source_type: Optional[str] = None
+    source_id: Optional[int] = None
+    student_id: Optional[int] = None
+    class_id: Optional[int] = None
+    grade_id: Optional[int] = None
+
+    # 处理时间线留痕
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    result: Optional[str] = None
 
     # closure
     closure_status: Optional[str] = None

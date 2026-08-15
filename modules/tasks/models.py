@@ -10,11 +10,11 @@ modules/tasks/models.py — Task Center Foundation V1 数据模型
 
 关键设计：
   1. Task 不自己猜 Owner：owner_user_id 仅由 ResponsibleOwnerResolver 写入，
-     unresolved → owner=NULL + unresolved_reason（unassigned / resolution_required）。
+     unresolved → owner=NULL + unresolved_reason（no_assignment / conflict / no_access / invalid_request）。
   2. 责任快照：tasks 主表保存 owner/role/scope/source/confidence/resolved_at/assignment_id，
      历史事实="某时刻依据某 assignment 分配给某老师"。
   3. Assignment 改变 ≠ 历史任务自动换人：task_assignments 只追加。
-  5. DONE ≠ verified：status=DONE 时 closure_status='pending'（V1 不自动复核，但字段分离）。
+  5. completed ≠ verified：status=completed 时 closure_status='pending'（V1 不自动复核，但字段分离）。
 """
 
 from datetime import datetime
@@ -28,33 +28,32 @@ from core.models import Base, get_local_now
 
 
 # ═══════════════════════════════════════════════════════════════
-# 任务状态机（V1 只管理真实动作）
+# 任务状态机（V1 只管理真实动作，4 态对齐 spec）
+#   pending     待处理（已建，等待责任人开始）
+#   in_progress 处理中（责任人已开始）
+#   completed   已完成（责任人填写了结果）
+#   cancelled   已取消
 # ═══════════════════════════════════════════════════════════════
-TASK_STATUS_OPEN = "OPEN"
-TASK_STATUS_ACCEPTED = "ACCEPTED"
-TASK_STATUS_IN_PROGRESS = "IN_PROGRESS"
-TASK_STATUS_DONE = "DONE"
-TASK_STATUS_REJECTED = "REJECTED"
-TASK_STATUS_CANCELLED = "CANCELLED"
+TASK_STATUS_PENDING = "pending"
+TASK_STATUS_IN_PROGRESS = "in_progress"
+TASK_STATUS_COMPLETED = "completed"
+TASK_STATUS_CANCELLED = "cancelled"
 
-TASK_STATUS_ACTIVE = {TASK_STATUS_OPEN, TASK_STATUS_ACCEPTED, TASK_STATUS_IN_PROGRESS}
-TASK_STATUS_TERMINAL = {TASK_STATUS_DONE, TASK_STATUS_REJECTED, TASK_STATUS_CANCELLED}
+TASK_STATUS_ACTIVE = {TASK_STATUS_PENDING, TASK_STATUS_IN_PROGRESS}
+TASK_STATUS_TERMINAL = {TASK_STATUS_COMPLETED, TASK_STATUS_CANCELLED}
 
-# closure 状态（与 status 分离：DONE ≠ verified）
+# closure 状态（与 status 分离：completed ≠ verified）
 CLOSURE_PENDING = "pending"
 CLOSURE_VERIFIED = "verified"
 
 # 事件类型
 EV_CREATED = "created"
-EV_ACCEPTED = "accepted"
 EV_STARTED = "started"
 EV_COMPLETED = "completed"
-EV_REJECTED = "rejected"
 EV_CANCELLED = "cancelled"
 EV_REASSIGNED = "reassigned"
 EV_EVIDENCE_ADDED = "evidence_added"
 EV_COMMENT_ADDED = "comment_added"
-EV_RESOLUTION_REQUIRED = "resolution_required"
 
 
 class Task(Base):
@@ -67,7 +66,7 @@ class Task(Base):
     task_type = Column(String(32), nullable=False, default="manual")
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
-    status = Column(String(20), nullable=False, default=TASK_STATUS_OPEN)
+    status = Column(String(20), nullable=False, default=TASK_STATUS_PENDING)
     priority = Column(String(10), nullable=False, default="normal")
     due_at = Column(DateTime, nullable=True)
 
@@ -83,11 +82,23 @@ class Task(Base):
     assignment_id = Column(BigInteger, nullable=True)
     unresolved_reason = Column(String(200), nullable=True)
 
-    # ── closure 与 status 分离（DONE ≠ verified）──
+    # ── 来源关联（问题归口：谁/哪个班/哪个年级/哪个业务记录）──
+    source_type = Column(String(32), nullable=True)   # 来源类型（behavior/attendance/class_affair...）
+    source_id = Column(BigInteger, nullable=True)     # 来源记录 ID
+    student_id = Column(BigInteger, nullable=True)    # 关联学生
+    class_id = Column(BigInteger, nullable=True)      # 关联班级
+    grade_id = Column(BigInteger, nullable=True)      # 关联年级
+
+    # ── closure 与 status 分离（completed ≠ verified）──
     closure_status = Column(String(16), nullable=True)
     closure_verified_at = Column(DateTime, nullable=True)
     closure_verified_by = Column(BigInteger, nullable=True)
     closed_at = Column(DateTime, nullable=True)
+
+    # ── 处理时间线留痕 ──
+    started_at = Column(DateTime, nullable=True)      # 责任人开始处理时间
+    completed_at = Column(DateTime, nullable=True)    # 责任人填写结果时间
+    result = Column(Text, nullable=True)              # 处理结果留痕
 
     created_by = Column(BigInteger, nullable=False)
     created_at = Column(DateTime, default=get_local_now)

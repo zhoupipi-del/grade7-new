@@ -24,6 +24,23 @@ export interface TaskResponsibility {
   unresolved_reason: string | null
 }
 
+/** ResponsibleOwnerResolver 预览结果（GET /responsibility/resolve） */
+export interface TaskResolveOut {
+  resolved: boolean
+  owner_user_id: number | null
+  owner_name: string | null
+  owner_role: string | null
+  role_type: string | null
+  responsibility: string | null
+  scope_type: string | null
+  scope_id: number | null
+  source: string
+  confidence: string | null
+  unresolved_reason: string | null
+  reason: string | null
+  assignment_id: number | null
+}
+
 export interface TaskEvent {
   id: number
   event_type: string
@@ -77,6 +94,14 @@ export interface TaskCreateBody {
   student_id?: number
   grade_id?: number
   subject?: string
+  source_type?: string
+  source_id?: number
+  class_id?: number
+}
+
+/** 预览：在 INSERT 之前先问 Resolver「这件事归谁」，未配置则禁止创建 */
+export function resolveResponsibility(params: { student_id?: number; grade_id?: number; subject?: string }) {
+  return request.get<any, TaskResolveOut>('/responsibility/resolve', { params })
 }
 
 export function getTaskStudents() {
@@ -95,10 +120,6 @@ export function getTask(id: number) {
   return request.get<any, TaskItem>(`/tasks/${id}`)
 }
 
-export function acceptTask(id: number) {
-  return request.post<any, { id: number; status: string; message: string }>(`/tasks/${id}/accept`)
-}
-
 export function startTask(id: number) {
   return request.post<any, { id: number; status: string; message: string }>(`/tasks/${id}/start`)
 }
@@ -106,14 +127,6 @@ export function startTask(id: number) {
 export function completeTask(id: number, note?: string) {
   return request.post<any, { id: number; status: string; message: string }>(
     `/tasks/${id}/complete`,
-    null,
-    { params: note ? { note } : {} },
-  )
-}
-
-export function rejectTask(id: number, note?: string) {
-  return request.post<any, { id: number; status: string; message: string }>(
-    `/tasks/${id}/reject`,
     null,
     { params: note ? { note } : {} },
   )
