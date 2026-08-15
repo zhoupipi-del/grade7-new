@@ -109,16 +109,30 @@ class CopilotSynthesizer:
 
 
 def _fallback_from_evidence(evidence: list[dict[str, Any]]) -> dict[str, Any]:
-    """LLM 失败兜底：用聚合证据构造结构化结论（无 PII）。"""
+    """LLM 失败兜底：用聚合证据构造结构化结论（无 PII）。
+
+    REAL EVENT #1：兜底同样遵守"无数据≠无异常"——data_coverage.empty_window
+    或 total_records=0 时明确声明无数据，不得归纳为低风险。
+    """
     domains: dict[str, Any] = {}
     findings: list[str] = []
     for item in evidence:
         domain = item.get("domain", "unknown")
         result = item.get("result", {}) or {}
         summary = result.get("summary", {})
+        coverage = result.get("data_coverage") or {}
         if domain not in domains:
             domains[domain] = {}
         domains[domain]["summary"] = summary
+        domains[domain]["data_coverage"] = coverage
+        # 无数据声明（空窗口 ≠ 低风险）
+        if coverage.get("empty_window") or coverage.get("total_records", 1) == 0:
+            findings.append(
+                f"[{domain}] 该窗口内无数据记录（total_records=0，"
+                f"period={result.get('period') or 'N/A'}）——"
+                "无数据不等于无异常，不可据此判断为低风险"
+            )
+            continue
         # 从 summary 取可展示指标生成发现
         if isinstance(summary, dict):
             bits = []
