@@ -78,7 +78,12 @@ class CopilotSynthesizer:
             "必须明确声明该窗口内无数据记录（可能为假期/未录入），严禁据此归纳为低风险或无需关注"
             "——无数据不等于无异常；\n"
             "5. 若某领域（grades/behavior/risk）完全没有 evidence，必须声明该领域无可用数据，"
-            "不得静默跳过或假装已分析。\n"
+            "不得静默跳过或假装已分析；\n"
+            "6. 判读规则（DATA-GOV-001 止血）：风险领域班级优先级必须基于 evidence 中每班的 "
+            "unique_students（涉及学生数）与 active_unexpired（当前未过期未处置预警数），"
+            "严禁用原始 total_records（含批处理重复/过期未关单的原始行数）作为风险强度或班级排序依据；"
+            "若 by_class 仅给出原始条数而无 unique_students/active_unexpired，须声明该数据未经去重核验，"
+            "不得据此给出班级风险结论。\n"
             "\n严格返回 JSON：\n"
             '{"overview": {}, "findings": ["..."], '
             '"recommendations": [...], '
@@ -141,20 +146,31 @@ def _fallback_from_evidence(evidence: list[dict[str, Any]]) -> dict[str, Any]:
                     bits.append(f"{k}={v}")
             if bits:
                 findings.append(f"[{domain}] " + "，".join(bits[:4]))
-        # REAL EVENT #1：班级维度（帮助主任缩小关注范围）——
-        # risk/behavior 的 by_class 按 count 降序呈现 Top3 班级
+        # REAL EVENT #1 + DATA-GOV-001 止血：班级维度帮助主任缩小关注范围。
+        # 排序不得按原始 COUNT(*)——按 unique_students + active_unexpired；
+        # 原始行数仅作审计数字并列展示。
         by_class = result.get("by_class") or []
         if by_class:
-            top = sorted(
-                by_class,
-                key=lambda x: x.get("count", 0) or x.get("anomalies", 0),
-                reverse=True,
-            )[:3]
-            parts = [
-                f"{c.get('class_name') or c.get('name')}({c.get('count', c.get('anomalies', 0))})"
-                for c in top
-            ]
-            findings.append(f"[{domain}] 需优先关注的班级 Top：{ '，'.join(parts) }")
+            def _rank(c):
+                if "unique_students" in c:
+                    return (c.get("unique_students", 0), c.get("active_unexpired", 0))
+                return (0, c.get("count", 0) or c.get("anomalies", 0))
+            top = sorted(by_class, key=_rank, reverse=True)[:3]
+            parts = []
+            for c in top:
+                name = c.get("class_name") or c.get("name")
+                if "unique_students" in c:
+                    parts.append(
+                        f"{name}(涉及学生{c.get('unique_students', 0)}人/"
+                        f"未过期{c.get('active_unexpired', 0)}条/"
+                        f"原始{c.get('total_records', 0)}条)"
+                    )
+                else:
+                    parts.append(f"{name}({c.get('count', c.get('anomalies', 0))})")
+            findings.append(
+                f"[{domain}] 需优先关注的班级 Top（按涉及学生数，非原始预警条数）："
+                f"{'，'.join(parts)}"
+            )
     return {
         "overview": {"note": "AI 综合结论暂不可用，以下为各域聚合数据"},
         "findings": findings or ["暂无可用聚合数据"],

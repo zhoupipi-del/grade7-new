@@ -126,14 +126,60 @@ class _RiskWarningAggregator:
         level_rows = (await self.db.execute(text(level_sql), params)).all()
         by_level = [{"level": r[0], "count": int(r[1])} for r in level_rows]
 
-        # By class
+        # By class — DATA-GOV-001 止血规则：不得按 COUNT(*) 排序班级风险强度。
+        # 排序改为 unique_students + active_unexpired；原始行数 total_records 仅作审计数字。
         class_sql = (
-            f"SELECT r.class_id, c.name, COUNT(1) FROM risk_warnings r "
-            f"JOIN classes c ON r.class_id = c.id WHERE {where_str} "
-            f"GROUP BY r.class_id, c.name ORDER BY COUNT(1) DESC"
+            f"SELECT r.class_id, c.name, "
+            f"COUNT(1) AS total_records, "
+            f"COUNT(DISTINCT r.student_id) AS unique_students, "
+            f"SUM(CASE WHEN r.status='active' AND r.handled_by IS NULL "
+            f"AND (r.expires_at IS NULL OR r.expires_at >= NOW()) THEN 1 ELSE 0 END) AS active_unexpired, "
+            f"SUM(CASE WHEN r.expires_at IS NOT NULL AND r.expires_at < NOW() THEN 1 ELSE 0 END) AS expired_not_closed, "
+            f"SUM(CASE WHEN r.trigger_event_id IS NOT NULL AND r.trigger_event_id > 0 THEN 1 ELSE 0 END) AS anchored, "
+            f"MAX(r.warned_at) AS last_warning_at "
+            f"FROM risk_warnings r JOIN classes c ON r.class_id = c.id "
+            f"WHERE {where_str} "
+            f"GROUP BY r.class_id, c.name"
         )
         class_rows = (await self.db.execute(text(class_sql), params)).all()
-        by_class = [{"class_id": int(r[0]), "class_name": r[1], "count": int(r[2])} for r in class_rows]
+        # 窗口内（近 30 天）新命中学生数
+        new_sql = (
+            f"SELECT r.class_id, COUNT(DISTINCT r.student_id) FROM risk_warnings r "
+            f"WHERE {where_str} AND r.warned_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) "
+            f"GROUP BY r.class_id"
+        )
+        new_rows = {int(r[0]): int(r[1]) for r in (await self.db.execute(text(new_sql), params)).all()}
+        # 重复组数：同学生+同触发源+同等级+同日（批处理重复报警证据）
+        dup_sql = (
+            f"SELECT t.class_id, COUNT(*) FROM ("
+            f"SELECT r.class_id, r.student_id, r.trigger_event_type, r.risk_level, "
+            f"DATE(r.warned_at) d FROM risk_warnings r "
+            f"WHERE {where_str} AND r.student_id IS NOT NULL "
+            f"GROUP BY r.class_id, r.student_id, r.trigger_event_type, r.risk_level, "
+            f"DATE(r.warned_at) HAVING COUNT(*)>1) t GROUP BY t.class_id"
+        )
+        dup_rows = {int(r[0]): int(r[1]) for r in (await self.db.execute(text(dup_sql), params)).all()}
+        by_class = []
+        for r in class_rows:
+            cid = int(r[0])
+            total_records = int(r[2])
+            unique_students = int(r[3] or 0)
+            active_unexpired = int(r[4] or 0)
+            expired_not_closed = int(r[5] or 0)
+            anchored = int(r[6] or 0)
+            by_class.append({
+                "class_id": cid, "class_name": r[1],
+                "unique_students": unique_students,
+                "total_records": total_records,
+                "active_unexpired": active_unexpired,
+                "expired_not_closed": expired_not_closed,
+                "new_students_in_window": new_rows.get(cid, 0),
+                "duplicate_day_groups": dup_rows.get(cid, 0),
+                "event_anchored_ratio": round(anchored / total_records, 3) if total_records else 0.0,
+                "last_warning_at": str(r[7]) if r[7] else None,
+            })
+        # 排序：涉及学生数优先，其次当前未过期未处置
+        by_class.sort(key=lambda x: (x["unique_students"], x["active_unexpired"]), reverse=True)
 
         # Trigger type (safe, no psych fields)
         trigger_sql = (
@@ -170,8 +216,14 @@ class _RiskWarningAggregator:
                 },
                 "by_trigger": by_trigger[:5],
                 "by_class": [
-                    {"name": c["class_name"], "count": c["count"]}
-                    for c in sorted(by_class, key=lambda x: x["count"], reverse=True)
+                    {"class_name": c["class_name"], "unique_students": c["unique_students"],
+                     "active_unexpired": c["active_unexpired"], "total_records": c["total_records"],
+                     "expired_not_closed": c["expired_not_closed"],
+                     "new_students_in_window": c["new_students_in_window"],
+                     "duplicate_day_groups": c["duplicate_day_groups"],
+                     "event_anchored_ratio": c["event_anchored_ratio"],
+                     "last_warning_at": c["last_warning_at"]}
+                    for c in by_class
                 ],
                 "note": "心理敏感字段(psych_deviation等)已在此层滤除",
                 "data_coverage": {"total_records": total, "empty_window": total == 0},
