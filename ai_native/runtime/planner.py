@@ -58,6 +58,11 @@ WRITE_MARKER_KEYWORDS = {
     "写测试标记", "写入测试标记", "写标记", "write marker",
 }
 
+# FT-016 test-only：受控失败测试意图（failure evidence 验证入口）
+FAIL_MARKER_KEYWORDS = {
+    "失败测试", "故障测试", "fail test",
+}
+
 COMPREHENSIVE_KEYWORDS = {
     "重点关注", "整体情况", "综合分析", "综合评估",
     "本周重点", "最近有什么问题", "需要关注什么",
@@ -108,6 +113,10 @@ class BoundedPlanner:
         wants_write_marker = (
             os.environ.get("AI_APPROVAL_TEST_TOOL") == "1"
             and any(k in text for k in WRITE_MARKER_KEYWORDS)
+        )
+        wants_fail_marker = (
+            os.environ.get("AI_FAILURE_TEST_TOOL") == "1"
+            and any(k in text for k in FAIL_MARKER_KEYWORDS)
         )
         wants_comprehensive = any(k in text for k in COMPREHENSIVE_KEYWORDS)
 
@@ -184,6 +193,23 @@ class BoundedPlanner:
                 tool="read_risk_warning_summary",
                 args=clean_args,
                 reason="查询风险预警数据",
+            ))
+
+        # ── FT-016 test-only：失败测试 → fail_test_marker 单 step ──
+        #   「可恢复」→ fail_until=1/recoverable=true（attempt1 FAIL→attempt2 PASS）
+        #   默认（不可恢复）→ fail_until=9999/recoverable=false（run FAILED）
+        if wants_fail_marker:
+            recoverable = "可恢复" in text
+            m = re.search(r"(?:失败|故障)测试\s+([\w-]+)?", text)
+            marker = m.group(1) if m and m.group(1) else "ft016"
+            steps.append(PlanStep(
+                tool="fail_test_marker",
+                args={
+                    "marker": marker,
+                    "fail_until": 1 if recoverable else 9999,
+                    "recoverable": recoverable,
+                },
+                reason="FT-016 HTTP E2E：受控失败证据链",
             ))
 
         # ── FT-015 test-only：写测试标记 → write_test_marker 单 step ──

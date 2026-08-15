@@ -33,6 +33,7 @@ from ai_native.governance.resource_scope import ResourceScope, resolve_scope
 from ai_native.runtime.agent_run import AgentRun
 from ai_native.runtime.critic import EvidenceCritic
 from ai_native.runtime.approval_gate import ApprovalGate, ApprovalGateError
+from modules.ai_teacher_assistant.tools.fail_test_marker import ControlledToolFailure
 from ai_native.runtime.permission import PermissionChecker
 from ai_native.runtime.planner import BoundedPlanner
 from ai_native.runtime.provider_router import ProviderRouter
@@ -205,6 +206,12 @@ def _build_all_tool_descriptors() -> list[ToolDescriptor]:
             build_write_test_marker_descriptor,
         )
         descriptors.append(build_write_test_marker_descriptor())
+    # FT-016 test-only：fail_test_marker 受控失败验证工具，同样仅测试模式注册。
+    if os.environ.get("AI_FAILURE_TEST_TOOL") == "1":
+        from modules.ai_teacher_assistant.tools.fail_test_marker import (
+            build_fail_test_marker_descriptor,
+        )
+        descriptors.append(build_fail_test_marker_descriptor())
     # V2 copilot 路径：所有 Tool 的 handler 统一指向"聚合型"handler
     # （handler 内部调用 _*Aggregator，不绕过 ToolExecutor，不调 DeepSeek）
     handler_map = {
@@ -385,15 +392,66 @@ class AgentCopilotService:
                 "user_id": self.user.id,
                 "run_id": agent_run.run_id,
                 "db": self.db,
+                "session": self.db,  # handler 契约（FT-016 fail_test_marker 需要）
                 "user": self.user,
                 "effective_student_ids": authorized_ids,  # None=本校全可见
                 "args": args,
             }
-            result = await self.executor.execute(
-                run=run_ctx,
-                descriptor=descriptor,
-                incident_sink=incidents.append,
-            )
+            try:
+                result = await self.executor.execute(
+                    run=run_ctx,
+                    descriptor=descriptor,
+                    incident_sink=incidents.append,
+                )
+            except ControlledToolFailure as ctf:
+                # ── FT-016 失败证据链：tool_call FAILED + ai_incidents + run 状态 ──
+                await self._record_tool_call_failure(
+                    run_id=agent_run.run_id,
+                    descriptor=descriptor,
+                    params=args,
+                    failure=ctf,
+                )
+                await self._record_incident(
+                    run_id=agent_run.run_id,
+                    descriptor=descriptor,
+                    failure=ctf,
+                )
+                if args.get("recoverable"):
+                    # 可恢复：run RECOVERING → 单次 fallback 重试（同 step，attempt2）
+                    await agent_run.transition("RECOVERING")
+                    await self.db.commit()
+                    await agent_run.transition("RESUMING")
+                    try:
+                        result = await self.executor.execute(
+                            run=run_ctx,
+                            descriptor=descriptor,
+                            incident_sink=incidents.append,
+                        )
+                        incidents.append({"type": "tool_recovery", "tool": descriptor.name,
+                                          "from": "RECOVERING", "to": "RESUMING"})
+                    except ControlledToolFailure as ctf2:
+                        # 重试仍失败 → 不可恢复 → run FAILED
+                        await self._record_tool_call_failure(
+                            run_id=agent_run.run_id,
+                            descriptor=descriptor,
+                            params=args,
+                            failure=ctf2,
+                        )
+                        await self._record_incident(
+                            run_id=agent_run.run_id,
+                            descriptor=descriptor,
+                            failure=ctf2,
+                        )
+                        await agent_run.transition("FAILED")
+                        await self.db.commit()
+                        raise HTTPException(status_code=500,
+                                            detail=f"Tool 执行失败（不可恢复）: {ctf2.message}")
+                else:
+                    # 不可恢复 → run FAILED（completed_at 由 TERMINAL_STATES 落库）
+                    await agent_run.transition("FAILED")
+                    await self.db.commit()
+                    raise HTTPException(status_code=500,
+                                        detail=f"Tool 执行失败: {ctf.message}")
 
             # ── 写 ai_tool_calls（同 run_id；Tool → EXECUTED）──
             await self._record_tool_call(
@@ -875,6 +933,80 @@ class AgentCopilotService:
             "run_id": run.id,
             "approval_id": approval.id,
         }
+
+    # ═══════════════════════════════════════════════════════════════════
+    # FT-016 失败证据链：tool_call FAILED + ai_incidents
+    # ═══════════════════════════════════════════════════════════════════
+
+    async def _record_tool_call_failure(
+        self,
+        *,
+        run_id: int,
+        descriptor: ToolDescriptor,
+        params: dict[str, Any],
+        failure: "ControlledToolFailure",
+    ) -> None:
+        """写 ai_tool_calls(FAILED)：失败也必须留 tool_call 记录（同 run_id）。"""
+        from ai_native.models.ai_tool_calls import AiToolCalls
+
+        args_hash = hashlib.sha256(
+            _json.dumps(params, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+
+        record = AiToolCalls(
+            school_id=self.user.school_id,
+            run_id=run_id,
+            tool_name=descriptor.name,
+            tool_version=descriptor.version,
+            schema_version="1",
+            action=descriptor.action,
+            side_effect=descriptor.side_effect,
+            arguments_hash=args_hash,
+            idempotency_key=f"{descriptor.name}:{run_id}:{args_hash[:16]}",
+            resource_scope={
+                "grade_id": params.get("grade_id"),
+                "class_id": params.get("class_id"),
+            },
+            declared_output_classification=descriptor.declared_output_classification,
+            actual_output_classification=descriptor.declared_output_classification,
+            status="FAILED",
+            started_at=datetime.now(),
+        )
+        self.db.add(record)
+        await self.db.flush()
+
+    async def _record_incident(
+        self,
+        *,
+        run_id: int,
+        descriptor: ToolDescriptor,
+        failure: "ControlledToolFailure",
+    ) -> None:
+        """写 ai_incidents（capability 类；不存原始异常正文——Inv 11）。
+
+        关联：run_id（INCIDENT_RUN_LINK）+ tool_call（经同 run 的 FAILED tool_call
+        查询关联，无需额外 FK）。
+        """
+        from ai_native.models.ai_incidents import AiIncidents
+        import hashlib as _hl
+
+        summary = failure.message[:512] if failure.message else "tool failure"
+        detail = getattr(failure, "detail", "") or failure.message
+        detail_hash = _hl.sha256(detail.encode("utf-8")).hexdigest()
+
+        incident = AiIncidents(
+            school_id=self.user.school_id,
+            run_id=run_id,
+            incident_code="P01",
+            incident_type="tool_controlled_failure",
+            category="capability",
+            severity="MEDIUM",
+            summary_redacted=summary,
+            detail_hash=detail_hash,
+            resolved=False,
+        )
+        self.db.add(incident)
+        await self.db.flush()
 
     async def _record_tool_call(self, *, run_id: int, descriptor: ToolDescriptor,
                                 result: dict[str, Any], params: dict[str, Any]) -> None:
