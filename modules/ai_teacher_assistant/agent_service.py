@@ -418,8 +418,10 @@ class AgentCopilotService:
                 )
                 if args.get("recoverable"):
                     # 可恢复：run RECOVERING → 单次 fallback 重试（同 step，attempt2）
+                    # ★ FT-016 修复：成功路径不中途 commit——RECOVERING/RESUMING 仅
+                    # flush，恢复成功后由外层事务统一 commit → HTTP 返回时 DB 即
+                    # COMPLETED（避免半途 RECOVERING 先落库被外部看到）。
                     await agent_run.transition("RECOVERING")
-                    await self.db.commit()
                     await agent_run.transition("RESUMING")
                     try:
                         result = await self.executor.execute(
@@ -431,6 +433,8 @@ class AgentCopilotService:
                                           "from": "RECOVERING", "to": "RESUMING"})
                     except ControlledToolFailure as ctf2:
                         # 重试仍失败 → 不可恢复 → run FAILED
+                        # （先 commit 再 raise：raise 会触发外层 rollback，必须让
+                        #   FAILED/incident 先落库）
                         await self._record_tool_call_failure(
                             run_id=agent_run.run_id,
                             descriptor=descriptor,
