@@ -284,7 +284,12 @@ async def list_prescription_history(
     #   含 full_text/raw_snapshot 涉心理/处分/成绩敏感字段。
     #   修法：角色闸排除 PARENT/STUDENT；教师/年级组长按行级 scope 收口。
     _role = current_user.role if isinstance(current_user.role, UserRole) else UserRole(current_user.role)
-    if _role not in (UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER):
+    if _role not in (
+        UserRole.MS_ADMIN,
+        UserRole.GRADE_LEADER,
+        UserRole.CLASS_TEACHER,
+        UserRole.COUNSELOR,  # CF04-OPS-001 R1: 心理教师（psych assignment scope）
+    ):
         raise HTTPException(status_code=403, detail="无权查看 AI 处方")
 
     school_id = current_user.school_id
@@ -435,7 +440,12 @@ async def get_prescription_detail(
     """获取历史处方的完整内容（含 full_text）"""
     # S0-2 P0 修复（SEC-INC-20260810-001）：角色闸 + 行级归属校验
     _role = current_user.role if isinstance(current_user.role, UserRole) else UserRole(current_user.role)
-    if _role not in (UserRole.MS_ADMIN, UserRole.GRADE_LEADER, UserRole.CLASS_TEACHER):
+    if _role not in (
+        UserRole.MS_ADMIN,
+        UserRole.GRADE_LEADER,
+        UserRole.CLASS_TEACHER,
+        UserRole.COUNSELOR,  # CF04-OPS-001 R1: 心理教师（psych assignment scope）
+    ):
         raise HTTPException(status_code=403, detail="无权查看 AI 处方")
 
     record = await db.scalar(
