@@ -80,14 +80,18 @@ for module_dir in sorted(_modules_dir.iterdir()):
 # ═══════════════════════════════════════════════════════════════
 #  AI Native Control Plane — ai_native/models/*.py 单独扫描
 #  （ai_native 在仓库根，不在 modules/ 下；§0-E/B0 §6：绿地包）
-#  ★ B1 FAIL-CLOSE：AI Native 是 frozen 9 Models，任何 import 失败 /
-#    数量 ≠ 9 必须 STOP，不允许像旧 modules/* 那样 skip 后继续。
+#  ★ B1 FAIL-CLOSE：AI Native 是 frozen N Models，任何 import 失败 /
+#    数量 ≠ N 必须 STOP，不允许像旧 modules/* 那样 skip 后继续。
+#  ★ 冻结基线更新（CF-05 Batch A，2026-08-16）：
+#    frozen 9 → frozen 10 —— 新增 AIProvenanceRecord（ai_provenance_records，
+#    CF-05 AI 业务产物溯源 Registry）。这是合法受控新增，非残缺 schema。
 # ═══════════════════════════════════════════════════════════════
+_AI_NATIVE_FROZEN_MODELS = 10  # CF-05 Batch A: 9 -> 10
 _ai_native_models_dir = BACKEND_ROOT / "ai_native" / "models"
 _ai_native_loaded = 0
 if not _ai_native_models_dir.is_dir():
     raise RuntimeError(
-        "[B1 FAIL-CLOSE] ai_native/models/ 目录缺失；frozen 9 Models 必须存在"
+        "[B1 FAIL-CLOSE] ai_native/models/ 目录缺失；frozen 10 Models 必须存在"
     )
 
 _ai_native_errors: list[tuple[str, str]] = []
@@ -111,10 +115,10 @@ if _ai_native_errors:
         "[B1 FAIL-CLOSE] ai_native.models 导入失败，必须 STOP：\n"
         + "\n".join(f"  {mod}: {err}" for mod, err in _ai_native_errors)
     )
-if _ai_native_loaded != 9:
+if _ai_native_loaded != _AI_NATIVE_FROZEN_MODELS:
     raise RuntimeError(
-        f"[B1 FAIL-CLOSE] AI Native frozen 9 Models，实际加载 {_ai_native_loaded} 个；"
-        f"必须 9/9，禁止带残缺 schema 迁移"
+        f"[B1 FAIL-CLOSE] AI Native frozen {_AI_NATIVE_FROZEN_MODELS} Models，实际加载 {_ai_native_loaded} 个；"
+        f"必须 {_AI_NATIVE_FROZEN_MODELS}/{_AI_NATIVE_FROZEN_MODELS}，禁止带残缺 schema 迁移"
     )
 
 print(
