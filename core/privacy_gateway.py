@@ -76,7 +76,9 @@ BLOCK_FIELDS = {
 # 文本级强扫描（最后一道防线，针对已拼成自由文本的场景）
 # ─────────────────────────────────────────────────────────────
 _RE_PHONE = re.compile(r"1[3-9]\d{9}")
-_RE_IDCARD = re.compile(r"\b\d{17}[\dXx]\b")
+# [AUDIT-FIX PII-001] 用零宽断言替代 \b：\b 在中文/数字紧贴（"身份证430121..."）处不成立，
+#   导致 18 位身份证（含 X 结尾）漏清。零宽断言保证两侧均非 [\dXx] 才命中。
+_RE_IDCARD = re.compile(r"(?<![\dXx])\d{17}[\dXx](?![\dXx])")
 _RE_NAME_LINE = re.compile(r"(姓名|学生姓名|真实姓名|患儿姓名)\s*[:：]\s*([^\s,，。\n]{1,12})")
 _RE_STUID_LINE = re.compile(r"(学生\s*ID|学号|student_id|student_no)\s*[:：]\s*(\d+)")
 

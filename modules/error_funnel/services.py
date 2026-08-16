@@ -16,6 +16,14 @@ import os
 import json
 from core.deepseek_provider import DeepSeekProvider
 
+# [AUDIT-FIX PII-001] 外发 LLM 的 PII 防护（复用平台能力，不发明第二套）：
+#   - sanitize_student_info: 清学号等数字 PII（research_ai 同款）
+#   - PrivacyGateway.scrub_text: 清手机/身份证/姓名行/敏感标记
+from modules.research_ai.llm_client import sanitize_student_info
+from core.privacy_gateway import PrivacyGateway
+
+_gateway_scrub = PrivacyGateway()
+
 _deepseek = DeepSeekProvider()
 import logging
 from sqlalchemy import select, func, and_, update, delete
@@ -25,6 +33,12 @@ from datetime import datetime
 
 from core.models import get_local_now, User, Student
 from modules.grades.models import GradeSubject, GradeRecord
+# [AUDIT-FIX AI-001] 接入 CF-04 人审状态机：AI 处方必须落 PENDING_REVIEW
+#   铁律：AI generate 永远只能落 PENDING_REVIEW；只有人工 CONFIRMED/MODIFIED
+#   之后才视为正式事实；REJECTED 永不进入业务。
+from modules.ai_prescription.models import (
+    AIPrescription, PrescriptionType, ReviewStatus, RiskLevel,
+)
 from .models import (
     KnowledgePoint, ErrorBookItem, KnowledgeGap,
     ERROR_CONCEPTUAL, ERROR_PROCEDURAL, ERROR_CARELESS, ERROR_OMISSION, ERROR_UNKNOWN,
@@ -595,7 +609,7 @@ async def generate_ai_prescription(
     )
     errors = error_result.scalars().all()
 
-    # 获取学生名
+    # 获取学生名（仅用于返回上下文，**不进入外部 prompt** — AUDIT-FIX PII-001）
     student_map = await _get_student_names_batch(db, [gap.student_id])
     student_name = student_map.get(gap.student_id, f"学生{gap.student_id}")
 
@@ -603,15 +617,23 @@ async def generate_ai_prescription(
     subject_map = await _get_subject_names_batch(db, [gap.subject_id])
     subject_name = subject_map.get(gap.subject_id, "")
 
-    # 构建 prompt
+    # 构建 prompt — [AUDIT-FIX PII-001] 学生身份信息不离开 WINGS 边界：
+    #   1) 禁止 student_name 进入 prompt（改为匿名「该学生」）
+    #   2) 错题内容过 sanitize（学生答案可能含姓名/学号/手机号）
     error_list_text = ""
     for i, e in enumerate(errors, 1):
-        error_list_text += f"\n错题{i}: {e.question_content[:200]}"
-        if e.student_answer:
-            error_list_text += f"\n  学生答案: {e.student_answer[:100]}"
-        if e.correct_answer:
-            error_list_text += f"\n  正确答案: {e.correct_answer[:100]}"
+        q = sanitize_student_info(e.question_content or "")[:200]
+        sa = sanitize_student_info(e.student_answer or "")[:100]
+        ca = sanitize_student_info(e.correct_answer or "")[:100]
+        error_list_text += f"\n错题{i}: {q}"
+        if sa:
+            error_list_text += f"\n  学生答案: {sa}"
+        if ca:
+            error_list_text += f"\n  正确答案: {ca}"
         error_list_text += f"\n  错误类型: {e.error_type}"
+    # 最后一道防线：整段 prompt 再过 scrub_text（手机/身份证/姓名行兜底）
+    audit: Dict[str, Any] = {"fields_blocked": [], "deidentified": []}
+    error_list_text = _gateway_scrub.scrub_text(error_list_text, audit=audit)
 
     system_prompt = (
         "你是一位资深教育专家,擅长诊断学生的知识点薄弱环节并开具针对性补救处方。"
@@ -619,7 +641,7 @@ async def generate_ai_prescription(
     )
 
     prompt = (
-        f"学生: {student_name}\n"
+        f"学生: 该学生（匿名）\n"
         f"科目: {subject_name}\n"
         f"薄弱知识点: {gap.knowledge_point_name}\n"
         f"累计错误次数: {gap.error_count}\n"
@@ -636,12 +658,48 @@ async def generate_ai_prescription(
         gap.ai_prescription = json.dumps(prescription, ensure_ascii=False)
         gap.ai_prescription_generated_at = get_local_now()
 
+        # [AUDIT-FIX AI-001] 同步落 ai_prescriptions（PENDING_REVIEW）：
+        #   AI 处方必须经过 CF-04 人工复核（confirm/modify/reject）后才视为正式事实。
+        #   raw_snapshot 保留 gap 溯源；REJECTED 永不进入业务闭环。
+        full_text = (
+            f"## 知识点断层 AI 处方（错题漏斗）\n\n"
+            f"**学生**: (匿名)\n"
+            f"**薄弱知识点**: {gap.knowledge_point_name}\n"
+            f"**断层等级**: {gap.gap_level}\n\n"
+            f"{json.dumps(prescription, ensure_ascii=False, indent=2)}"
+        )
+        review_record = AIPrescription(
+            school_id=school_id,
+            prescription_type=PrescriptionType.STUDENT_INTV,
+            target_id=gap.student_id,
+            target_type="student",
+            risk_level=RiskLevel.LOW,
+            summary=f"错题断层处方: {gap.knowledge_point_name} ({gap.gap_level})"[:500],
+            full_text=full_text,
+            raw_snapshot={
+                "trigger": "error_funnel_gap",
+                "gap_id": gap.id,
+                "knowledge_point": gap.knowledge_point_name,
+                "gap_level": gap.gap_level,
+                "school_id": school_id,
+                "llm_output": prescription,
+            },
+            creator_id=0,  # 0 = 系统触发
+            review_status=ReviewStatus.PENDING_REVIEW,
+        )
+        db.add(review_record)
+        await db.flush()
+        review_id = review_record.id
+
         await db.commit()
         await db.refresh(gap)
 
+        # [AUDIT-FIX PII-001] 响应不再回显 student_name（外部不感知学生身份）
         return {
             "gap_id": gap.id,
-            "student_name": student_name,
+            "student_id": gap.student_id,
+            "prescription_id": review_id,  # [AUDIT-FIX AI-001] CF-04 人审记录 ID
+            "review_status": "PENDING_REVIEW",
             "knowledge_point_name": gap.knowledge_point_name,
             "gap_level": gap.gap_level,
             "prescription": prescription,

@@ -22,8 +22,8 @@ modules/evaluation/routers.py — 素质评价 API 端点
 import logging
 
 from core.access import get_student_or_403
-from core.models import User, UserRole
-from core.routers import get_current_user, get_db, require_role
+from core.models import User, UserRole, Class as SchoolClass
+from core.routers import get_current_user, get_db, require_role, verify_entity_ownership
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -430,7 +430,13 @@ async def get_class_ranking(
     current_user: User = Depends(get_current_user),
 ):
     """班级排名 — 按总分降序，返回前 N 名"""
-    ranking = await EvaluationService.get_class_ranking(db, class_id, semester, limit)
+    # [AUDIT-FIX F-07] 归属校验：防止跨校/跨级读取排名（原实现无任何校验）
+    await verify_entity_ownership(db, SchoolClass, class_id, current_user, '班级不存在')
+    # [AUDIT-FIX F-07] 修复参数错位：Service 签名 (db, class_id, school_id, semester, limit)
+    #   原调用 (db, class_id, semester, limit) 把 school_id 顶替为 None → WHERE school_id IS NULL → 排名恒空
+    ranking = await EvaluationService.get_class_ranking(
+        db, class_id, school_id=current_user.school_id, semester=semester, limit=limit
+    )
     total = len(ranking)
     avg = round(sum(r["total_score"] for r in ranking) / max(total, 1), 1)
     return {
