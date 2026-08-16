@@ -2,7 +2,7 @@
  * Wings 3.0 Type Definitions
  */
 
-export type UserRole = 'MS_ADMIN' | 'GRADE_LEADER' | 'CLASS_TEACHER' | 'PARENT' | 'STUDENT'
+export type UserRole = 'MS_ADMIN' | 'GRADE_LEADER' | 'CLASS_TEACHER' | 'COUNSELOR' | 'PARENT' | 'STUDENT'
 
 export interface UserInfo {
   id: number

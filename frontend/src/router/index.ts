@@ -115,6 +115,17 @@ const routes: RouteRecordRaw[] = [
           roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'] as UserRole[],
         },
       },
+      // CF04-OPS-001 R1: 人审待办队列（权限真相在后端 psych assignment）
+      {
+        path: 'ai-prescription-review',
+        name: 'AiPrescriptionReview',
+        component: () => import('@/views/ai-prescription/Review.vue'),
+        meta: {
+          title: '待审核 AI 处方',
+          icon: 'Stamp',
+          roles: ['COUNSELOR', 'MS_ADMIN'] as UserRole[],
+        },
+      },
       // AI 智能助手 — Agent V1
       {
         path: 'ai-copilot',

@@ -467,6 +467,13 @@ const allMenuGroups: MenuGroup[] = [
         phases: ['junior', 'senior', 'integrated'],
       },
       {
+        index: '/ai-prescription-review',
+        title: '待审核 AI 处方',
+        icon: 'Stamp',
+        roles: ['COUNSELOR', 'MS_ADMIN'],
+        phases: ['junior', 'senior', 'integrated'],
+      },
+      {
         index: '/evaluation',
         title: '素质评价',
         icon: 'TrendCharts',

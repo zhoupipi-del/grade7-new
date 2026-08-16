@@ -576,6 +576,40 @@ export function renderSegmentMarkdown(text: string): string {
 
 // ─── Utility ──────────────────────────────────────────────────────
 
+// ═════════════════════════════════════════════════════════════════
+// R1 (CF04-OPS-001 Phase 1): Human Review Queue APIs
+// 前端只做操作面，授权真相在后端（tenant + psych assignment + state machine）。
+// ═════════════════════════════════════════════════════════════════
+
+/** 待审核列表：GET /ai_prescription/history?review_status=PENDING_REVIEW */
+export function listPendingReviews(params?: { page?: number; per_page?: number }) {
+  return request.get<any, PrescriptionHistoryOut>('/ai_prescription/history', {
+    params: { review_status: 'PENDING_REVIEW', ...params },
+  })
+}
+
+/** 确认：POST /ai_prescription/records/{id}/confirm */
+export function confirmPrescription(recordId: number, reviewNote?: string) {
+  return request.post<any, PrescriptionResultOut>(`/ai_prescription/records/${recordId}/confirm`, {
+    review_note: reviewNote ?? null,
+  })
+}
+
+/** 修改后确认：POST /ai_prescription/records/{id}/modify */
+export function modifyPrescription(
+  recordId: number,
+  payload: { modified_content: string; review_note?: string },
+) {
+  return request.post<any, PrescriptionResultOut>(`/ai_prescription/records/${recordId}/modify`, payload)
+}
+
+/** 拒绝：POST /ai_prescription/records/{id}/reject */
+export function rejectPrescription(recordId: number, reviewNote: string) {
+  return request.post<any, PrescriptionResultOut>(`/ai_prescription/records/${recordId}/reject`, {
+    review_note: reviewNote,
+  })
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
