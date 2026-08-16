@@ -44,6 +44,10 @@ PRIVACY_POLICY_VERSION = "cf03-v1"
 # 去标识密钥：生产必须注入 PRIVACY_GATEWAY_SECRET；缺失则降级为 salted-HMAC（不可逆，仅弱于带密钥版本）
 _GATEWAY_SECRET = os.environ.get("PRIVACY_GATEWAY_SECRET", "")
 
+# CF-03 Edge-ready（Step 0）：数据源 Provider 选择。当前固定 cloud；
+# Edge 阶段切 "edge" 时由 EdgeStudentDataProvider 替换，Gateway 业务逻辑零修改。
+PRIVACY_GATEWAY_PROVIDER = os.environ.get("PRIVACY_GATEWAY_PROVIDER", "cloud")
+
 
 # ─────────────────────────────────────────────────────────────
 # 字段级规则
