@@ -39,6 +39,7 @@ from ai_native.models.ai_approvals import AiApprovals
 from ai_native.models.ai_incidents import AiIncidents
 from ai_native.models.ai_command_envelopes import AiCommandEnvelopes
 from ai_native.models.ai_execution_snapshots import AiExecutionSnapshots
+from ai_native.models.ai_provenance_records import AIProvenanceRecord
 
 __all__ = [
     "AiRuns",
@@ -50,4 +51,5 @@ __all__ = [
     "AiIncidents",
     "AiCommandEnvelopes",
     "AiExecutionSnapshots",
+    "AIProvenanceRecord",
 ]
