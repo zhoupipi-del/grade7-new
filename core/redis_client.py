@@ -15,6 +15,7 @@ DB 分配:
 
 import logging
 import os
+import re
 
 import redis.asyncio as aioredis
 
@@ -63,10 +64,27 @@ async def init_redis() -> aioredis.Redis:
     password = os.getenv("REDIS_PASSWORD", "")
     db = int(os.getenv("REDIS_EVENT_DB", "1"))
 
+    # [AUDIT-FIX F-16] 生产契约：REDIS_URL=redis://:pass@host:port/db 是权威来源，
+    #   REDIS_PASSWORD 是显式覆盖键。原实现只读 REDIS_PASSWORD → 生产未配置该键
+    #   → 空密码连接 → Redis NOAUTH 拒绝 → 事件总线降级跳过（CEP 事件注入静默失效）。
+    redis_url = os.getenv("REDIS_URL", "")
+    if not password and redis_url:
+        m = re.match(r"redis://(?::([^@]+)@)?([^:/]+):(\d+)/(\d+)", redis_url)
+        if m:
+            if m.group(1):
+                password = m.group(1)
+            # REDIS_URL 中的 host/port/db 仅作兜底（保持 REDIS_HOST/REDIS_PORT/REDIS_EVENT_DB 优先）
+            if not os.getenv("REDIS_HOST"):
+                host = m.group(2)
+            if not os.getenv("REDIS_PORT"):
+                port = int(m.group(3))
+            if not os.getenv("REDIS_EVENT_DB"):
+                db = int(m.group(4))
+
     if not password:
         logger.warning(
             "[SECURITY] REDIS_PASSWORD 未设置，Redis 事件总线连接无密码保护！"
-            "请在生产环境 .env 中配置 REDIS_PASSWORD。"
+            "请在生产环境 .env 中配置 REDIS_PASSWORD 或 REDIS_URL。"
         )
 
     # 构建连接 URL

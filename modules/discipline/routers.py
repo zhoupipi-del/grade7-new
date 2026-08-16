@@ -650,12 +650,12 @@ async def check_escalation_trigger(
 # Phase 4: 家校申诉 Webhook + 申诉管理 API
 # ═══════════════════════════════════════════════════════════════
 
-# Webhook Secret — 从环境变量读取，必须配置否则拒绝启动
+# Webhook Secret — 从环境变量读取。
+# [AUDIT-FIX F-15] 缺失时降级为「webhook 端点禁用」而非「整个模块 import 失败」：
+#   原实现 raise ValueError 导致 discipline 模块加载失败 → 处分管理全部 API 不可用
+#   （已启用模块 school_modules.enabled=1 但 /api/v1/discipline/* 全 404）。
+#   修复：SECRET 缺失时 webhook_create_appeal 返回 503（明确未配置），主处分 API 正常可用。
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
-if not WEBHOOK_SECRET:
-    raise ValueError(
-        "WEBHOOK_SECRET 环境变量未配置，申诉 Webhook 安全校验无法初始化。请在 .env 中注入安全密钥。"
-    )
 
 
 @router.post("/webhooks/appeal", status_code=201)
@@ -683,6 +683,13 @@ async def webhook_create_appeal(
         "reason": "孩子当时是被冤枉的，有证人可以证明"
       }
     """
+    # ── [AUDIT-FIX F-15] WEBHOOK_SECRET 未配置时降级 503（不再整模块 import 失败）──
+    if not WEBHOOK_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="申诉 Webhook 未启用：WEBHOOK_SECRET 未配置（处分管理主功能正常）",
+        )
+
     # ── X-Webhook-Secret 校验 ──
     # 用 bytes 比较：compare_digest 的 str 分支仅支持纯 ASCII 密钥，
     # 密钥含非 ASCII 字符会直接 TypeError → 500。两边 .encode() 与 Python

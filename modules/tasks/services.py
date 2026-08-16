@@ -202,7 +202,7 @@ class TaskService:
             ),
         ]
         if role == "ms_admin":
-            return Task.school_id == school_id  # 全校
+            return [Task.school_id == school_id]  # [AUDIT-FIX F-14] 全校：必须返回 list，否则 list(conds) 迭代表达式 → getitem 500
         if role == "grade_leader":
             grade_ids = {int(user.grade_id)} if user.grade_id else set()
             from sqlalchemy import and_
