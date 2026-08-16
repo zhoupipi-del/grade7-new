@@ -156,7 +156,7 @@ class ClassGradeSummaryService:
                 "aggregation": agg,
                 "exam_id": exam_id,
             }
-            result = executor.execute(
+            result = await executor.execute(
                 run=run_ctx,
                 descriptor=descriptor,
                 incident_sink=incidents.append,

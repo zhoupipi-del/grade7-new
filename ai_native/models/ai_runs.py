@@ -26,7 +26,8 @@ from sqlalchemy.dialects.mysql import CHAR, ENUM
 from core.models import Base
 
 
-# Run 状态机 8 态（v3.2 FINAL frozen；禁止新增）
+# Run 状态机 9 态（v3.2 frozen 基线 8 态；FT-015 正式追加 CANCELLED——
+# REJECTED -> CANCELLED 终态。model/migration/DB 三方对齐）
 AI_RUN_STATUSES = (
     "PLANNING",
     "POLICY_CHECK",
@@ -36,6 +37,7 @@ AI_RUN_STATUSES = (
     "RESUMING",
     "COMPLETED",
     "FAILED",
+    "CANCELLED",
 )
 
 
@@ -75,7 +77,7 @@ class AiRuns(Base):
     query_redacted = Column(String(512), nullable=True, comment="脱敏后的输入摘要")
     input_summary = Column(String(256), nullable=True, comment="Agent 理解后的任务摘要")
 
-    # ── Run 状态机 8 态（Frozen ENUM）──────────────────
+    # ── Run 状态机 9 态（Frozen ENUM，含 CANCELLED）──────
     status = Column(
         ENUM(*AI_RUN_STATUSES),
         nullable=False,

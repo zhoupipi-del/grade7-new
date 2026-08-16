@@ -192,7 +192,7 @@ class _Aggregator:
             filters.append(Student.id.in_(visible))
 
         rows = (await self.db.execute(
-            select(GradeSubject.code, GradeSubject.name, GradeSubject.full_score, GradeRecord.score)
+            select(GradeSubject.code, GradeSubject.name, GradeSubject.full_score, GradeRecord.score, Student.id)
             .select_from(GradeRecord)
             .join(Student, GradeRecord.student_id == Student.id)
             .join(GradeSubject, GradeRecord.subject_id == GradeSubject.id)
@@ -208,7 +208,7 @@ class _Aggregator:
             return self._empty(class_id, grade_id, exam)
 
         subject_scores: Dict[str, list[float]] = defaultdict(list)
-        for code, name, full_score, score in rows:
+        for code, name, full_score, score, sid in rows:
             if score is not None:
                 subject_scores[code].append(float(score))
 
@@ -231,7 +231,7 @@ class _Aggregator:
                      "exam_date": str(exam.exam_date) if exam.exam_date else None,
                      "exam_type": exam.exam_type},
             "subjects": subjects,
-            "counts": {"students": len(rows),
+            "counts": {"students": len({sid for _, _, _, _, sid in rows}),
                        "examined": len(subject_scores[list(subject_scores)[0]]) if subject_scores else 0},
             "data_json": json.dumps({
                 "exam": exam.name,
@@ -249,3 +249,36 @@ class _Aggregator:
                          "exam_type": exam.exam_type},
                 "subjects": [], "counts": {"students": 0, "examined": 0},
                 "data_json": json.dumps({"exam": exam.name, "subjects": [], "counts": {"examined": 0}}, ensure_ascii=False)}
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Copilot handler（V2 多工具编排路径，经 ToolExecutor 执行）
+#  ★ 聚合调用发生在 handler 内部，不绕过 ToolExecutor；不调 DeepSeek
+#    （综合结论由 CopilotSynthesizer 统一生成，避免每 Tool 各调一次 LLM）
+# ═══════════════════════════════════════════════════════════════
+
+async def read_class_grade_summary_copilot_handler(run=None, **_) -> Dict[str, Any]:
+    """V2 Copilot 执行点：经 ToolExecutor 调用，内部聚合成绩数据。
+
+    返回标准化结果（status/domain/result/actual_classification），
+    供 agent_service 写入 ai_tool_calls 与综合证据。
+    """
+    run = run or {}
+    db = run["db"]
+    user = run["user"]
+    school_id = run["school_id"]
+    effective_student_ids = run.get("effective_student_ids")
+    args = run.get("args", {}) or {}
+    agg = _Aggregator(db, school_id, user)
+    result = await agg.aggregate(
+        class_id=args.get("class_id"),
+        grade_id=args.get("grade_id"),
+        exam_id=args.get("exam_id"),
+        effective_student_ids=effective_student_ids,
+    )
+    return {
+        "status": "EXECUTED",
+        "domain": "grades",
+        "result": result,
+        "actual_classification": "internal",
+    }

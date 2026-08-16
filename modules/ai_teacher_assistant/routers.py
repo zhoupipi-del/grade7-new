@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from core.models import User
-from core.routers import get_current_user, get_db
+from core.models import User, UserRole
+from core.routers import get_current_user, get_db, require_role
 from sqlalchemy.ext.asyncio import AsyncSession
+from ai_native.runtime.approval_gate import ApprovalGate, ApprovalGateError
 
 from .schemas import (
     ClassGradeSummaryRequest, ClassGradeSummaryResponse,
@@ -110,3 +111,84 @@ async def available_scopes(
     service = AgentCopilotService(db=db, user=current_user)
     data = await service.resolve_available_scopes()
     return AvailableScopesResponse(**data)
+
+
+# ═══════════════════════════════════════════════════════════════
+# FT-015：AI 受控动作审批 API（approval gate）
+# 权限：ms_admin / grade_leader（复用现有明确管理权限，第一版不做多人会签）
+# 校验：已登录 + 同 school + envelope PENDING + 未过期（ApprovalGate fail-closed）
+# ═══════════════════════════════════════════════════════════════
+
+@router.post(
+    "/approvals/{approval_id}/approve",
+    summary="批准 AI 受控动作（approval gate）",
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER))],
+)
+async def approve_approval(
+    approval_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """人工批准：仅 PENDING 且未过期的 approval 可批；tenant 必须匹配当前用户学校。
+
+    FT-015 HTTP 闭环：批准后 resume SAME run（不新建 run），
+    ToolExecutor 做最终 approval/hash 校验 → execute exactly once → COMPLETED。
+    """
+    if current_user.school_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="未绑定学校")
+    try:
+        gate = ApprovalGate(db, current_user.school_id)
+        await gate.approve(approval_id=approval_id,
+                           approver_id=current_user.id,
+                           school_id=current_user.school_id)
+        await db.flush()
+
+        # resume SAME run（approval 已 APPROVED；executor 最终校验 fail-closed）
+        service = AgentCopilotService(db=db, user=current_user)
+        resume_result = await service.resume_after_approval(approval_id=approval_id)
+        await db.commit()
+        # 动作状态与 run 执行状态分列（resume_result["status"] 为 run 终态）
+        return {
+            "status": "APPROVED",
+            "approval_id": approval_id,
+            "run_id": resume_result.get("run_id"),
+            "run_status": resume_result.get("status"),
+        }
+    except ApprovalGateError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post(
+    "/approvals/{approval_id}/reject",
+    summary="拒绝 AI 受控动作（approval gate）",
+    dependencies=[Depends(require_role(UserRole.MS_ADMIN, UserRole.GRADE_LEADER))],
+)
+async def reject_approval(
+    approval_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """人工拒绝：PENDING → REJECTED；SAME run → CANCELLED（completed_at 落库）；永不执行。"""
+    if current_user.school_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="未绑定学校")
+    try:
+        gate = ApprovalGate(db, current_user.school_id)
+        await gate.reject(approval_id=approval_id,
+                          approver_id=current_user.id,
+                          school_id=current_user.school_id)
+        await db.flush()
+
+        # cancel SAME run（CANCELLED 终态；tool_call → DENIED）
+        service = AgentCopilotService(db=db, user=current_user)
+        cancel_result = await service.cancel_after_reject(approval_id=approval_id)
+        await db.commit()
+        return {
+            "status": "REJECTED",
+            "approval_id": approval_id,
+            "run_id": cancel_result.get("run_id"),
+            "run_status": cancel_result.get("status"),
+        }
+    except ApprovalGateError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

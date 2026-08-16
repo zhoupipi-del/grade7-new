@@ -54,13 +54,14 @@ class CopilotStepView(BaseModel):
 
 
 class CopilotCriticView(BaseModel):
-    passed: bool
-    issues: list[str]
+    passed: bool | None = None  # FT-015: awaiting_approval 时未到 critic 阶段
+    issues: list[str] = []
 
 
 class CopilotRunResponse(BaseModel):
     status: str
     run_id: int
+    approval_id: Optional[int] = None  # FT-015: awaiting_approval 时返回
     goal: str
     plan: list[CopilotStepView]
     overview: dict[str, _Any]

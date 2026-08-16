@@ -55,6 +55,7 @@ celery_engine = Celery(
         "modules.risk_models.tasks",  # Phase 2A: RDI 异步任务骨架
         "modules.approval.tasks",  # Phase 2B: 审批超时扫描器
         "modules.timetable.tasks",  # Wings 3.1: 时空发电机 (Beat 02:00)
+        "modules.research_ai.tasks",  # Research AI 教研工具 (V2.2.1)
     ],
 )
 
@@ -102,6 +103,7 @@ celery_engine.conf.update(
         "reports.periodic_*": {"queue": "periodic"},
         "approval.*": {"queue": "periodic"},  # Phase 2B
         "timetable.*": {"queue": "periodic"},  # Wings 3.1
+        "research_ai.*": {"queue": "high_priority"},  # Research AI 教研工具 (V2.2.1)
     },
     # ── Celery Beat 调度 (Phase 2B: RDI 每日全量扫描已激活) ──
     beat_schedule={

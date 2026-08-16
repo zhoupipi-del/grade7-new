@@ -175,6 +175,10 @@ class _BehaviorAggregator:
             },
             "by_type": by_type,
             "by_category": by_category,
+            "data_coverage": {
+                "total_records": len(type_rows),
+                "empty_window": len(type_rows) == 0,
+            },
             "by_class": by_class,
             "sanctions_active": int(sanctions_active),
             "data_json": json.dumps({

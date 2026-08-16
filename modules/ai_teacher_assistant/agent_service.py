@@ -32,6 +32,8 @@ from ai_native.governance.approval_policy import ApprovalPolicy
 from ai_native.governance.resource_scope import ResourceScope, resolve_scope
 from ai_native.runtime.agent_run import AgentRun
 from ai_native.runtime.critic import EvidenceCritic
+from ai_native.runtime.approval_gate import ApprovalGate, ApprovalGateError
+from modules.ai_teacher_assistant.tools.fail_test_marker import ControlledToolFailure
 from ai_native.runtime.permission import PermissionChecker
 from ai_native.runtime.planner import BoundedPlanner
 from ai_native.runtime.provider_router import ProviderRouter
@@ -72,6 +74,16 @@ class CopilotSynthesizer:
             "1. 编造 evidence 中不存在的事实；\n"
             "2. 输出学生姓名、学号、手机号、身份证等 PII；\n"
             "3. 把相关性表述成因果关系。\n"
+            "4. 判读规则：若某领域 evidence.data_coverage.empty_window=true 或 total_records=0，"
+            "必须明确声明该窗口内无数据记录（可能为假期/未录入），严禁据此归纳为低风险或无需关注"
+            "——无数据不等于无异常；\n"
+            "5. 若某领域（grades/behavior/risk）完全没有 evidence，必须声明该领域无可用数据，"
+            "不得静默跳过或假装已分析；\n"
+            "6. 判读规则（DATA-GOV-001 止血）：风险领域班级优先级必须基于 evidence 中每班的 "
+            "unique_students（涉及学生数）与 active_unexpired（当前未过期未处置预警数），"
+            "严禁用原始 total_records（含批处理重复/过期未关单的原始行数）作为风险强度或班级排序依据；"
+            "若 by_class 仅给出原始条数而无 unique_students/active_unexpired，须声明该数据未经去重核验，"
+            "不得据此给出班级风险结论。\n"
             "\n严格返回 JSON：\n"
             '{"overview": {}, "findings": ["..."], '
             '"recommendations": [...], '
@@ -102,16 +114,30 @@ class CopilotSynthesizer:
 
 
 def _fallback_from_evidence(evidence: list[dict[str, Any]]) -> dict[str, Any]:
-    """LLM 失败兜底：用聚合证据构造结构化结论（无 PII）。"""
+    """LLM 失败兜底：用聚合证据构造结构化结论（无 PII）。
+
+    REAL EVENT #1：兜底同样遵守"无数据≠无异常"——data_coverage.empty_window
+    或 total_records=0 时明确声明无数据，不得归纳为低风险。
+    """
     domains: dict[str, Any] = {}
     findings: list[str] = []
     for item in evidence:
         domain = item.get("domain", "unknown")
         result = item.get("result", {}) or {}
         summary = result.get("summary", {})
+        coverage = result.get("data_coverage") or {}
         if domain not in domains:
             domains[domain] = {}
         domains[domain]["summary"] = summary
+        domains[domain]["data_coverage"] = coverage
+        # 无数据声明（空窗口 ≠ 低风险）
+        if coverage.get("empty_window") or coverage.get("total_records", 1) == 0:
+            findings.append(
+                f"[{domain}] 该窗口内无数据记录（total_records=0，"
+                f"period={result.get('period') or 'N/A'}）——"
+                "无数据不等于无异常，不可据此判断为低风险"
+            )
+            continue
         # 从 summary 取可展示指标生成发现
         if isinstance(summary, dict):
             bits = []
@@ -120,6 +146,36 @@ def _fallback_from_evidence(evidence: list[dict[str, Any]]) -> dict[str, Any]:
                     bits.append(f"{k}={v}")
             if bits:
                 findings.append(f"[{domain}] " + "，".join(bits[:4]))
+        # REAL EVENT #1 + DATA-GOV-001 止血：班级维度帮助主任缩小关注范围。
+        # 排序不得按原始 COUNT(*)——按 unique_students + active_unexpired；
+        # 原始行数仅作审计数字并列展示。
+        by_class = result.get("by_class") or []
+        if by_class:
+            def _rank(c):
+                if "unique_students" in c:
+                    return (c.get("unique_students", 0), c.get("actionable", 0),
+                            c.get("requires_verification", 0))
+                return (0, c.get("count", 0) or c.get("anomalies", 0))
+            top = sorted(by_class, key=_rank, reverse=True)[:3]
+            parts = []
+            for c in top:
+                name = c.get("class_name") or c.get("name")
+                if "unique_students" in c:
+                    anchor_ratio = c.get("event_anchored_ratio", 0)
+                    parts.append(
+                        f"{name}(涉及学生{c.get('unique_students', 0)}人/"
+                        f"可直接处置{c.get('actionable', 0)}条/"
+                        f"需人工核验{c.get('requires_verification', 0)}条/"
+                        f"过期{c.get('expired_not_closed', 0)}条/"
+                        f"原始{c.get('total_records', 0)}条/"
+                        f"事件锚定率{round(anchor_ratio * 100, 0):.0f}%)"
+                    )
+                else:
+                    parts.append(f"{name}({c.get('count', c.get('anomalies', 0))})")
+            findings.append(
+                f"[{domain}] 需优先关注的班级 Top（按涉及学生数，未过期≠可处置）："
+                f"{'，'.join(parts)}"
+            )
     return {
         "overview": {"note": "AI 综合结论暂不可用，以下为各域聚合数据"},
         "findings": findings or ["暂无可用聚合数据"],
@@ -180,7 +236,6 @@ def _build_all_tool_descriptors() -> list[ToolDescriptor]:
         build_read_risk_warning_summary_descriptor,
         read_risk_warning_summary_copilot_handler,
     )
-
     descriptors = [
         build_read_class_grade_summary_descriptor(),
         ToolDescriptor(
@@ -198,6 +253,19 @@ def _build_all_tool_descriptors() -> list[ToolDescriptor]:
         build_read_behavior_summary_descriptor(),
         build_read_risk_warning_summary_descriptor(),
     ]
+    # FT-015 收尾：write_test_marker 是验证工具，非产品能力。
+    # 仅 AI_APPROVAL_TEST_TOOL=1 时注册（test/internal mode），生产默认不暴露。
+    if os.environ.get("AI_APPROVAL_TEST_TOOL") == "1":
+        from modules.ai_teacher_assistant.tools.write_test_marker import (
+            build_write_test_marker_descriptor,
+        )
+        descriptors.append(build_write_test_marker_descriptor())
+    # FT-016 test-only：fail_test_marker 受控失败验证工具，同样仅测试模式注册。
+    if os.environ.get("AI_FAILURE_TEST_TOOL") == "1":
+        from modules.ai_teacher_assistant.tools.fail_test_marker import (
+            build_fail_test_marker_descriptor,
+        )
+        descriptors.append(build_fail_test_marker_descriptor())
     # V2 copilot 路径：所有 Tool 的 handler 统一指向"聚合型"handler
     # （handler 内部调用 _*Aggregator，不绕过 ToolExecutor，不调 DeepSeek）
     handler_map = {
@@ -257,6 +325,7 @@ class AgentCopilotService:
             tool_name="agent_copilot",
             role=self.user.role or "teacher",
             session=self.db,
+            query=goal,
         )
         await agent_run.start()
 
@@ -328,10 +397,12 @@ class AgentCopilotService:
                 class_ids={class_id} if class_id else None,
             )
 
-            # ── Permission（越权 → 403，0 Tool execution）──
+            # ── Permission（越权 → 403，0 Tool execution；action 取 descriptor.action，
+            #    WRITE tool 按 write 判定，不再硬编码 read）──
             if not self.permission.check(
                 user=self.user, agent=None, tool=descriptor,
-                requested=requested, authorized=authorized, action="read",
+                requested=requested, authorized=authorized,
+                action=descriptor.action,
             ):
                 await agent_run.transition("FAILED")
                 await self.db.commit()
@@ -353,6 +424,20 @@ class AgentCopilotService:
 
             args = dict(step.args)
 
+            # ── ★ FT-015 HTTP 闭环：WRITE tool → 审批挂起（不进 executor）──
+            # 识别写工具 → tool_call(AWAITING_APPROVAL) + envelope + approval(PENDING)
+            # → run=WAITING_APPROVAL → 返回 approval_id，停止执行。
+            if descriptor.approval_policy in ("always", "policy_decides"):
+                pending = await self._suspend_for_approval(
+                    agent_run=agent_run,
+                    descriptor=descriptor,
+                    args=args,
+                    step=step,
+                    grade_id=grade_id,
+                    class_id=class_id,
+                )
+                return pending
+
             # ── ToolExecutor.execute → descriptor.handler（内部调 _*Aggregator）──
             run_ctx: dict[str, Any] = {
                 "status": "EXECUTING",
@@ -361,15 +446,70 @@ class AgentCopilotService:
                 "user_id": self.user.id,
                 "run_id": agent_run.run_id,
                 "db": self.db,
+                "session": self.db,  # handler 契约（FT-016 fail_test_marker 需要）
                 "user": self.user,
                 "effective_student_ids": authorized_ids,  # None=本校全可见
                 "args": args,
             }
-            result = await self.executor.execute(
-                run=run_ctx,
-                descriptor=descriptor,
-                incident_sink=incidents.append,
-            )
+            try:
+                result = await self.executor.execute(
+                    run=run_ctx,
+                    descriptor=descriptor,
+                    incident_sink=incidents.append,
+                )
+            except ControlledToolFailure as ctf:
+                # ── FT-016 失败证据链：tool_call FAILED + ai_incidents + run 状态 ──
+                await self._record_tool_call_failure(
+                    run_id=agent_run.run_id,
+                    descriptor=descriptor,
+                    params=args,
+                    failure=ctf,
+                )
+                await self._record_incident(
+                    run_id=agent_run.run_id,
+                    descriptor=descriptor,
+                    failure=ctf,
+                )
+                if args.get("recoverable"):
+                    # 可恢复：run RECOVERING → 单次 fallback 重试（同 step，attempt2）
+                    # ★ FT-016 修复：成功路径不中途 commit——RECOVERING/RESUMING 仅
+                    # flush，恢复成功后由外层事务统一 commit → HTTP 返回时 DB 即
+                    # COMPLETED（避免半途 RECOVERING 先落库被外部看到）。
+                    await agent_run.transition("RECOVERING")
+                    await agent_run.transition("RESUMING")
+                    try:
+                        result = await self.executor.execute(
+                            run=run_ctx,
+                            descriptor=descriptor,
+                            incident_sink=incidents.append,
+                        )
+                        incidents.append({"type": "tool_recovery", "tool": descriptor.name,
+                                          "from": "RECOVERING", "to": "RESUMING"})
+                    except ControlledToolFailure as ctf2:
+                        # 重试仍失败 → 不可恢复 → run FAILED
+                        # （先 commit 再 raise：raise 会触发外层 rollback，必须让
+                        #   FAILED/incident 先落库）
+                        await self._record_tool_call_failure(
+                            run_id=agent_run.run_id,
+                            descriptor=descriptor,
+                            params=args,
+                            failure=ctf2,
+                        )
+                        await self._record_incident(
+                            run_id=agent_run.run_id,
+                            descriptor=descriptor,
+                            failure=ctf2,
+                        )
+                        await agent_run.transition("FAILED")
+                        await self.db.commit()
+                        raise HTTPException(status_code=500,
+                                            detail=f"Tool 执行失败（不可恢复）: {ctf2.message}")
+                else:
+                    # 不可恢复 → run FAILED（completed_at 由 TERMINAL_STATES 落库）
+                    await agent_run.transition("FAILED")
+                    await self.db.commit()
+                    raise HTTPException(status_code=500,
+                                        detail=f"Tool 执行失败: {ctf.message}")
 
             # ── 写 ai_tool_calls（同 run_id；Tool → EXECUTED）──
             await self._record_tool_call(
@@ -600,6 +740,332 @@ class AgentCopilotService:
                     status_code=403,
                     detail="无权访问该班级数据（跨校请求被拒绝）",
                 )
+
+    # ═══════════════════════════════════════════════════════════════════
+    # FT-015 HTTP 审批闭环（SAME run 原则）
+    # ═══════════════════════════════════════════════════════════════════
+
+    async def _suspend_for_approval(
+        self,
+        *,
+        agent_run: AgentRun,
+        descriptor: ToolDescriptor,
+        args: dict,
+        step,
+        grade_id: int | None,
+        class_id: int | None,
+    ) -> dict:
+        """WRITE tool 审批挂起：tool_call(AWAITING_APPROVAL) + envelope + approval(PENDING)。
+
+        返回 awaiting_approval 响应（含 approval_id），绝不调用 executor。
+        """
+        from ai_native.models.ai_tool_calls import AiToolCalls
+
+        args_hash = hashlib.sha256(
+            _json.dumps(args, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+
+        # 1. 预建 tool_call（AWAITING_APPROVAL）—— approval 绑定 tool_call_id
+        tool_call = AiToolCalls(
+            school_id=self.user.school_id,
+            run_id=agent_run.run_id,
+            tool_name=descriptor.name,
+            tool_version=descriptor.version,
+            schema_version="1",
+            action=descriptor.action,
+            side_effect=descriptor.side_effect,
+            arguments_hash=args_hash,
+            idempotency_key=f"{descriptor.name}:{agent_run.run_id}:{args_hash[:16]}",
+            resource_scope={
+                "grade_id": grade_id,
+                "class_id": class_id,
+            },
+            declared_output_classification=descriptor.declared_output_classification,
+            status="AWAITING_APPROVAL",
+            started_at=datetime.now(),
+        )
+        self.db.add(tool_call)
+        await self.db.flush()
+
+        # 2. envelope + approval(PENDING)
+        gate = ApprovalGate(self.db, self.user.school_id)
+        envelope_uuid, approval_id = await gate.create_envelope(
+            run_id=agent_run.run_id,
+            user_id=self.user.id,
+            tool_call_id=tool_call.id,
+            tool_name=descriptor.name,
+            tool_version=descriptor.version,
+            args=args,
+        )
+
+        # 3. run → WAITING_APPROVAL（非 terminal，completed_at 保持 NULL）
+        await agent_run.transition("WAITING_APPROVAL")
+        await self.db.commit()
+
+        return {
+            "status": "awaiting_approval",
+            "run_id": agent_run.run_id,
+            "approval_id": approval_id,
+            "goal": agent_run.query,
+            "plan": [{
+                "tool": descriptor.name,
+                "status": "AWAITING_APPROVAL",
+                "reason": step.reason,
+            }],
+            "overview": {},
+            "findings": [],
+            "recommendations": [],
+            "critic": {"passed": None, "issues": []},
+            "provider": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+            "model": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+            "trust": {
+                "permission_checked": True,
+                "approval_required": True,
+                "approval_id": approval_id,
+            },
+            "outcome": "awaiting_approval",
+            "outcome_reason": "该操作需要人工审批",
+            "student_count": 0,
+            "examined_count": 0,
+            "grade_record_count": 0,
+            "domain_counts": {},
+            "domains": {},
+        }
+
+    async def resume_after_approval(self, *, approval_id: int) -> dict:
+        """approve 后恢复 SAME run：executor 最终 approval/hash 校验 → execute once → COMPLETED。
+
+        不新建 run（SAME run_id）；证据链：approval → envelope(args) → tool_call → snapshot 全链同 run。
+        """
+        from ai_native.models.ai_approvals import AiApprovals
+        from ai_native.models.ai_runs import AiRuns
+        from ai_native.models.ai_tool_calls import AiToolCalls
+
+        approval = await self.db.get(AiApprovals, approval_id)
+        if approval is None or approval.school_id != self.user.school_id:
+            raise ApprovalGateError("approval record missing or tenant mismatch")
+        if approval.decision != "APPROVED":
+            raise ApprovalGateError(f"approval not approved: {approval.decision}")
+
+        run = await self.db.get(AiRuns, approval.run_id)
+        if run is None:
+            raise ApprovalGateError("run missing")
+        if run.status != "WAITING_APPROVAL":
+            raise ApprovalGateError(f"run status not WAITING_APPROVAL: {run.status}")
+
+        tool_call = await self.db.get(AiToolCalls, approval.tool_call_id)
+        if tool_call is None:
+            raise ApprovalGateError("tool_call missing")
+
+        descriptor = self.registry.get(approval.tool_name)
+        if descriptor is None:
+            raise ApprovalGateError(f"tool not registered: {approval.tool_name}")
+
+        # 解密 envelope → 恢复批准时的原始 args（SAME run 上下文）
+        gate = ApprovalGate(self.db, self.user.school_id)
+        args = await gate.reveal_args(
+            approval_id=approval.id, school_id=self.user.school_id,
+        )
+
+        # 重建 AgentRun 上下文（SAME run_id，不重新 start）
+        agent_run = AgentRun(
+            school_id=run.school_id, user_id=run.user_id,
+            tool_name=descriptor.name,
+            session=self.db,
+        )
+        agent_run.run_id = run.id
+        agent_run.run_uuid = run.run_uuid
+        agent_run.trace_id = run.trace_id
+        agent_run.status = run.status
+        agent_run.data_classification = run.data_classification or "internal"
+
+        await agent_run.transition("EXECUTING", session=self.db)
+
+        run_ctx = {
+            "status": "EXECUTING",
+            "data_classification": agent_run.data_classification,
+            "school_id": run.school_id,
+            "user_id": run.user_id,
+            "run_id": run.id,
+            "db": self.db,
+            "session": self.db,  # handler 契约：write_test_marker 从 session 取
+            "user": self.user,
+            "approval_args": args,
+        }
+        incidents: list[dict] = []
+        result = await self.executor.execute(
+            run=run_ctx,
+            descriptor=descriptor,
+            incident_sink=incidents.append,
+            session=self.db,
+            tool_call_id=tool_call.id,
+            approval_args=args,
+        )
+
+        # tool_call → EXECUTED（executor 已做最终校验，fail-closed）
+        tool_call.status = "EXECUTED"
+        tool_call.actual_output_classification = result.get(
+            "actual_classification", descriptor.declared_output_classification,
+        )
+
+        # finish → COMPLETED + snapshot（approval_refs 入快照，证据链同 run）
+        await agent_run.finish(
+            snapshot={
+                "run_id": run.id,
+                "school_id": run.school_id,
+                "tool": descriptor.name,
+                "approval_refs": [approval.id],
+                "classification_peak": run_ctx.get("data_classification"),
+                "incidents": incidents,
+            },
+            session=self.db,
+        )
+        await self.db.commit()
+
+        return {
+            "status": "completed",
+            "run_id": run.id,
+            "approval_id": approval.id,
+            "goal": run.query_redacted or "",
+            "plan": [{
+                "tool": descriptor.name,
+                "status": "EXECUTED",
+                "reason": "审批通过后执行",
+            }],
+            "overview": {},
+            "findings": [],
+            "recommendations": [],
+            "critic": {"passed": True, "issues": []},
+            "provider": "deepseek",
+            "model": os.environ.get("LLM_MODEL", "deepseek-v4-flash"),
+            "trust": {
+                "permission_checked": True,
+                "approval_required": True,
+                "approval_id": approval.id,
+            },
+            "outcome": "success",
+            "outcome_reason": "approval approved; executed exactly once",
+            "student_count": 0,
+            "examined_count": 0,
+            "grade_record_count": 0,
+            "domain_counts": {},
+            "domains": {},
+        }
+
+    async def cancel_after_reject(self, *, approval_id: int) -> dict:
+        """reject 后：SAME run → CANCELLED（completed_at 落库）；tool_call → DENIED；永不执行。"""
+        from ai_native.models.ai_approvals import AiApprovals
+        from ai_native.models.ai_runs import AiRuns
+        from ai_native.models.ai_tool_calls import AiToolCalls
+
+        approval = await self.db.get(AiApprovals, approval_id)
+        if approval is None or approval.school_id != self.user.school_id:
+            raise ApprovalGateError("approval record missing or tenant mismatch")
+
+        run = await self.db.get(AiRuns, approval.run_id)
+        if run is None:
+            raise ApprovalGateError("run missing")
+        if run.status != "WAITING_APPROVAL":
+            raise ApprovalGateError(f"run status not WAITING_APPROVAL: {run.status}")
+
+        tool_call = await self.db.get(AiToolCalls, approval.tool_call_id)
+        if tool_call is not None and tool_call.status == "AWAITING_APPROVAL":
+            tool_call.status = "DENIED"
+
+        agent_run = AgentRun(
+            school_id=run.school_id, user_id=run.user_id,
+            tool_name=approval.tool_name,
+            session=self.db,
+        )
+        agent_run.run_id = run.id
+        agent_run.run_uuid = run.run_uuid
+        agent_run.trace_id = run.trace_id
+        agent_run.status = run.status
+
+        # CANCELLED ∈ TERMINAL_STATES → completed_at 自动落库
+        await agent_run.transition("CANCELLED", session=self.db)
+        await self.db.commit()
+
+        return {
+            "status": "cancelled",
+            "run_id": run.id,
+            "approval_id": approval.id,
+        }
+
+    # ═══════════════════════════════════════════════════════════════════
+    # FT-016 失败证据链：tool_call FAILED + ai_incidents
+    # ═══════════════════════════════════════════════════════════════════
+
+    async def _record_tool_call_failure(
+        self,
+        *,
+        run_id: int,
+        descriptor: ToolDescriptor,
+        params: dict[str, Any],
+        failure: "ControlledToolFailure",
+    ) -> None:
+        """写 ai_tool_calls(FAILED)：失败也必须留 tool_call 记录（同 run_id）。"""
+        from ai_native.models.ai_tool_calls import AiToolCalls
+
+        args_hash = hashlib.sha256(
+            _json.dumps(params, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+
+        record = AiToolCalls(
+            school_id=self.user.school_id,
+            run_id=run_id,
+            tool_name=descriptor.name,
+            tool_version=descriptor.version,
+            schema_version="1",
+            action=descriptor.action,
+            side_effect=descriptor.side_effect,
+            arguments_hash=args_hash,
+            # :fail 后缀——与成功记录(无 tag)区分，避免 uq_school_idempotency 冲突
+            idempotency_key=f"{descriptor.name}:{run_id}:{args_hash[:16]}:fail",
+            resource_scope={
+                "grade_id": params.get("grade_id"),
+                "class_id": params.get("class_id"),
+            },
+            declared_output_classification=descriptor.declared_output_classification,
+            actual_output_classification=descriptor.declared_output_classification,
+            status="FAILED",
+            started_at=datetime.now(),
+        )
+        self.db.add(record)
+        await self.db.flush()
+
+    async def _record_incident(
+        self,
+        *,
+        run_id: int,
+        descriptor: ToolDescriptor,
+        failure: "ControlledToolFailure",
+    ) -> None:
+        """写 ai_incidents（capability 类；不存原始异常正文——Inv 11）。
+
+        关联：run_id（INCIDENT_RUN_LINK）+ tool_call（经同 run 的 FAILED tool_call
+        查询关联，无需额外 FK）。
+        """
+        from ai_native.models.ai_incidents import AiIncidents
+        import hashlib as _hl
+
+        summary = failure.message[:512] if failure.message else "tool failure"
+        detail = getattr(failure, "detail", "") or failure.message
+        detail_hash = _hl.sha256(detail.encode("utf-8")).hexdigest()
+
+        incident = AiIncidents(
+            school_id=self.user.school_id,
+            run_id=run_id,
+            incident_code="P01",
+            incident_type="tool_controlled_failure",
+            category="capability",
+            severity="MEDIUM",
+            summary_redacted=summary,
+            detail_hash=detail_hash,
+            resolved=False,
+        )
+        self.db.add(incident)
+        await self.db.flush()
 
     async def _record_tool_call(self, *, run_id: int, descriptor: ToolDescriptor,
                                 result: dict[str, Any], params: dict[str, Any]) -> None:

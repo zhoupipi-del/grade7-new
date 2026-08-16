@@ -232,3 +232,28 @@ async def _discover_latest_exam_ids(
     )).all()
 
     return [int(x[0]) for x in rows]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Copilot handler（V2 多工具编排路径，经 ToolExecutor 执行）
+#  ★ 比较调用发生在 handler 内部，不绕过 ToolExecutor
+#  ★ 只返回 matched-cohort 的科目均分对比，绝不携带 student_id / 单生成绩
+# ═══════════════════════════════════════════════════════════════
+
+async def compare_exam_performance_copilot_handler(run=None, **_) -> Dict[str, Any]:
+    """V2 Copilot 执行点：经 ToolExecutor 调用，内部比较考试表现。"""
+    run = run or {}
+    db = run["db"]
+    effective_student_ids = run.get("effective_student_ids") or set()
+    args = run.get("args", {}) or {}
+    output = await compare_exam_performance_handler(
+        db=db,
+        effective_student_ids=effective_student_ids,
+        exam_ids=args.get("exam_ids") or [],
+    )
+    return {
+        "status": "EXECUTED",
+        "domain": "grades",
+        "result": output.model_dump() if hasattr(output, "model_dump") else output,
+        "actual_classification": "internal",
+    }
