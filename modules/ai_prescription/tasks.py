@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 
 from celery import Task
 from celery.exceptions import Retry
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, func, select
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 from modules.ai_prescription.models import (
@@ -1205,6 +1205,41 @@ def bridge_rdi_to_approval(
         # ── Step 3: 落库 ai_prescriptions (V2: segments 存入 llm_output) ──
         db = _get_sync_session()
         try:
+            # ── R4 dedup (CF04-OPS-001 Phase 1): SKIP_DUPLICATE_PENDING ──
+            # 同一 school + student + trigger=rdi_bridge 已有 PENDING_REVIEW 处方时，
+            # 不重复新建（同一风险事件不重复排队）。仅记审计日志并跳过；
+            # 绝不覆盖旧处方原始 AI 内容。不同风险事件（未来多类型处方）
+            # 仍独立进入审核——当前模型为单一综合 RDI，key 即上述组合。
+            existing = db.execute(
+                select(AIPrescription.id)
+                .where(
+                    AIPrescription.school_id == school_id,
+                    AIPrescription.target_id == student_id,
+                    AIPrescription.target_type == "student",
+                    AIPrescription.review_status == ReviewStatus.PENDING_REVIEW,
+                    func.json_extract(
+                        AIPrescription.raw_snapshot, "$.trigger"
+                    )
+                    == "rdi_bridge",
+                )
+                .order_by(AIPrescription.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if existing is not None:
+                logger.info(
+                    "[BRIDGE][R4-SKIP_DUPLICATE_PENDING] existing_prescription_id=%s "
+                    "student=%s school=%s warning=%s rdi=%.2f "
+                    "reason=same_risk_pending_duplicate",
+                    existing, student_id, school_id, warning_id, rdi_score,
+                )
+                return {
+                    "status": "skipped_duplicate",
+                    "reason": "same_risk_pending_duplicate",
+                    "existing_prescription_id": existing,
+                    "student_id": student_id,
+                    "new_warning_id": warning_id,
+                    "detected_at": datetime.now(timezone.utc).isoformat(),
+                }
             record = AIPrescription(
                 school_id=school_id,
                 prescription_type=PrescriptionType.STUDENT_INTV,
