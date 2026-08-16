@@ -530,14 +530,21 @@ async def _get_class_academic_summary(
     school_id: int,
     class_id: int,
 ) -> Dict[str, Any]:
-    """本班学业概览"""
+    """本班学业概览
+
+    Deprecated:
+    Historical reports query referenced nonexistent grades_records.std_value
+    (avg_std_value / below_avg_count / above_avg_count).
+    No valid class-wide z-score source currently exists.
+    Do not derive this metric from risk_baselines.std_value.
+
+    F-17: 兼容性修复——SQL 仅保留 covered_students 真实查询，
+    三个 deprecated 字段返回 null（保持 API shape，不制造 breaking change）。
+    """
     try:
         q = text("""
             SELECT
-                COUNT(DISTINCT gr.student_id) as covered_students,
-                AVG(gr.std_value) as avg_std_value,
-                COUNT(CASE WHEN gr.std_value < -1.0 THEN 1 END) as below_avg_count,
-                COUNT(CASE WHEN gr.std_value >= 1.0 THEN 1 END) as above_avg_count
+                COUNT(DISTINCT gr.student_id) as covered_students
             FROM grades_records gr
             JOIN students s ON gr.student_id = s.id
             WHERE s.class_id = :cid AND s.school_id = :sid AND s.is_active = 1
@@ -548,10 +555,11 @@ async def _get_class_academic_summary(
             return {"status": "no_data"}
 
         return {
+            "status": "ok",
             "covered_students": int(row[0] or 0),
-            "avg_std_value": round(float(row[1] or 0), 2),
-            "below_avg_count": int(row[2] or 0),
-            "above_avg_count": int(row[3] or 0),
+            "avg_std_value": None,
+            "below_avg_count": None,
+            "above_avg_count": None,
         }
     except Exception as e:
         logger.warning("学业概览查询失败 class=%s: %s", class_id, e)

@@ -116,5 +116,5 @@ class ClassTeacherReportResponse(BaseModel):
         ..., description="违纪概览: {total_incidents, involved_students, total_penalty_points, ...}"
     )
     academic_summary: Dict[str, Any] = Field(
-        ..., description="学业概览: {covered_students, avg_std_value, below_avg_count, ...}"
+        ..., description="学业概览: {status, covered_students}。Deprecated 字段 avg_std_value/below_avg_count/above_avg_count 固定为 null（F-17：历史查询引用了不存在的 grades_records.std_value，无有效全班标准分数据源，勿从 risk_baselines.std_value 推导）"
     )
