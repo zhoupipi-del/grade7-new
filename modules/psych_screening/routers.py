@@ -777,6 +777,7 @@ async def followup_psych_intervention(
     rec = await followup_intervention(
         db=db,
         intervention_id=intervention_id,
+        school_id=current_user.school_id,
         data=req.model_dump(exclude_none=True),
     )
 

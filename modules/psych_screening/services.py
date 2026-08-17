@@ -1295,11 +1295,20 @@ async def create_intervention(
 async def followup_intervention(
     db: AsyncSession,
     intervention_id: int,
+    school_id: int,
     data: dict,
 ) -> InterventionRecord:
-    """随访更新干预记录"""
+    """随访更新干预记录
+
+    AUTH-DEF-001: service 层租户防御——查询必须同时满足
+    id == intervention_id AND school_id == school_id（必填参数，防未来
+    调用点漏传；router 端点另有预查 404 + require_psych_write_access）。
+    """
     rec = await db.execute(
-        select(InterventionRecord).where(InterventionRecord.id == intervention_id)
+        select(InterventionRecord).where(
+            InterventionRecord.id == intervention_id,
+            InterventionRecord.school_id == school_id,
+        )
     )
     rec = rec.scalar_one_or_none()
     if not rec:
