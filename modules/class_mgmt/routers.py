@@ -176,6 +176,15 @@ async def get_class_students(
     if not cls:
         raise HTTPException(status_code=404, detail="班级不存在")
     await verify_school_access(cls["school_id"], current_user, db)
+    # UAT-F2 修复（2026-08-17）：班级花名册横向 scope
+    # class_teacher → 仅本班；grade_leader → 仅本年级；其余 STAFF 保持校级现状
+    # （404 而非 403，防班级枚举；复用 User.class_id/grade_id，不造第二套权限算法）
+    if current_user.role == UserRole.CLASS_TEACHER:
+        if getattr(current_user, "class_id", None) != class_id:
+            raise HTTPException(status_code=404, detail="班级不存在")
+    elif current_user.role == UserRole.GRADE_LEADER:
+        if getattr(current_user, "grade_id", None) != cls.get("grade_id"):
+            raise HTTPException(status_code=404, detail="班级不存在")
     students = await ClassMgmtService.get_class_students(db, class_id)
     return {"class_id": class_id, "total": len(students), "students": students}
 

@@ -331,9 +331,17 @@ class StudentSearchItem(BaseModel):
 
 
 class StudentSearchResponse(BaseModel):
-    """学生搜索响应"""
+    """学生搜索响应
+
+    UAT-F1 修复: attention 分支也返回本 schema（students=[] + attention 信号字段），
+    消除 ResponseValidationError 500；不新增任何心理详情字段。
+    """
     students: List[StudentSearchItem]
     total: int
+    # ── attention 信号（非 counselor 的最小「专业跟进」降级，CF-01 语义保持）──
+    professional_followup_required: Optional[bool] = None
+    detail_access: Optional[bool] = None
+    recommended_action: Optional[str] = None
 
 
 # ============================================================

@@ -73,7 +73,7 @@ from modules.psych_screening.schemas import (
     EFFECT_RATING_CHOICES,
 )
 
-from core.privacy_audit import PURPOSE_SCREENING_REVIEW
+from core.privacy_audit import PURPOSE_SCREENING_REVIEW, _derive_scope
 from core.psych_capability import (
     require_psych_access, require_psych_list_access, require_psych_write_access,
     attention_payload, PSY_ATTENTION, PSY_DETAIL,
@@ -912,12 +912,23 @@ async def search_psych_students(
         purpose=PURPOSE_SCREENING_REVIEW,
     )
     if level == PSY_ATTENTION:
-        return attention_payload(professional_followup_required=True)
+        # UAT-F1 修复: attention 信号返回兼容 schema（不再 ResponseValidationError 500）
+        return StudentSearchResponse(
+            students=[], total=0,
+            professional_followup_required=True,
+            detail_access=False,
+            recommended_action="refer_to_psych_staff",
+        )
+    # UAT-F1 修复: scope 未定义 NameError —— 用 _derive_scope 推导搜索范围
+    # （class_teacher→本班 class_id；grade_leader→本年级 grade_id；counselor/ms_admin→全校 None）
+    scope_type, scope_id = _derive_scope(current_user)
+    grade_id = scope_id if scope_type == "grade" else None
+    class_id = scope_id if scope_type == "class" else None
     results = await search_students(
         db=db,
         school_id=current_user.school_id,
-        grade_id=scope.get("grade_id"),
-        class_id=scope.get("class_id"),
+        grade_id=grade_id,
+        class_id=class_id,
         keyword=q,
         limit=limit,
     )
