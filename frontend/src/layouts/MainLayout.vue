@@ -619,6 +619,43 @@ const allMenuGroups: MenuGroup[] = [
         icon: 'DataAnalysis',
         roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'],
       },
+      // ── 教研 AI 工具集（V2.1 三页 + V2.2 三页，FE-REGRESSION-001 R1 恢复） ──
+      {
+        index: '/research-ai/lesson-plans',
+        title: 'AI教案生成',
+        icon: 'Document',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'],
+      },
+      {
+        index: '/research-ai/essay',
+        title: 'AI作文批改',
+        icon: 'EditPen',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'],
+      },
+      {
+        index: '/research-ai/homework',
+        title: '分层作业设计',
+        icon: 'Files',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'],
+      },
+      {
+        index: '/research-ai/paper',
+        title: 'AI试卷命制',
+        icon: 'Tickets',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'],
+      },
+      {
+        index: '/research-ai/analysis',
+        title: 'AI学情分析',
+        icon: 'TrendCharts',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'],
+      },
+      {
+        index: '/research-ai/comments',
+        title: 'AI学生评语',
+        icon: 'ChatDotRound',
+        roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'],
+      },
     ],
   },
   // ── 5. 心理关怀：筛查→干预→画像→危机闭环 ──

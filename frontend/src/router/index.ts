@@ -170,6 +170,67 @@ const routes: RouteRecordRaw[] = [
           roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER'] as UserRole[],
         },
       },
+      // ── 教研 AI 工具集（V2.1 三页 + V2.2 三页，FE-REGRESSION-001 R1 恢复） ──
+      {
+        path: 'research-ai/lesson-plans',
+        name: 'LessonPlanBatch',
+        component: () => import('@/views/research-ai/LessonPlanBatch.vue'),
+        meta: {
+          title: 'AI教案生成',
+          icon: 'Document',
+          roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'] as UserRole[],
+        },
+      },
+      {
+        path: 'research-ai/essay',
+        name: 'EssayGrader',
+        component: () => import('@/views/research-ai/EssayGrader.vue'),
+        meta: {
+          title: 'AI作文批改',
+          icon: 'EditPen',
+          roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'] as UserRole[],
+        },
+      },
+      {
+        path: 'research-ai/homework',
+        name: 'HomeworkDesign',
+        component: () => import('@/views/research-ai/HomeworkDesign.vue'),
+        meta: {
+          title: '分层作业设计',
+          icon: 'Files',
+          roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'] as UserRole[],
+        },
+      },
+      {
+        path: 'research-ai/paper',
+        name: 'PaperGenerator',
+        component: () => import('@/views/research-ai/PaperGenerator.vue'),
+        meta: {
+          title: 'AI试卷命制',
+          icon: 'Tickets',
+          roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'] as UserRole[],
+        },
+      },
+      {
+        path: 'research-ai/analysis',
+        name: 'LearningAnalysis',
+        component: () => import('@/views/research-ai/LearningAnalysis.vue'),
+        meta: {
+          title: 'AI学情分析',
+          icon: 'TrendCharts',
+          roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'] as UserRole[],
+        },
+      },
+      {
+        path: 'research-ai/comments',
+        name: 'StudentComment',
+        component: () => import('@/views/research-ai/StudentComment.vue'),
+        meta: {
+          title: 'AI学生评语',
+          icon: 'ChatDotRound',
+          roles: ['MS_ADMIN', 'GRADE_LEADER', 'CLASS_TEACHER', 'TEACHER'] as UserRole[],
+        },
+      },
       // 作业管理 — 结构化作业+批改+错题标记
       {
         path: 'homework',
