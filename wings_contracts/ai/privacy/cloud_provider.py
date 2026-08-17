@@ -31,7 +31,7 @@ WINGS 现状（2026-08-16 只读侦察）：
 
 from datetime import datetime
 
-from app.ai.privacy.base import StudentDataProvider
+from wings_contracts.ai.privacy.base import StudentDataProvider
 
 
 class CloudStudentDataProvider(StudentDataProvider):
