@@ -6,6 +6,9 @@ import logging
 
 from core.models import User, UserRole
 from core.routers import get_db, require_role, verify_school_access
+from core.access import (
+    load_assignment_scopes, role_str, ROLE_CLASS_WIDE, ROLE_GRADE_WIDE,
+)
 from fastapi import APIRouter, Depends, HTTPException, Query
 from modules.class_mgmt.schemas import (
     AssignStudentsRequest,
@@ -170,20 +173,35 @@ async def get_class_students(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(*STAFF_ROLES)),
 ):
-    """班级学生名单（家长/学生 403；跨校 403）"""
+    """班级学生名单（家长/学生 403；跨校 404；横向 scope 隔离）"""
     # P0 修复（2026-08-09）：原端点零校级校验，可跨校读取任意班级学生名单
     cls = await ClassMgmtService.get_class(db, class_id)
     if not cls:
         raise HTTPException(status_code=404, detail="班级不存在")
-    await verify_school_access(cls["school_id"], current_user, db)
-    # UAT-F2 修复（2026-08-17）：班级花名册横向 scope
-    # class_teacher → 仅本班；grade_leader → 仅本年级；其余 STAFF 保持校级现状
-    # （404 而非 403，防班级枚举；复用 User.class_id/grade_id，不造第二套权限算法）
-    if current_user.role == UserRole.CLASS_TEACHER:
-        if getattr(current_user, "class_id", None) != class_id:
-            raise HTTPException(status_code=404, detail="班级不存在")
-    elif current_user.role == UserRole.GRADE_LEADER:
-        if getattr(current_user, "grade_id", None) != cls.get("grade_id"):
+    # 跨校：404 防校名/班级枚举（与下方越权统一状态码）
+    if cls.get("school_id") != current_user.school_id:
+        raise HTTPException(status_code=404, detail="班级不存在")
+    # UAT-F2 修复（2026-08-17）：班级花名册横向 scope —— 复用权威源
+    # load_assignment_scopes（teacher_role_assignments），与 get_student_or_403 同机制；
+    # assignment 为权威判定（class_teacher→本班 / grade_leader→本年级），
+    # 仅当 assignment 无记录时 fallback 到 users.class_id/grade_id（与既有行为一致，
+    # 防止 users.class_id 与真实 assignment 漂移导致越权放大）。
+    # 404 而非 403，避免用状态码差异探测班级是否存在。
+    scopes = await load_assignment_scopes(db, current_user)
+    if scopes["school"]:
+        pass  # 全校角色（ms_admin/group_admin/branch_admin/counselor）保持校级现状
+    elif cls.get("grade_id") in scopes["grade"]:
+        pass  # 年级组长：本年级
+    elif class_id in scopes["class"]:
+        pass  # 班主任：本班（assignment 权威）
+    else:
+        role = role_str(current_user)
+        allowed = False
+        if role in ROLE_CLASS_WIDE and current_user.class_id and current_user.class_id == class_id:
+            allowed = True
+        if role in ROLE_GRADE_WIDE and current_user.grade_id and current_user.grade_id == cls.get("grade_id"):
+            allowed = True
+        if not allowed:
             raise HTTPException(status_code=404, detail="班级不存在")
     students = await ClassMgmtService.get_class_students(db, class_id)
     return {"class_id": class_id, "total": len(students), "students": students}
