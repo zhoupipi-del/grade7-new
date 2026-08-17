@@ -285,6 +285,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchTicketsWithFallback,
   urgeTicketNode,
+  approveRequest,
+  rejectRequest,
   type ApprovalTicket,
   type ApprovalNode,
 } from '@/api/approval'
@@ -305,6 +307,7 @@ let countdownTimer: ReturnType<typeof setInterval> | null = null
 // Urge
 const urgingNodeId = ref<string | null>(null)
 const urgedNodes = ref<Set<string>>(new Set())
+const acting = ref(false)
 
 // Reject dialog
 const rejectDialogVisible = ref(false)
@@ -409,13 +412,11 @@ async function triggerUrge(nodeId: string) {
 
   urgingNodeId.value = nodeId
   try {
-    await urgeTicketNode(selectedTicket.value.ticket_id, nodeId)
+    const res = await urgeTicketNode(selectedTicket.value.ticket_id, nodeId)
     urgedNodes.value.add(nodeId)
-    ElMessage.success('催办通知已推送至审批人（钉钉/企业微信）')
-  } catch {
-    // Even if backend fails, show success in demo mode
-    urgedNodes.value.add(nodeId)
-    ElMessage.success('催办通知已推送至审批人（钉钉/企业微信）')
+    ElMessage.success(res?.message || '催办已发送站内提醒')
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '催办发送失败')
   } finally {
     urgingNodeId.value = null
   }
@@ -425,15 +426,32 @@ async function triggerUrge(nodeId: string) {
 // Approve / Reject / View
 // ═════════════════════════════════════════════════════════════════
 
-function handleApprove() {
-  ElMessageBox.confirm(
-    '确认通过当前节点的审批？通过后将流转至下一节点。',
-    '审批确认',
-    { confirmButtonText: '确认通过', cancelButtonText: '取消', type: 'success' },
-  ).then(() => {
+async function handleApprove() {
+  if (!selectedTicket.value || acting.value) return
+  try {
+    await ElMessageBox.confirm(
+      '确认通过当前节点的审批？通过后将流转至下一节点。',
+      '审批确认',
+      { confirmButtonText: '确认通过', cancelButtonText: '取消', type: 'success' },
+    )
+  } catch {
+    return
+  }
+  acting.value = true
+  try {
+    await approveRequest(Number(selectedTicket.value.ticket_id), { comment: '' })
     ElMessage.success('审批已通过，工单流转至下一节点')
-    // In real mode, would call approveRequest API
-  }).catch(() => {})
+    await loadTickets()
+  } catch (e: any) {
+    const status = e?.response?.status
+    if (status === 400 || status === 409) {
+      ElMessage.warning('该工单已处理，无需重复操作')
+    } else {
+      ElMessage.error(e?.response?.data?.detail || '审批通过失败')
+    }
+  } finally {
+    acting.value = false
+  }
 }
 
 function handleReject() {
@@ -441,14 +459,31 @@ function handleReject() {
   rejectDialogVisible.value = true
 }
 
-function confirmReject() {
+async function confirmReject() {
   if (!rejectReason.value.trim()) {
     ElMessage.warning('请输入驳回理由')
     return
   }
-  rejectDialogVisible.value = false
-  ElMessage.success('工单已驳回')
-  // In real mode, would call rejectRequest API
+  if (!selectedTicket.value || acting.value) return
+  acting.value = true
+  try {
+    await rejectRequest(Number(selectedTicket.value.ticket_id), { comment: rejectReason.value.trim() })
+    ElMessage.success('工单已驳回')
+    rejectDialogVisible.value = false
+    rejectReason.value = ''
+    await loadTickets()
+  } catch (e: any) {
+    const status = e?.response?.status
+    if (status === 400 || status === 409) {
+      ElMessage.warning('该工单已处理，无需重复操作')
+      rejectDialogVisible.value = false
+      rejectReason.value = ''
+    } else {
+      ElMessage.error(e?.response?.data?.detail || '驳回失败')
+    }
+  } finally {
+    acting.value = false
+  }
 }
 
 function handleViewDetail() {

@@ -104,17 +104,9 @@ export function getApprovalChains() {
  * @param type - 'todo' for pending, 'done' for completed
  */
 export async function fetchTicketsWithFallback(type: 'todo' | 'done'): Promise<ApprovalTicket[]> {
-  try {
-    const tickets = await getApprovalTickets(type)
-    if (tickets && tickets.length > 0) {
-      return tickets
-    }
-  } catch {
-    // Backend unavailable — fall through to demo
-  }
-
-  await sleep(300)
-  return getDemoTickets(type)
+  // 开学接线（OPENING-APPROVAL-001 / A4）：仅返回真实后端工单，
+  // 不再回退 demo 假数据，避免教师点到不存在的工单 id 而 404 / 误以为已处理。
+  return getApprovalTickets(type)
 }
 
 // ═════════════════════════════════════════════════════════════════

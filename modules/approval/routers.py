@@ -78,6 +78,55 @@ def _require_staff(user: User = Depends(get_current_user)):
 
 
 # ═══════════════════════════════════════════════════════════════
+# 节点指派角色 → 可调用 UserRole 集合（OPENING-APPROVAL-001 / A1）
+# ═══════════════════════════════════════════════════════════════
+# 说明: DEFAULT_CHAINS 的节点角色含 dean / principal / moral_education_staff,
+# 而 UserRole 枚举无对应值（实际由 ms_admin 德育主任代行）。
+# 此映射确保「非本节点指派人 → 403」且不卡死真实违纪链
+# （behavior_major: 班主任→年级组长→德育处长; behavior_critical 再加校长）。
+# R4-B（周主任拍板 Q1）: moral_education_staff 仅 ms_admin 代行，
+# 不得下放 grade_leader，否则任意年级组长可代行德育处审批（扩大授权）。
+NODE_ROLE_TO_USER_ROLES = {
+    "class_teacher": {UserRole.CLASS_TEACHER},
+    "grade_leader": {UserRole.GRADE_LEADER},
+    "moral_education_staff": {UserRole.MS_ADMIN},
+    "dean": {UserRole.MS_ADMIN},
+    "principal": {UserRole.MS_ADMIN},
+    "ms_admin": {UserRole.MS_ADMIN},
+}
+# 催办通知目标角色映射（未知节点角色默认通知 ms_admin）
+URGE_TARGET_ROLE = {
+    "class_teacher": UserRole.CLASS_TEACHER,
+    "grade_leader": UserRole.GRADE_LEADER,
+    "moral_education_staff": UserRole.MS_ADMIN,
+    "dean": UserRole.MS_ADMIN,
+    "principal": UserRole.MS_ADMIN,
+    "ms_admin": UserRole.MS_ADMIN,
+}
+
+
+def _check_node_assignee(node: dict, user: User) -> None:
+    """
+    校验当前操作人是否为该审批节点的指派人；否则 403。
+
+    - USER 型节点: 必须是指定的 user_id
+    - ROLE 型节点: 用户角色必须落在节点角色的「可调用集合」内
+      （见 NODE_ROLE_TO_USER_ROLES，保证 dean/principal 等由 ms_admin 代行）
+    """
+    if node.get("approver_type") == "USER":
+        if str(node.get("approver_value")) != str(user.id):
+            raise HTTPException(status_code=403, detail="当前节点非您审批，无权操作")
+        return
+    role = node.get("role") or "ms_admin"
+    allowed = NODE_ROLE_TO_USER_ROLES.get(role, {UserRole.MS_ADMIN})
+    if user.role not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"当前节点（{node.get('label', role)}）非您审批，无权操作",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════
 # 辅助函数: chain_config 快照 → 前端 ApprovalNode 映射
 # ═══════════════════════════════════════════════════════════════
 
@@ -387,17 +436,35 @@ async def urge_ticket_node(
     if ar.current_status != "pending":
         raise HTTPException(status_code=400, detail="该工单已处理，无需催办")
 
-    # 记录催办日志（后续可对接通知模块）
-    logger.info(
-        "[URGE] 催办 | ticket=%s node=%s school=%s user=%s",
-        ticket_id,
-        node_id,
-        user.school_id,
-        user.id,
-    )
+    # 解析当前待审节点
+    chain = normalize_chain_config(ar.chain_config)
+    nodes = chain.get("nodes", [])
+    current_step = ar.current_step or 0
+    node = nodes[current_step] if current_step < len(nodes) else {}
+    target_role = URGE_TARGET_ROLE.get(node.get("role"), UserRole.MS_ADMIN)
+
+    # 站内催办（真实落地）：向当前节点的指派角色发送站内通知
+    # 外部消息通道（钉钉/企业微信）开学后接入，此处不谎称已发送
+    try:
+        from modules.notifications.services import NotificationService
+        node_label = node.get("label") or node.get("role") or "审批"
+        await NotificationService.notify_by_role(
+            db,
+            school_id=ar.school_id,
+            role=target_role,
+            type="approval_urge",
+            title=f"审批催办 — {ar.event_type or '待办工单'}",
+            body=f"工单 #{ar.id} 的「{node_label}」节点待您审批，请尽快处理。",
+            sender_id=user.id,
+            entity_type="approval_request",
+            entity_id=ar.id,
+        )
+        await db.commit()
+    except Exception as exc:
+        logger.warning("[URGE] 站内通知发送失败 (不影响催办记录): %s", exc)
 
     return UrgeResponse(
-        message="催办通知已发送",
+        message="催办已发送站内提醒（外部消息通道暂未启用）",
         ticket_id=ticket_id,
         node_id=node_id,
     )
@@ -531,6 +598,17 @@ async def approve_request(
     if ar.current_status != "pending":
         raise HTTPException(status_code=400, detail="该审批已处理，不可重复操作")
 
+    # R4-A (APPROVAL-AUTH-001): 资源范围校验 —— 仅能审批自己责任范围内的学生工单。
+    # ms_admin 为 school-wide（scope=None 放行）；年级组长限本年级、班主任限本班。
+    # 与 _check_node_assignee（角色资格）共同构成「角色资格 + 资源范围」双闸，
+    # 彻底消除「2501班主任批2502班 / A年级组长批B年级」类越权。
+    scope = await student_id_scope(db, user)
+    if scope is not None and ar.student_id not in scope:
+        raise HTTPException(
+            status_code=403,
+            detail="无该学生审批权限（超出您的责任范围）",
+        )
+
     # 归一化 + 自愈: 历史裸 list 快照在首次审批动作时被规整为标准 dict 并落库
     chain = normalize_chain_config(ar.chain_config)
     if chain is not ar.chain_config:
@@ -547,6 +625,7 @@ async def approve_request(
 
     # 更新当前节点
     node = nodes[current_step]
+    _check_node_assignee(node, user)
     node["status"] = "approved"
     node["approver_id"] = user.id
     node["approved_at"] = now.isoformat()
@@ -615,6 +694,15 @@ async def reject_request(
     if ar.current_status != "pending":
         raise HTTPException(status_code=400, detail="该审批已处理，不可重复操作")
 
+    # R4-A (APPROVAL-AUTH-001): 资源范围校验 —— 仅能驳回自己责任范围内的学生工单。
+    # ms_admin 为 school-wide（scope=None 放行）；年级组长限本年级、班主任限本班。
+    scope = await student_id_scope(db, user)
+    if scope is not None and ar.student_id not in scope:
+        raise HTTPException(
+            status_code=403,
+            detail="无该学生审批权限（超出您的责任范围）",
+        )
+
     # 归一化 + 自愈: 历史裸 list 快照在首次审批动作时被规整为标准 dict 并落库
     chain = normalize_chain_config(ar.chain_config)
     if chain is not ar.chain_config:
@@ -631,6 +719,7 @@ async def reject_request(
 
     # 更新当前节点为 rejected
     node = nodes[current_step]
+    _check_node_assignee(node, user)
     node["status"] = "rejected"
     node["approver_id"] = user.id
     node["rejected_at"] = now.isoformat()
