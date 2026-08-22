@@ -70,7 +70,8 @@ async def create_class_diagnosis(
     客户端需轮询 /tasks/{task_id} 获取结果
     """
     # 权限校验：年级组长 / 校管理员
-    require_role(UserRole.GRADE_LEADER, UserRole.MS_ADMIN)(current_user)
+    # [SEC-FIX C-1] require_role 是 async guard，必须 await 才执行校验
+    await require_role(UserRole.GRADE_LEADER, UserRole.MS_ADMIN)(current_user)
 
     school_id = current_user.school_id
 
@@ -122,7 +123,8 @@ async def create_student_intervention(
     提交学生心理干预话术生成任务，立即返回 task_id
     客户端需轮询 /tasks/{task_id} 获取结果
     """
-    require_role(
+    # [SEC-FIX C-1] require_role 是 async guard，必须 await 才执行校验
+    await require_role(
         UserRole.CLASS_TEACHER,
         UserRole.GRADE_LEADER,
         UserRole.MS_ADMIN,

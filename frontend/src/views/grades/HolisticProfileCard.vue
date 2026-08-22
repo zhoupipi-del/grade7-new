@@ -501,7 +501,11 @@ async function fetchRDI() {
     // Axios interceptor 已自动解包 response.data
     rdiInfo.value = res ?? null
   } catch {
-    rdiInfo.value = await getDemoRDI()
+    // [SEC-FIX C-5 2026-08-22] 原实现静默回退 getDemoRDI()，会把虚构的
+    // RDI/心理偏差分归到真实学生名下且无任何提示。改为明确展示"加载失败"
+    // （rdiInfo=null 时模板已有 v-if 空状态处理），并提示用户重试。
+    rdiInfo.value = null
+    ElMessage.warning('RDI 风险指数加载失败，请重试')
   }
 }
 
@@ -511,8 +515,9 @@ async function fetchTimeline() {
     const res = await getGrowthTimeline(selectedStudentId.value)
     timelineData.value = (res as GrowthTimelineResponse)?.timeline ?? res ?? []
   } catch {
-    const demoRes = await getDemoTimeline(selectedStudentId.value)
-    timelineData.value = (demoRes as GrowthTimelineResponse)?.timeline ?? demoRes ?? []
+    // [SEC-FIX C-5 2026-08-22] 同上：不再用虚构学生的时间轴数据顶替。
+    timelineData.value = []
+    ElMessage.warning('成长时间轴加载失败，请重试')
   }
 }
 
@@ -532,13 +537,12 @@ async function fetchPrescription() {
     const warningId = (monitorRes as any)?.students?.[0]?.latest_warning_id ?? 1
     await loadPrescriptionV2(warningId)
   } catch {
-    // 降级: 尝试 demo 处方
-    try {
-      const demo = await getDemoPrescriptionV2(selectedStudentId.value ?? 1)
-      prescription.value = demo as AIPrescriptionPayloadV2
-    } catch {
-      prescription.value = null
-    }
+    // [SEC-FIX C-5 2026-08-22] 原实现静默回退 getDemoPrescriptionV2()，会把
+    // 硬编码的"自伤倾向/RED级干预"等虚构心理危机文案顶替到真实学生档案上，
+    // 且没有任何"演示数据"标识。改为保持 prescription=null，模板已有的
+    // "触发AI处方"空状态 + 手动重试按钮（v-else-if="!prescriptionLoading"）
+    // 会自然展示，不会误导教师。
+    prescription.value = null
   }
 }
 
@@ -552,12 +556,9 @@ async function loadPrescriptionV2(warningId: number) {
     breakerRemaining.value = 72
     startBreakerTimer()
   } catch {
-    try {
-      const demo = await getDemoPrescriptionV2(selectedStudentId.value ?? 1)
-      prescription.value = demo as AIPrescriptionPayloadV2
-    } catch {
-      prescription.value = null
-    }
+    // [SEC-FIX C-5 2026-08-22] 同上，不再静默展示虚构心理处方。
+    prescription.value = null
+    ElMessage.error('AI 处方加载失败，请重试')
   }
 }
 
